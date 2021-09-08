@@ -5,6 +5,8 @@ using Random
 using StatsBase
 
 @testset "equi-correlated knockoffs" begin
+    Random.seed!(2021)
+
     # simulate matrix and normalize columns
     n = 3000
     p = 1000

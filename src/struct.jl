@@ -10,6 +10,7 @@ end
 
 function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
     n, p = size(X)
+    n ≥ 2p || error("knockoff_equi: currently only works for n ≥ 2p case! sorry!")
     # compute gram matrix using full svd
     U, σ, V = svd(X, full=true)
     Σ = V * Diagonal(σ)^2 * V'
