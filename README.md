@@ -21,4 +21,7 @@ This package supports Julia `v1.6`+.
 
 ## Development Roadmap
 
-TBD
++ SDP knockoffs
++ Threshold functions
++ Example with lasso path
++ Example with IHT path

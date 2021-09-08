@@ -26,13 +26,17 @@ using StatsBase
     @test all(X' * X .≈ Σ) # good accuracy
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-2)) # numerical accuracy not good?
     @test all(s .≥ 0)
-    λ = eigvals(2Σ - Diagonal(s)); @test all(λ .≥ 0)
-    @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
-    for i in 1:p-1
-        @test dot(X[:, i], X̃[:, i+1]) ≈ dot(X[:, i], X[:, i+1])
+    λ = eigvals(2Σ - Diagonal(s))
+    for λi in λ
+        @test λi ≥ 0 || λi ≈ 0
     end
-    for i in 1:p
-        @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i])
-        @test isapprox(dot(X[:, i], X̃[:, i]), 1 - s[i], atol=5e-2) # numerical accuracy not good?
+    @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
+    for i in 1:p, j in 1:p
+        if i == j
+            @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i])
+            @test isapprox(dot(X[:, i], X̃[:, i]), 1 - s[i], atol=5e-2) # numerical accuracy not good?
+        else
+            @test dot(X[:, i], X̃[:, j]) ≈ dot(X[:, i], X[:, j])
+        end
     end
 end
