@@ -1,5 +1,7 @@
 module Knockoffs
 
-# Write your package code here.
+using LinearAlgebra
+export knockoff_equi, knockoff_sdp
 
+include("struct.jl")
 end
