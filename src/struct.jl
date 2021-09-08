@@ -22,7 +22,8 @@ function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
     # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition
     D = Diagonal(s)
     γ, P = eigen(2D - D*Σinv*D)
-    C = Diagonal(sqrt.(γ)) * P    
+    clamp!(γ, 0, typemax(T))
+    C = Diagonal(sqrt.(γ)) * P
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
     return Knockoff(X, X̃, s, C, Ũ, Σ, Σinv)
@@ -30,4 +31,16 @@ end
 
 function knockoff_sdp(X::Matrix{T}) where T <: AbstractFloat
     # TODO
+end
+
+function normalize_col!(X::AbstractMatrix)
+    n, p = size(X)
+    @inbounds for x in eachcol(X)
+        μi = mean(x)
+        xnorm = norm(x)
+        @simd for i in eachindex(x)
+            x[i] = (x[i] - μi) / xnorm
+        end
+    end
+    return X
 end

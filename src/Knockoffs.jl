@@ -1,7 +1,8 @@
 module Knockoffs
 
 using LinearAlgebra
-export knockoff_equi, knockoff_sdp
+using Statistics
+export knockoff_equi, knockoff_sdp, normalize_col!
 
 include("struct.jl")
 end
