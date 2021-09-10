@@ -1,4 +1,10 @@
-struct Knockoff{T}
+"""
+A `Knockoff` is an `AbstractMatrix`, essentially the matrix [X X̃] of
+concatenating X̃ to X. It behaves like a regular matrix and can be inputted
+into any function that supports inputs of type `AbstractMatrix`. Basic
+operations like @view(A[:, 1]) are supported. 
+"""
+struct Knockoff{T} <: AbstractMatrix{T}
     X::Matrix{T} # original design matrix
     X̃::Matrix{T} # knockoff of X
     s::Vector{T} # diagonal(s) and 2Σ - diagonal(s) are both psd
@@ -6,6 +12,17 @@ struct Knockoff{T}
     Ũ::Matrix{T} # Ũ'X = 0
     Σ::Matrix{T} # X'X
     Σinv::Matrix{T} # inv(X'X)
+end
+
+Base.size(A::Knockoff) = size(A.X, 1), 2size(A.X, 2)
+Base.eltype(A::Knockoff) = eltype(A.X)
+function Base.getindex(A::Knockoff, i::Int)
+    n, p = size(A.X)
+    i ≤ n * p ? getindex(A.X, i) : getindex(A.X̃, i - n * p)
+end
+function Base.getindex(A::Knockoff, i::Int, j::Int)
+    n, p = size(A.X)
+    j ≤ p ? getindex(A.X, i, j) : getindex(A.X̃, i, j - p)
 end
 
 function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
