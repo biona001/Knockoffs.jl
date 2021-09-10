@@ -23,10 +23,10 @@ function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
     s = min(1, 2λmin) .* ones(size(Σ, 1))
     # compute Ũ such that Ũ'X = 0
     Ũ = U[:, p+1:2p]
-    # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition
+    # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
     D = Diagonal(s)
-    # C = cholesky(2D - D*Σinv*D, check=false).U # not stable
     γ, P = eigen(2D - D*Σinv*D)
+    clamp!(γ, 0, typemax(T)) # numerical stability
     C = Diagonal(sqrt.(γ)) * P
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
@@ -43,14 +43,14 @@ function knockoff_sdp(X::Matrix{T}) where T <: AbstractFloat
     # setup and solve SDP problem to get s
     s = Variable(p)
     problem = maximize(sum(s), s ≥ 0, 1 ≥ s, 2Σ - Diagonal(s) == Semidefinite(p))
-    @time solve!(problem, () -> SCS.Optimizer(verbose=false))
+    solve!(problem, () -> SCS.Optimizer(verbose=false))
     sfinal = clamp.(vec(s.value), 0, 1)
     # compute Ũ such that Ũ'X = 0
     Ũ = U[:, p+1:2p]
-    # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition
+    # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
     D = Diagonal(sfinal)
-    # C = cholesky(2D - D*Σinv*D, check=false).U # not stable
     γ, P = eigen(2D - D*Σinv*D)
+    clamp!(γ, 0, typemax(T)) # numerical stability
     C = Diagonal(sqrt.(γ)) * P
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
