@@ -24,6 +24,16 @@ function Base.getindex(A::Knockoff, i::Int, j::Int)
     n, p = size(A.X)
     j ≤ p ? getindex(A.X, i, j) : getindex(A.X̃, i, j - p)
 end
+function LinearAlgebra.mul!(C::AbstractMatrix, A::Knockoff, B::AbstractMatrix)
+    p = size(A.X, 2)
+    mul!(C, A.X, @view(B[1:p, :]))
+    mul!(C, A.X̃, @view(B[p+1:end, :]), 1.0, 1.0)
+end
+function LinearAlgebra.mul!(c::AbstractVector, A::Knockoff, b::AbstractVector)
+    p = size(A.X, 2)
+    mul!(c, A.X, @view(b[1:p]))
+    mul!(c, A.X̃, @view(b[p+1:end]), 1.0, 1.0)
+end
 
 function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
     n, p = size(X)

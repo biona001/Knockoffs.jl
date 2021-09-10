@@ -80,3 +80,41 @@ end
         end
     end
 end
+
+@testset "Knockoff <: AbstractMatrix" begin
+    Random.seed!(2021)
+
+    # simulate matrix and normalize columns
+    n = 1000
+    p = 100
+    X = randn(n, p)
+    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
+    normalize_col!(X) # normalize Xj to unit length
+
+    # construct knockoff struct and the real [A Ã]
+    @time A = knockoff_sdp(X)
+    Atrue = [A.X A.X̃]
+
+    # array operations
+    @test size(Atrue) == size(A)
+    @test eltype(Atrue) == eltype(A)
+    @test getindex(Atrue, 127) == getindex(A, 127)
+    @test getindex(Atrue, 2, 19) == getindex(A, 2, 19)
+    @test getindex(Atrue, 900, 110) == getindex(A, 900, 110)
+    @test all(@view(Atrue[:, 1]) .== @view(A[:, 1]))
+    @test all(@view(Atrue[1:2:end, 1:5:end]) .== @view(A[1:2:end, 1:5:end]))
+
+    # matrix-vector multiplication
+    b = randn(2p)
+    ctrue, c = zeros(n), zeros(n)
+    mul!(ctrue, Atrue, b)
+    mul!(c, A, b)
+    @test all(ctrue .≈ c)
+
+    # matrix-matrix multiplication 
+    B = randn(2p, n)
+    Ctrue, C = zeros(n, n), zeros(n, n)
+    mul!(Ctrue, Atrue, B)
+    mul!(C, A, B)
+    @test all(Ctrue .≈ C)
+end
