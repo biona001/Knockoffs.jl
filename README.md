@@ -19,9 +19,28 @@ pkg"add https://github.com/biona001/Knockoffs.jl"
 ```
 This package supports Julia `v1.6`+. 
 
+## Design principle
+
+This package is designed with compatibility in mind: the `knockoff` matrix is an `AbstractMatrix` with custom-defined operations. You can plug a `knockoff` into any functions that supports `AbstractMatrix` as inputs (e.g. a LASSO solver) and it will be fast. 
+
+```Julia
+# load package
+using Knockoffs
+
+# simulate random matrix, then normalize columns
+X = randn(1000, 200)
+normalize_col!(X)
+
+# equi and SDP knockoffs
+Aequi = knockoff_sdp(X)
+Asdp  = knockoff_sdp(X)
+```
+Internally, a `knockoff` stores the original design matrix and its knockoff separately in memory, in addition to other variables such as the `s` vector. 
+
 ## Development Roadmap
 
-+ SDP and ASDP knockoffs
++ Parallelized ASDP knockoffs
 + Threshold functions
 + Example with lasso path
 + Example with IHT path
++ Compare to [existing implementations](https://github.com/msesia/knockoff-filter)
