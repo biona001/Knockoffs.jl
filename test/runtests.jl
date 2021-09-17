@@ -15,8 +15,8 @@ using Statistics
     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
     normalize_col!(X) # normalize Xj to unit length
 
-    # construct knockoff struct
-    @time knockoff = knockoff_equi(X)
+    # equi-correlated knockoff
+    @time knockoff = fixed_knockoffs(X, method=:equi)
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
@@ -53,8 +53,8 @@ end
     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
     normalize_col!(X) # normalize Xj to unit length
 
-    # construct knockoff struct
-    @time knockoff = knockoff_sdp(X)
+    # SDP knockoff
+    @time knockoff = fixed_knockoffs(X, method=:sdp)
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
@@ -81,7 +81,7 @@ end
     end
 end
 
-@testset "Knockoff <: AbstractMatrix" begin
+@testset "Knockoff data structure" begin
     Random.seed!(2021)
 
     # simulate matrix and normalize columns
@@ -92,7 +92,7 @@ end
     normalize_col!(X) # normalize Xj to unit length
 
     # construct knockoff struct and the real [A Ã]
-    @time A = knockoff_sdp(X)
+    @time A = fixed_knockoffs(X, method=:sdp)
     Atrue = [A.X A.X̃]
 
     # array operations

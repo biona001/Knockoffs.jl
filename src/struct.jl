@@ -35,19 +35,59 @@ function LinearAlgebra.mul!(c::AbstractVector, A::Knockoff, b::AbstractVector)
     mul!(c, A.X̃, @view(b[p+1:end]), 1.0, 1.0)
 end
 
-function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
+"""
+    gaussian(X::Matrix{T})
+
+Creates model-free multivariate normal knockoffs by sequentially sampling from 
+conditional multivariate normal distributions.
+
+# Classical regression formula
++ μ = X - Xinv(Σ)diag(s)
++ V = 2diag(s) - diag(s)inv(Σ)diag(s).
+
+# Reference: 
+"Panning for Gold: Model-X Knockos for High-dimensional Controlled
+Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+"""
+function modelX_gaussian(X::Matrix{T}) where T <: AbstractFloat
+    # todo
+end
+
+"""
+    fixed_knockoffs(X::Matrix{T}; method=:sdp)
+
+Creates fixed knockoffs based on equation (2.2)-(2.4) of 
+"Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015)
+
+# Inputs
++ `X`: A numeric matrix 
+
+# Optional inputs
++ `method`: can be :equi for equi-distant knockoffs (eq 2.3) or :sdp for SDP
+    knockoffs (eq 2.4)
+"""
+function fixed_knockoffs(X::Matrix{T}; method::Symbol=:sdp) where T <: AbstractFloat
     n, p = size(X)
-    n ≥ 2p || error("knockoff_equi: currently only works for n ≥ 2p case! sorry!")
+    n ≥ 2p || error("fixed_knockoffs: only works for n ≥ 2p case! sorry!")
     # compute gram matrix using full svd
     U, σ, V = svd(X, full=true)
     Σ = V * Diagonal(σ)^2 * V'
     Σinv = V * inv(Diagonal(σ)^2) * V'
-    # compute equi-correlated knockoffs
-    λmin = typemax(T)
-    for σi in σ
-        σi^2 < λmin && (λmin = σi^2)
+    # compute knockoffs using the specified method
+    if method == :equi
+        λmin = typemax(T)
+        for σi in σ
+            σi^2 < λmin && (λmin = σi^2)
+        end
+        s = min(1, 2λmin) .* ones(size(Σ, 1))
+    elseif method == :sdp
+        svar = Variable(p)
+        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) == Semidefinite(p))
+        solve!(problem, () -> SCS.Optimizer(verbose=false))
+        s = clamp.(vec(svar.value), 0, 1) # for numeric stability
+    else
+        error("fixed_knockoffs: method can only be :equi or :sdp")
     end
-    s = min(1, 2λmin) .* ones(size(Σ, 1))
     # compute Ũ such that Ũ'X = 0
     Ũ = U[:, p+1:2p]
     # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
@@ -58,30 +98,6 @@ function knockoff_equi(X::Matrix{T}) where T <: AbstractFloat
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
     return Knockoff(X, X̃, s, C, Ũ, Σ, Σinv)
-end
-
-function knockoff_sdp(X::Matrix{T}) where T <: AbstractFloat
-    n, p = size(X)
-    n ≥ 2p || error("knockoff_sdp: currently only works for n ≥ 2p case! sorry!")
-    # compute gram matrix using full svd
-    U, σ, V = svd(X, full=true)
-    Σ = V * Diagonal(σ)^2 * V'
-    Σinv = V * inv(Diagonal(σ)^2) * V'
-    # setup and solve SDP problem to get s
-    s = Variable(p)
-    problem = maximize(sum(s), s ≥ 0, 1 ≥ s, 2Σ - Diagonal(s) == Semidefinite(p))
-    solve!(problem, () -> SCS.Optimizer(verbose=false))
-    sfinal = clamp.(vec(s.value), 0, 1)
-    # compute Ũ such that Ũ'X = 0
-    Ũ = U[:, p+1:2p]
-    # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
-    D = Diagonal(sfinal)
-    γ, P = eigen(2D - D*Σinv*D)
-    clamp!(γ, 0, typemax(T)) # numerical stability
-    C = Diagonal(sqrt.(γ)) * P
-    # compute knockoffs
-    X̃ = X * (I - Σinv*D) + Ũ * C
-    return Knockoff(X, X̃, sfinal, C, Ũ, Σ, Σinv)
 end
 
 function normalize_col!(X::AbstractMatrix)
