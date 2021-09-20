@@ -8,8 +8,6 @@ struct Knockoff{T} <: AbstractMatrix{T}
     X::Matrix{T} # original design matrix
     X̃::Matrix{T} # knockoff of X
     s::Vector{T} # diagonal(s) and 2Σ - diagonal(s) are both psd
-    C::Matrix{T} # C'C = 2diagonal(s) - diagonal(s)*inv(Σ)*diagonal(s)
-    Ũ::Matrix{T} # Ũ'X = 0
     Σ::Matrix{T} # X'X
     Σinv::Matrix{T} # inv(X'X)
 end
@@ -36,21 +34,65 @@ function LinearAlgebra.mul!(c::AbstractVector, A::Knockoff, b::AbstractVector)
 end
 
 """
-    gaussian(X::Matrix{T})
+    modelX_gaussian(X::Matrix{T})
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions.
 
-# Classical regression formula
-+ μ = X - Xinv(Σ)diag(s)
-+ V = 2diag(s) - diag(s)inv(Σ)diag(s).
+# Inputs
++ `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
+    to mean 0 variance 1. 
 
 # Reference: 
-"Panning for Gold: Model-X Knockos for High-dimensional Controlled
+"Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 """
-function modelX_gaussian(X::Matrix{T}) where T <: AbstractFloat
-    # todo
+function modelX_gaussian(X::Matrix{T}, method::Symbol=:sdp;
+    μ::Vector{T}=mean(X, dims=2)) where T <: AbstractFloat
+    n, p = size(X)
+    # compute gram matrix using full svd
+    U, σ, V = svd(X, full=true)
+    Σ = V * Diagonal(σ)^2 * V'
+    Σinv = V * inv(Diagonal(σ)^2) * V'
+    # compute s vector using the specified method
+    if method == :equi
+        λmin = typemax(T)
+        for σi in σ
+            σi^2 < λmin && (λmin = σi^2)
+        end
+        s = min(1, 2λmin) .* ones(size(Σ, 1))
+    elseif method == :sdp
+        svar = Variable(p)
+        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) == Semidefinite(p))
+        solve!(problem, () -> SCS.Optimizer(verbose=false))
+        s = clamp.(vec(svar.value), 0, 1) # for numeric stability
+    elseif method==:asdp
+        # todo
+        error("ASDP not supported yet! sorry!")
+    else
+        error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
+    end
+    X̃ = Matrix{T}(undef, n, p)
+    for i in 1:p
+        x̃ = condition(@view(X[i, :]), μ, Σinv, Diagonal(s)) #todo efficiency
+        copyto!(@view(X̃[i, :]), x̃)
+    end
+    return Knockoff(X, X̃, s, Σ, Σinv)
+end
+
+"""
+    condition(x::AbstractVector, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
+
+Samples a knockoff x̃ from Gaussian x using conditional distribution formulas:
+
+If (x, x̃) ~ N((μ, μ), G) where G = [Σ  Σ - D; Σ - D  Σ], then we sample x̃ from 
+x̃|x = N(x - D*inv(Σ)(x - μ), 2D - D*inv(Σ)*D)
+"""
+function condition(x::AbstractVector, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
+    DinvΣ = D * Σinv
+    new_μ = x - DinvΣ * (x - μ)
+    new_V = 2D - DinvΣ * D
+    return rand(MvNormal(new_μ, new_V))
 end
 
 """
@@ -60,11 +102,16 @@ Creates fixed knockoffs based on equation (2.2)-(2.4) of
 "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015)
 
 # Inputs
-+ `X`: A numeric matrix 
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is normalized
+    to mean 0 variance 1 with unit norm. 
 
 # Optional inputs
 + `method`: can be :equi for equi-distant knockoffs (eq 2.3) or :sdp for SDP
     knockoffs (eq 2.4)
+
+# Output
++ `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, 
+    in addition to other variables (e.g. `s`)
 """
 function fixed_knockoffs(X::Matrix{T}; method::Symbol=:sdp) where T <: AbstractFloat
     n, p = size(X)
@@ -73,7 +120,7 @@ function fixed_knockoffs(X::Matrix{T}; method::Symbol=:sdp) where T <: AbstractF
     U, σ, V = svd(X, full=true)
     Σ = V * Diagonal(σ)^2 * V'
     Σinv = V * inv(Diagonal(σ)^2) * V'
-    # compute knockoffs using the specified method
+    # compute s vector using the specified method
     if method == :equi
         λmin = typemax(T)
         for σi in σ
@@ -97,7 +144,7 @@ function fixed_knockoffs(X::Matrix{T}; method::Symbol=:sdp) where T <: AbstractF
     C = Diagonal(sqrt.(γ)) * P
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
-    return Knockoff(X, X̃, s, C, Ũ, Σ, Σinv)
+    return Knockoff(X, X̃, s, Σ, Σinv)
 end
 
 function normalize_col!(X::AbstractMatrix)

@@ -21,9 +21,7 @@ This package supports Julia `v1.6`+.
 
 ## Design principle
 
-The `knockoff` matrix is an `AbstractMatrix` with custom-defined operations so that it behaves like a matrix. You can plug a `knockoff` into any functions that supports `AbstractMatrix` as inputs (e.g. a LASSO solver) and it will be fast. 
-
-Internally, a `knockoff` stores the original design matrix and its knockoff separately in memory, in addition to other variables such as the `s` vector. 
+A `knockoff` an `AbstractMatrix` with custom-defined operations so that it behaves like a matrix. Internally, a `knockoff` stores the original design matrix and its knockoff separately in memory, in addition to other variables such as the `s` vector. You can plug a `knockoff` into any functions that supports `AbstractMatrix` as inputs (e.g. a LASSO solver) and it will be fast. 
 
 ```Julia
 # simulate random matrix, then normalize columns
