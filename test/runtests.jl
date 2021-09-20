@@ -20,19 +20,18 @@ using Statistics
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
-    C = knockoff.C
-    Ũ = knockoff.Ũ
     Σ = knockoff.Σ
     Σinv = knockoff.Σinv
 
     @test all(X' * X .≈ Σ)
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-2)) # numerical accuracy not good?
     @test all(s .≥ 0)
+    @test all(1 .≥ s)
     # λ = eigvals(2Σ - Diagonal(s))
     # for λi in λ
     #     @test λi ≥ 0 || λi ≈ 0
     # end
-    @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
+    # @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
     for i in 1:p, j in 1:p
         if i == j
             @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i])
@@ -58,19 +57,18 @@ end
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
-    C = knockoff.C
-    Ũ = knockoff.Ũ
     Σ = knockoff.Σ
     Σinv = knockoff.Σinv
 
     @test all(X' * X .≈ Σ)
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-1)) # numerical accuracy not good?
     @test all(s .≥ 0)
+    @test all(1 .≥ s)
     # λ = eigvals(2Σ - Diagonal(s))
     # for λi in λ
     #     @test λi ≥ 0 || λi ≈ 0
     # end
-    @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
+    # @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
     for i in 1:p, j in 1:p
         if i == j
             @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i], atol=1e-8)

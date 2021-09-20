@@ -47,8 +47,7 @@ conditional multivariate normal distributions.
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 """
-function modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol=:sdp;
-    μ::Vector{T}=mean(X, dims=2)) where T <: AbstractFloat
+function modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol, μ::Vector{T}) where T <: AbstractFloat
     n, p = size(X)
     full_svd = n > p ? true : false
     # compute gram matrix using full svd
@@ -89,7 +88,7 @@ function condition(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix,
     n, p = size(X)
     X̃ = Matrix{eltype(X)}(undef, n, p)
     ΣinvD = Σinv * D
-    new_V = 2D - D * ΣinvD
+    new_V = Symmetric(2D - D * ΣinvD)
     L = cholesky(new_V, check=false).L
     return X - (X .- μ') * ΣinvD + randn(n, p) * L
 end
