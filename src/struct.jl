@@ -1,15 +1,15 @@
 """
 A `Knockoff` is an `AbstractMatrix`, essentially the matrix [X X̃] of
-concatenating X̃ to X. It behaves like a regular matrix and can be inputted
-into any function that supports inputs of type `AbstractMatrix`. Basic
-operations like @view(A[:, 1]) are supported. 
+concatenating X̃ to X. If `A` is a `Knockoff`, `A` behaves like a regular matrix
+and can be inputted into any function that supports inputs of type `AbstractMatrix`.
+Basic operations like @view(A[:, 1]) are supported. 
 """
 struct Knockoff{T} <: AbstractMatrix{T}
-    X::Matrix{T} # original design matrix
-    X̃::Matrix{T} # knockoff of X
-    s::Vector{T} # diagonal(s) and 2Σ - diagonal(s) are both psd
-    Σ::Matrix{T} # X'X
-    Σinv::Matrix{T} # inv(X'X)
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    s::Vector{T} # p × 1 vector. diagonal(s) and 2Σ - diagonal(s) are both psd
+    Σ::Matrix{T} # p × p gram matrix X'X
+    Σinv::Matrix{T} # p × p inv(X'X)
 end
 
 Base.size(A::Knockoff) = size(A.X, 1), 2size(A.X, 2)
@@ -34,7 +34,7 @@ function LinearAlgebra.mul!(c::AbstractVector, A::Knockoff, b::AbstractVector)
 end
 
 """
-    modelX_gaussian(X::Matrix{T})
+    modelX_gaussian_knockoffs(X::Matrix{T})
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions.
@@ -47,11 +47,12 @@ conditional multivariate normal distributions.
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 """
-function modelX_gaussian(X::Matrix{T}, method::Symbol=:sdp;
+function modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol=:sdp;
     μ::Vector{T}=mean(X, dims=2)) where T <: AbstractFloat
     n, p = size(X)
+    full_svd = n > p ? true : false
     # compute gram matrix using full svd
-    U, σ, V = svd(X, full=true)
+    U, σ, V = svd(X, full=full_svd)
     Σ = V * Diagonal(σ)^2 * V'
     Σinv = V * inv(Diagonal(σ)^2) * V'
     # compute s vector using the specified method
@@ -72,11 +73,7 @@ function modelX_gaussian(X::Matrix{T}, method::Symbol=:sdp;
     else
         error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
     end
-    X̃ = Matrix{T}(undef, n, p)
-    for i in 1:p
-        x̃ = condition(@view(X[i, :]), μ, Σinv, Diagonal(s)) #todo efficiency
-        copyto!(@view(X̃[i, :]), x̃)
-    end
+    X̃ = condition(X, μ, Σinv, Diagonal(s))
     return Knockoff(X, X̃, s, Σ, Σinv)
 end
 
@@ -88,11 +85,13 @@ Samples a knockoff x̃ from Gaussian x using conditional distribution formulas:
 If (x, x̃) ~ N((μ, μ), G) where G = [Σ  Σ - D; Σ - D  Σ], then we sample x̃ from 
 x̃|x = N(x - D*inv(Σ)(x - μ), 2D - D*inv(Σ)*D)
 """
-function condition(x::AbstractVector, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
-    DinvΣ = D * Σinv
-    new_μ = x - DinvΣ * (x - μ)
-    new_V = 2D - DinvΣ * D
-    return rand(MvNormal(new_μ, new_V))
+function condition(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
+    n, p = size(X)
+    X̃ = Matrix{eltype(X)}(undef, n, p)
+    ΣinvD = Σinv * D
+    new_V = 2D - D * ΣinvD
+    L = cholesky(new_V, check=false).L
+    return X - (X .- μ') * ΣinvD + randn(n, p) * L
 end
 
 """
