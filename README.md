@@ -34,7 +34,10 @@ Aequi = fixed_knockoffs(X, :equi)
 Asdp  = fixed_knockoffs(X, :sdp)
 
 # model-X Gaussian knockoffs
-Aequi = modelX_gaussian_knockoffs(X, :equi)
+X = randn(200, 400)
+μtrue = zeros(400)
+Aequi = modelX_gaussian_knockoffs(X, :equi, μtrue)
+Asdp  = modelX_gaussian_knockoffs(X, :sdp, μtrue)
 ```
 
 ## Development Roadmap
