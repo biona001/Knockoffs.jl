@@ -116,3 +116,36 @@ end
     mul!(C, A, B)
     @test all(Ctrue .≈ C)
 end
+
+@testset "model X Guassian Knockoffs" begin
+    Random.seed!(2021)
+
+    # simulate matrix (but manually normalizing columns leads to rank deficiency for some reason)
+    n = 300
+    p = 600
+    X = randn(n, p)
+    # zscore!(X, mean(X, dims=1), std(X, dims=1))
+    # normalize_col!(X)
+    # @show rank(X)
+
+    # generate knockoff
+    @time knockoff = modelX_gaussian_knockoffs(X, :sdp, zeros(p));
+    X = knockoff.X
+    X̃ = knockoff.X̃
+    s = knockoff.s
+    Σ = knockoff.Σ
+    Σinv = knockoff.Σinv
+
+    # test properties
+    @test all(X' * X .≈ Σ)
+    @test all(isapprox.(X̃' * X̃, Σ, atol=0.5)) # numerical accuracy not good?
+    @test all(s .≥ 0)
+    @test all(1 .≥ s)
+    for i in 1:p, j in 1:p
+        if i == j
+            @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i], atol=1.0) # numerical accuracy not good?
+        else
+            @test isapprox(dot(X[:, i], X̃[:, j]), dot(X[:, i], X[:, j]), atol=1.0) # numerical accuracy not good?
+        end
+    end
+end

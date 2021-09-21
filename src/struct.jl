@@ -63,9 +63,9 @@ function modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol, μ::Vector{T}) 
         s = min(1, 2λmin) .* ones(size(Σ, 1))
     elseif method == :sdp
         svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) == Semidefinite(p))
+        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
         solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(vec(svar.value), 0, 1) # for numeric stability
+        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
     elseif method==:asdp
         # todo
         error("ASDP not supported yet! sorry!")
@@ -86,10 +86,9 @@ x̃|x = N(x - D*inv(Σ)(x - μ), 2D - D*inv(Σ)*D)
 """
 function condition(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
     n, p = size(X)
-    X̃ = Matrix{eltype(X)}(undef, n, p)
     ΣinvD = Σinv * D
-    new_V = Symmetric(2D - D * ΣinvD)
-    L = cholesky(new_V, check=false).L
+    new_V = Symmetric(2D - D * ΣinvD + 0.00001I) # small perturbation ensures positive eigvals
+    L = cholesky(new_V).L
     return X - (X .- μ') * ΣinvD + randn(n, p) * L
 end
 
@@ -127,9 +126,9 @@ function fixed_knockoffs(X::Matrix{T}; method::Symbol=:sdp) where T <: AbstractF
         s = min(1, 2λmin) .* ones(size(Σ, 1))
     elseif method == :sdp
         svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) == Semidefinite(p))
+        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
         solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(vec(svar.value), 0, 1) # for numeric stability
+        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
     else
         error("fixed_knockoffs: method can only be :equi or :sdp")
     end
