@@ -16,7 +16,7 @@ using Statistics
     normalize_col!(X) # normalize Xj to unit length
 
     # equi-correlated knockoff
-    @time knockoff = fixed_knockoffs(X, method=:equi)
+    @time knockoff = fixed_knockoffs(X, :equi)
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
@@ -53,7 +53,7 @@ end
     normalize_col!(X) # normalize Xj to unit length
 
     # SDP knockoff
-    @time knockoff = fixed_knockoffs(X, method=:sdp)
+    @time knockoff = fixed_knockoffs(X, :sdp)
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
@@ -90,7 +90,7 @@ end
     normalize_col!(X) # normalize Xj to unit length
 
     # construct knockoff struct and the real [A Ã]
-    @time A = fixed_knockoffs(X, method=:sdp)
+    @time A = fixed_knockoffs(X, :sdp)
     Atrue = [A.X A.X̃]
 
     # array operations

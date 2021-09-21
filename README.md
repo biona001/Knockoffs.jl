@@ -21,7 +21,7 @@ This package supports Julia `v1.6`+.
 
 ## Design principle
 
-A `knockoff` an `AbstractMatrix` with custom-defined operations so that it behaves like a matrix. Internally, a `knockoff` stores the original design matrix and its knockoff separately in memory, in addition to other variables such as the `s` vector. You can plug a `knockoff` into any functions that supports `AbstractMatrix` as inputs (e.g. a LASSO solver) and it will be fast. 
+A `knockoff` is essentially a `n*2p` `AbstractMatrix` with custom defined operations. Internally, a `knockoff` stores the original design matrix and its knockoff separately in memory, in addition to a few other variables. You can plug a `knockoff` into any functions that supports `AbstractMatrix` as inputs (e.g. a LASSO solver) and internally, linear algebra will automatically be dispatched to relvant BLAS functions. 
 
 ```Julia
 # simulate random matrix, then normalize columns
@@ -30,15 +30,21 @@ X = randn(1000, 200)
 normalize_col!(X)
 
 # fixed equi and SDP knockoffs
-Aequi = fixed_knockoffs(X, method=:equi)
-Asdp  = fixed_knockoffs(X, method=:sdp)
+Aequi = fixed_knockoffs(X, :equi)
+Asdp  = fixed_knockoffs(X, :sdp)
+
+# model-X Gaussian knockoffs
+Aequi = modelX_gaussian_knockoffs(X, :equi)
 ```
 
 ## Development Roadmap
 
-+ Multivariate normal knockoffs based on conditional formulas
++ Fixed equi-correlated knockoffs (done)
++ Fixed SDP knockoffs (done)
++ Multivariate normal knockoffs based on conditional formulas (done)
 + Parallelized ASDP knockoffs
-+ HMM knockoffs? Might be hard.
++ Markov chain knockoffs
++ HMM knockoffs
 + Threshold functions
 + Example with lasso path
 + Example with IHT path
