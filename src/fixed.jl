@@ -37,7 +37,7 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
         error("fixed_knockoffs: method can only be :equi or :sdp")
     end
     # compute Ũ such that Ũ'X = 0
-    Ũ = U[:, p+1:2p]
+    Ũ = @view(U[:, p+1:2p])
     # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
     D = Diagonal(s)
     γ, P = eigen(2D - D*Σinv*D)
