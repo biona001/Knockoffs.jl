@@ -12,5 +12,6 @@ include("struct.jl")
 include("fixed.jl")
 include("modelX.jl")
 include("dmc.jl")
+include("feature_stats.jl")
 
 end
