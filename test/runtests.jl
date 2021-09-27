@@ -149,3 +149,20 @@ end
         end
     end
 end
+
+@testset "threshold functions" begin
+    w = [0.1, 1.9, 1.3, 1.8, 0.8, -0.7, -0.1]
+    τ = threshold(w, 0.2)
+    @test τ == 0.8
+    τ = threshold(w, 0.2, :knockoff_plus)
+
+    w = [0.27, 0.76, 0.21, 0.1, -0.38, -0.01]
+    τ = threshold(w, 0.4)
+    @test τ == 0.1
+    τ = threshold(w, 0.5, :knockoff_plus)
+    @test τ == 0.1
+
+    w = [0.74, -0.65, -0.83, -0.27, -0.19, 0.4]
+    τ = threshold(w, 0.25)
+    @test τ == Inf
+end
