@@ -6,7 +6,7 @@ using Convex
 using SCS
 import Base: eltype, getindex, size
 
-export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!
+export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!, coefficient_diff
 
 include("struct.jl")
 include("fixed.jl")
