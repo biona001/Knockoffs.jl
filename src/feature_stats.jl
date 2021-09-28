@@ -6,9 +6,9 @@ from a univariate (single response) regression.
 
 # Inputs
 + `β`: Vector of regression coefficients
-+ `method`: Either `:concatenated` if all knockoffs are concatenated at the end
-    (e.g. [XX̃]) or `:interleaved` if each variable is immediately followed by
-    its knockoff (e.g. [x₁x̃₁x₂x̃₂...])
++ `method`: Either `:concatenated` (default) if all knockoffs are concatenated
+    at the end (e.g. [XX̃]) or `:interleaved` if each variable is immediately
+    followed by its knockoff (e.g. [x₁x̃₁x₂x̃₂...])
 """
 function coefficient_diff(β::AbstractVector, method::Symbol=:concatenated)
     iseven(length(β)) || error("length of β should be even but was odd.")

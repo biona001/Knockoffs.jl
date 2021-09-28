@@ -166,3 +166,37 @@ end
     τ = threshold(w, 0.25)
     @test τ == Inf
 end
+
+@testset "coefficient_diff" begin
+    # knockoffs are at the end (e.g. [XX̃])
+    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5]
+    w = coefficient_diff(β, :concatenated)
+    @test length(w) == 3
+    @test w[1] ≈ 0.2
+    @test w[2] ≈ 0.1
+    @test w[3] ≈ -0.2
+
+    # knockoffs are interleaved (e.g. [x₁x̃₁x₂x̃₂...])
+    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5]
+    w = coefficient_diff(β, :interleaved)
+    @test length(w) == 3
+    @test w[1] ≈ 0.8
+    @test w[2] ≈ -0.5
+    @test w[3] ≈ -0.4
+
+    # knockoffs are at the end (e.g. [XX̃])
+    B = [[1.0, 2.0, -0.3, 0.8, -0.1, 0.5] [-0.4, 0.6, 1.8, -0.3, 1.4, 0.3]]
+    w = coefficient_diff(B, :concatenated)
+    @test length(w) == 3
+    @test w[1] ≈ 0.3
+    @test w[2] ≈ 1.1
+    @test w[3] ≈ 1.3
+
+    # knockoffs are interleaved (e.g. [x₁x̃₁x₂x̃₂...])
+    B = [[1.0, 2.0, -0.3, 0.8, -0.1, 0.5] [-0.4, 0.6, 1.8, -0.3, 1.4, 0.3]]
+    w = coefficient_diff(B, :interleaved)
+    @test length(w) == 3
+    @test w[1] ≈ -1.2
+    @test w[2] ≈ 1.0
+    @test w[3] ≈ 0.7
+end
