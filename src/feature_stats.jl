@@ -68,3 +68,34 @@ function coefficient_diff(B::AbstractMatrix, method::Symbol=:concatenated)
     end
     return W
 end
+
+"""
+    extract_beta(β̂_knockoff::AbstractVector, fdr::Number, method::Symbol=:concatenated)
+
+Given estimated β of original variables and their knockoffs, compute β for the
+original design matrix that controls the FDR.
+"""
+function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
+    method::Symbol=:concatenated
+    ) where T <: AbstractFloat
+    0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
+    p = length(β̂_knockoff) >> 1
+    # find set of selected predictors
+    W = coefficient_diff(β̂_knockoff, method)
+    τ = threshold(W, fdr)
+    detected = findall(W .> τ)
+    # construct original β
+    β = zeros(T, p)
+    if method == :concatenated
+        for i in detected
+            β[i] = β̂_knockoff[i]
+        end
+    elseif method == :interleaved
+        for i in detected
+            β[i] = β̂_knockoff[2i - 1]
+        end
+    else
+        error("method should be :concatenated or :interleaved but got $method")
+    end
+    return β
+end

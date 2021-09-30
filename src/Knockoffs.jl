@@ -7,7 +7,7 @@ using SCS
 import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
-    coefficient_diff, threshold
+    coefficient_diff, threshold, extract_beta
 
 include("struct.jl")
 include("fixed.jl")
