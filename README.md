@@ -48,7 +48,7 @@ Asdp  = modelX_gaussian_knockoffs(X, :sdp, μtrue)
 + Parallelized ASDP knockoffs
 + Markov chain knockoffs (work in progress)
 + HMM knockoffs (wrap code from [snpknock](https://github.com/msesia/snpknock))
-+ MAC-minimizing knockoffs [ref](https://arxiv.org/abs/2011.14625)
++ MRC minimizing knockoffs ([ref](https://arxiv.org/abs/2011.14625))
 + Threshold functions (done)
 + Example with lasso path
 + Example with IHT path

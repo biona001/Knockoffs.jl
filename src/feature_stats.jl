@@ -29,6 +29,29 @@ function coefficient_diff(β::AbstractVector, method::Symbol=:concatenated)
 end
 
 """
+    coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
+
+Returns the coefficient difference statistic W[j] = |β[j]| - |β[j + p]| 
+from a univariate (single response) regression, where the `j`th variable is stored
+in position `original[j]` of `β`, and its knockoff is stored in position `knockoff[j]`
+
+# Inputs
++ `β`: Vector of regression coefficients
++ `original`: The index of original variables in `β`
++ `knockoff`: The index of knockoff variables in `β`
+"""
+function coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
+    p = length(β) >> 1
+    length(original) == length(knockoff) == p || error("Length of " * 
+        "β should be twice of original and knockoff.")
+    W = Vector{eltype(β)}(undef, p)
+    for j in 1:p
+        W[j] = abs(β[original[j]]) - abs(β[knockoff[j]])
+    end
+    return W
+end
+
+"""
     coefficient_diff(B::AbstractMatrix)
 
 Returns the coefficient difference statistic
@@ -70,6 +93,33 @@ function coefficient_diff(B::AbstractMatrix, method::Symbol=:concatenated)
 end
 
 """
+    coefficient_diff(B::AbstractMatrix, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
+
+Returns the coefficient difference statistic W[j] = |β[j]| - |β[j + p]| 
+from a multivariate (multiple response) regression, where the `j`th variable is stored
+in position `original[j]` of `β`, and its knockoff is stored in position `knockoff[j]`
+
+# Inputs
++ `β`: Vector of regression coefficients
++ `original`: The index of original variables in `β`
++ `knockoff`: The index of knockoff variables in `β`
+"""
+function coefficient_diff(B::AbstractMatrix, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
+    p = size(B, 1) >> 1
+    length(original) == length(knockoff) == p || error("Number of variables in " * 
+        "B should be twice the length of original and knockoff.")
+    W = Vector{eltype(B)}(undef, p)
+    for j in 1:p
+        Wj = zero(T)
+        for i in 1:r
+            Wj += abs(B[original[j], i]) - abs(B[knockoff[j], i])
+        end
+        W[j] = Wj
+    end
+    return W
+end
+
+"""
     extract_beta(β̂_knockoff::AbstractVector, fdr::Number, method::Symbol=:concatenated)
 
 Given estimated β of original variables and their knockoffs, compute β for the
@@ -83,7 +133,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, method)
     τ = threshold(W, fdr)
-    detected = findall(W .> τ)
+    detected = findall(W .≥ τ)
     # construct original β
     β = zeros(T, p)
     if method == :concatenated
@@ -96,6 +146,23 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
         end
     else
         error("method should be :concatenated or :interleaved but got $method")
+    end
+    return β
+end
+
+function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}
+    ) where T <: AbstractFloat
+    0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
+    p = length(β̂_knockoff) >> 1
+    # find set of selected predictors
+    W = coefficient_diff(β̂_knockoff, original, knockoff)
+    τ = threshold(W, fdr)
+    detected = findall(W .≥ τ)
+    # construct original β
+    β = zeros(T, p)
+    for i in detected
+        β[i] = β̂_knockoff[original[i]]
     end
     return β
 end
