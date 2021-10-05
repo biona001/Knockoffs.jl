@@ -147,13 +147,13 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
     ) where T <: AbstractFloat
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     p = length(β̂_knockoff) >> 1
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, original, knockoff)
-    τ = threshold(W, fdr)
+    τ = threshold(W, fdr, method)
     detected = findall(W .≥ τ)
     # construct original β
     β = zeros(T, p)
