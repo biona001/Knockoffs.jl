@@ -1,5 +1,5 @@
 """
-modelX_gaussian_knockoffs(X::Matrix{T})
+    modelX_gaussian_knockoffs(X::Matrix{T})
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions.
@@ -48,6 +48,8 @@ Samples a knockoff x̃ from Gaussian x using conditional distribution formulas:
 
 If (x, x̃) ~ N((μ, μ), G) where G = [Σ  Σ - D; Σ - D  Σ], then we sample x̃ from 
 x̃|x = N(x - D*inv(Σ)(x - μ), 2D - D*inv(Σ)*D)
+
+# todo: efficiency
 """
 function condition(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
     n, p = size(X)
