@@ -162,3 +162,15 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     end
     return β
 end
+
+function extract_combine_beta(β_full::AbstractVector{T}, 
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, 
+    ) where T <: AbstractFloat
+    p = length(β_full) >> 1
+    # construct β by summing original β and β_ko
+    β = zeros(T, p)
+    for i in 1:p
+        β[i] = β_full[original[i]] + β_full[knockoff[i]]
+    end
+    return β
+end
