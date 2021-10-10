@@ -215,7 +215,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     β = zeros(T, p)
     for i in 1:p
         g = groups[i]
-        if g in detected_groups
+        if g in detected_groups # TODO performance
             β[i] = β̂_knockoff[original[i]]
         end
     end

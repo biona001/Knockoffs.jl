@@ -12,7 +12,7 @@ f = "sim1/summary.txt"
 df = CSV.read(f, DataFrame)
 
 # all results
-df_sum = zeros(15, 5)
+df_sum = zeros(16, 5)
 successes = 0
 for sim in 1:100
     f = "sim$sim/summary.txt"
@@ -26,7 +26,7 @@ for sim in 1:100
 end
 df_mean = df_sum ./ successes
 # get std
-df_std = zeros(15, 5)
+df_std = zeros(16, 5)
 for sim in 1:100
     f = "sim$sim/summary.txt"
     if isfile(f)
@@ -43,7 +43,7 @@ writedlm("prs_population_R2_std.txt", df_std)
 # print latex table
 column_name = ["African", "Asian", "Bangladeshi", "British", "Caribbean", "Chinese",
     "Indian", "Irish", "Pakistani", "White-asian", "White-black", "White",
-    "beta selected", "TPP", "FDP"]
+    "non-zero betas", "beta selected", "TPP", "FDP"]
 
 for i in 1:size(df_mean, 1)
     print(column_name[i])
