@@ -41,10 +41,38 @@ in position `original[j]` of `β`, and its knockoff is stored in position `knock
 + `knockoff`: The index of knockoff variables in `β`
 """
 function coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
-    p = length(β) >> 1
-    length(original) == length(knockoff) == p || error("Length of " * 
-        "β should be twice of original and knockoff.")
     return abs.(β[original]) - abs.(β[knockoff])
+end
+
+"""
+    coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
+
+Returns the coefficient difference statistic for grouped variables
+W[G] = sum_{j in G} |β[j]| - sum_{j in G} |β[j + p]|.
+
+# Inputs
++ `β`: Vector of regression coefficients
++ `groups`: Vector storing group membership. `groups[i]` is the group of `β[i]`
++ `original`: The index of original variables in `β`
++ `knockoff`: The index of knockoff variables in `β`
+"""
+function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
+    knockoff::AbstractVector{Int})
+    unique_groups = unique(groups)
+    β_groups = zeros(length(unique_groups))
+    # find which variables are Knockoffs
+    knockoff_idx = falses(length(β))
+    knockoff_idx[knockoff] .= true
+    # loop over each variable
+    for i in 1:length(β)
+        g = groups[i]
+        if knockoff_idx[i]
+            β_groups[g] -= abs(β[i])
+        else
+            β_groups[g] += abs(β[i])
+        end
+    end
+    return β_groups
 end
 
 """
@@ -124,8 +152,11 @@ original design matrix that controls the FDR.
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
     method::Symbol=:concatenated
     ) where T <: AbstractFloat
+    # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     p = length(β̂_knockoff) >> 1
+    length(original) == length(knockoff) == p || error("Length of " * 
+        "β should be twice of original and knockoff.")
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, method)
     τ = threshold(W, fdr)
@@ -149,8 +180,11 @@ end
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
     original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
     ) where T <: AbstractFloat
-    0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
+    # first handle errors
     p = length(β̂_knockoff) >> 1
+    0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
+    length(original) == length(knockoff) == p || error("Length of " * 
+        "β should be twice of original and knockoff.")
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, original, knockoff)
     τ = threshold(W, fdr, method)
@@ -159,6 +193,31 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     β = zeros(T, p)
     for i in detected
         β[i] = β̂_knockoff[original[i]]
+    end
+    return β
+end
+
+function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
+    ) where T <: AbstractFloat
+    # first handle errors
+    p = length(β̂_knockoff) >> 1
+    0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
+    length(β̂_knockoff) == length(groups) ||
+        error("β̂_knockoff should have same length as groups")
+    length(original) == length(knockoff) == p ||
+        error("Length of β should be twice of original and knockoff.")
+    # find set of selected predictors
+    W = coefficient_diff(β̂_knockoff, groups, knockoff)
+    τ = threshold(W, fdr, method)
+    detected_groups = findall(W .≥ τ)
+    # construct original β
+    β = zeros(T, p)
+    for i in 1:p
+        g = groups[i]
+        if g in detected_groups
+            β[i] = β̂_knockoff[original[i]]
+        end
     end
     return β
 end
