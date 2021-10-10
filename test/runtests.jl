@@ -181,7 +181,7 @@ end
     @test w[2] ≈ -0.5
     @test w[3] ≈ -0.4
 
-    # knockoffs are at the end (e.g. [XX̃])
+    # multivariate: knockoffs are at the end (e.g. [XX̃])
     B = [[1.0, 2.0, -0.3, 0.8, -0.1, 0.5] [-0.4, 0.6, 1.8, -0.3, 1.4, 0.3]]
     w = coefficient_diff(B, :concatenated)
     @test length(w) == 3
@@ -189,11 +189,31 @@ end
     @test w[2] ≈ 1.1
     @test w[3] ≈ 1.3
 
-    # knockoffs are interleaved (e.g. [x₁x̃₁x₂x̃₂...])
+    # multivariate: knockoffs are interleaved (e.g. [x₁x̃₁x₂x̃₂...])
     B = [[1.0, 2.0, -0.3, 0.8, -0.1, 0.5] [-0.4, 0.6, 1.8, -0.3, 1.4, 0.3]]
     w = coefficient_diff(B, :interleaved)
     @test length(w) == 3
     @test w[1] ≈ -1.2
     @test w[2] ≈ 1.0
     @test w[3] ≈ 0.7
+
+    # knockoffs and original are randomly swapped
+    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5]
+    original = [1, 4, 6]
+    knockoff = [2, 3, 5]
+    w = coefficient_diff(β, original, knockoff)
+    @test length(w) == 3
+    @test w[1] ≈ 0.8
+    @test w[2] ≈ 0.5
+    @test w[3] ≈ 0.4
+
+    # group knockoffs
+    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5, 0.5, -0.1]
+    groups = [1, 1, 1, 1, 2, 2, 2, 2]
+    original = [1, 4, 6, 7]
+    knockoff = [2, 3, 5, 8]
+    w = coefficient_diff(β, groups, original, knockoff)
+    @test length(w) == 2
+    @test w[1] ≈ 1.8 - 0.5
+    @test w[2] ≈ 1.0 - 0.2
 end

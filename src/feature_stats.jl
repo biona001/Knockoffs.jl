@@ -57,7 +57,7 @@ W[G] = sum_{j in G} |β[j]| - sum_{j in G} |β[j + p]|.
 + `knockoff`: The index of knockoff variables in `β`
 """
 function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
-    knockoff::AbstractVector{Int})
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int})
     unique_groups = unique(groups)
     β_groups = zeros(length(unique_groups))
     # find which variables are Knockoffs
@@ -208,7 +208,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     length(original) == length(knockoff) == p ||
         error("Length of β should be twice of original and knockoff.")
     # find set of selected predictors
-    W = coefficient_diff(β̂_knockoff, groups, knockoff)
+    W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     τ = threshold(W, fdr, method)
     detected_groups = findall(W .≥ τ)
     # construct original β
