@@ -26,7 +26,7 @@ function FDR(correct_snps, signif_snps)
     return FDR
 end
 
-function run_sims(seed::Int)
+function run_sims(seed::Int; combine_beta=false)
     #
     # import data
     #
@@ -125,10 +125,13 @@ function run_sims(seed::Int)
         # compare R2 across populations, save result in a dataframe
         #
         β_iht = vec(readdlm("iht.beta"))
-        β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), fdr, original, knockoff)
-        β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")), fdr, original, knockoff)
         β_lasso = vec(readdlm("lasso.beta"))
-        β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")), fdr, original, knockoff)
+        β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), fdr,
+            original, knockoff, combine=combine_beta)
+        β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")),
+            fdr, original, knockoff, combine=combine_beta)
+        β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")), fdr,
+            original, knockoff, combine=combine_beta)
 
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
             "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
@@ -192,8 +195,8 @@ function run_sims(seed::Int)
 end
 
 #
-# Run simulation (via `julia --threads 16 5`)
+# Run simulation (via `julia prs.jl 5`)
 # each seed is a different run
 #
 seed = parse(Int, ARGS[1])
-run_sims(seed)
+run_sims(seed, combine_beta=true)

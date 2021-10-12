@@ -178,8 +178,8 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
-    ) where T <: AbstractFloat
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int},
+    method::Symbol=:knockoff, combine::Bool=false) where T <: AbstractFloat
     # first handle errors
     p = length(β̂_knockoff) >> 1
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
@@ -189,10 +189,16 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     W = coefficient_diff(β̂_knockoff, original, knockoff)
     τ = threshold(W, fdr, method)
     detected = findall(W .≥ τ)
-    # construct original β
+    # construct final β
     β = zeros(T, p)
-    for i in detected
-        β[i] = β̂_knockoff[original[i]]
+    if combine
+        for i in detected
+            β[i] = β̂_knockoff[original[i]] + β̂_knockoff[knockoff[i]]
+        end
+    else
+        for i in detected
+            β[i] = β̂_knockoff[original[i]]
+        end
     end
     return β
 end
@@ -218,18 +224,6 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
         if g in detected_groups # TODO performance
             β[i] = β̂_knockoff[original[i]]
         end
-    end
-    return β
-end
-
-function extract_combine_beta(β_full::AbstractVector{T}, 
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, 
-    ) where T <: AbstractFloat
-    p = length(β_full) >> 1
-    # construct β by summing original β and β_ko
-    β = zeros(T, p)
-    for i in 1:p
-        β[i] = β_full[original[i]] + β_full[knockoff[i]]
     end
     return β
 end
