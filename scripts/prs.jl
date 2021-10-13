@@ -26,7 +26,7 @@ function FDR(correct_snps, signif_snps)
     return FDR
 end
 
-function run_sims(seed::Int; combine_beta=false)
+function run_sims(seed::Int; combine_beta=false, extra_k = 0)
     #
     # import data
     #
@@ -39,10 +39,11 @@ function run_sims(seed::Int; combine_beta=false)
     xko_la = convert(Matrix{Float64}, xko, center=true, scale=true, impute=true)
     original = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.original.snp.index", Int))
     knockoff = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.knockoff.snp.index", Int))
+    cur_dir = pwd()
 
     for fdr in [0.05, 0.1, 0.25, 0.5]
-        top_dir = "/scratch/users/bbchu/ukb/prs/fdr$fdr/"
-        new_dir = "/scratch/users/bbchu/ukb/prs/fdr$fdr/sim$seed"
+        top_dir = cur_dir * "/fdr$fdr/"
+        new_dir = cur_dir * "/fdr$fdr/sim$seed"
         isdir(top_dir) || mkdir(top_dir)
         isdir(new_dir) || mkdir(new_dir)
         cd(new_dir)
@@ -95,7 +96,8 @@ function run_sims(seed::Int; combine_beta=false)
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht(y, xko_la, path=path, init_beta=true)
         GC.gc()
-        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
+        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)]+extra_k,
+            init_beta=true, max_iter=500)
         @show result
         writedlm("iht.knockoff.beta", result.beta)
 
@@ -105,14 +107,32 @@ function run_sims(seed::Int; combine_beta=false)
         chr = 10
         path = 10:10:200
         z = ones(Float64, 10000)
-        mses = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=path, init_beta=true)
+        mses = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=path,
+            init_beta=true, combine_beta = combine_beta)
         GC.gc()
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=dense_path, init_beta=true)
+        mses_new = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr,
+            path=dense_path, init_beta=true, combine_beta = combine_beta)
         GC.gc()
-        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
+        best_k = dense_path[argmin(mses_new)]
+        cur_k = best_k
+        # wrapped cross validation found best_k non-zero predictors;
+        # so adjust sparsity level until best_k non-zero beta are selected after ko filter
+        for iter in 1:5
+            result = fit_iht(y, xko_la, k=cur_k, init_beta=true, max_iter=500)
+            W = coefficient_diff(result.beta, original, knockoff)
+            τ = threshold(W, fdr, :knockoff)
+            detected = count(x -> x ≥ τ, W)
+            if detected < best_k
+                cur_k += best_k - detected
+            else
+                break
+            end
+            GC.gc()
+        end
         @show result
+        println("wrapped CV says best_k = $best_k; after tuning detected = $detected")
         writedlm("iht.knockoff.cv.beta", result.beta)
 
         #
@@ -127,11 +147,11 @@ function run_sims(seed::Int; combine_beta=false)
         β_iht = vec(readdlm("iht.beta"))
         β_lasso = vec(readdlm("lasso.beta"))
         β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), fdr,
-            original, knockoff, combine=combine_beta)
+            original, knockoff, :knockoff, combine_beta)
         β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")),
-            fdr, original, knockoff, combine=combine_beta)
+            fdr, original, knockoff, :knockoff, combine_beta)
         β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")), fdr,
-            original, knockoff, combine=combine_beta)
+            original, knockoff, :knockoff, combine_beta)
 
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
             "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
@@ -195,8 +215,8 @@ function run_sims(seed::Int; combine_beta=false)
 end
 
 #
-# Run simulation (via `julia prs.jl 5`)
-# each seed is a different run
+# Run simulation (via `julia prs.jl n`)
+# where n is a seed
 #
 seed = parse(Int, ARGS[1])
 run_sims(seed, combine_beta=true)
