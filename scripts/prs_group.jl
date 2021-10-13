@@ -10,6 +10,7 @@ using Distributions
 using DataFrames
 using CSV
 using Printf
+BLAS.set_num_threads(1)
 
 function R2(X::AbstractMatrix, y::AbstractVector, β̂::AbstractVector)
     μ = y - X * β̂
@@ -25,8 +26,28 @@ function FDR(correct_snps, signif_snps)
     FDR = FP / length(signif_snps)
     return FDR
 end
+function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int},
+    knockoff::Vector{Int}, groups::Vector{Int}, fdr::Float64, best_k::Int
+    )
+    # do a grid search for best sparsity level
+    best_β = Float64[]
+    best_err = Inf
+    for cur_k in best_k:5:round(Int, 1.5best_k)
+        result = fit_iht(y, xko_la, k=cur_k, init_beta=true, max_iter=500)
+        W = coefficient_diff(result.beta, groups, original, knockoff)
+        τ = threshold(W, fdr, :knockoff)
+        detected = count(x -> x ≥ τ, W)
+        if abs(detected - best_k) < best_err
+            best_β = copy(result.beta)
+            best_err = abs(detected - best_k)
+        end
+        println("wrapped CV says best_k = $best_k; using k = $cur_k detected $detected")
+        GC.gc()
+    end
+    return best_β
+end
 
-function run_sims(x::SnpArray, knockoff_idx, groups, seed::Int)
+function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, seed::Int)
     #
     # import data (first 10000 samples of chr 10)
     #
@@ -34,10 +55,11 @@ function run_sims(x::SnpArray, knockoff_idx, groups, seed::Int)
     knockoff = findall(knockoff_idx)
     xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
     xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
+    cur_dir = pwd()
 
     for fdr in [0.05, 0.1, 0.25, 0.5]
-        top_dir = "/scratch/users/bbchu/ukb/prs/Radj20_K50_s0/fdr$fdr/"
-        new_dir = "/scratch/users/bbchu/ukb/prs/Radj20_K50_s0/fdr$fdr/sim$seed"
+        top_dir = cur_dir * "/fdr$fdr/"
+        new_dir = cur_dir * "/fdr$fdr/sim$seed"
         isdir(top_dir) || mkdir(top_dir)
         isdir(new_dir) || mkdir(new_dir)
         cd(new_dir)
@@ -90,25 +112,27 @@ function run_sims(x::SnpArray, knockoff_idx, groups, seed::Int)
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht(y, xko_la, path=path, init_beta=true)
         GC.gc()
-        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
+        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)],
+            init_beta=true, max_iter=500)
         @show result
         writedlm("iht.knockoff.beta", result.beta)
 
         #
         # run knockoff IHT with wrapped cross validation
         #
-        chr = 10
         path = 10:10:200
         z = ones(Float64, 10000)
-        mses = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=path, init_beta=true)
+        mses = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=path,
+            init_beta=true, group_ko=groups)
         GC.gc()
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=dense_path, init_beta=true)
+        mses_new = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr,
+            path=dense_path, init_beta=true, group_ko=groups)
         GC.gc()
-        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
-        @show result
-        writedlm("iht.knockoff.cv.beta", result.beta)
+        best_k = dense_path[argmin(mses_new)]
+        best_β = tune_k(y, xko_la, original, knockoff, groups, fdr, best_k)
+        writedlm("iht.knockoff.cv.beta", best_β)
 
         #
         # Run knockoff lasso
@@ -120,13 +144,13 @@ function run_sims(x::SnpArray, knockoff_idx, groups, seed::Int)
         # compare R2 across populations, save result in a dataframe
         #
         β_iht = vec(readdlm("iht.beta"))
-        β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), groups,
-            fdr, original, knockoff)
+        β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), fdr, groups,
+            original, knockoff)
         β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")),
-            groups, fdr, original, knockoff)
+            fdr, groups, original, knockoff)
         β_lasso = vec(readdlm("lasso.beta"))
         β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")),
-            groups, fdr, original, knockoff)
+            fdr, groups, original, knockoff)
 
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
             "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
@@ -192,12 +216,13 @@ end
 #
 # import key and data
 #
-chr = 10
-keyfile = "/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr$chr.key"
+# keyfile = "/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.key"
+keyfile = "ukb_gen_chr10.key"
 df = CSV.read(keyfile, DataFrame)
-groups = df[!, :Group]
+groups = convert(Vector{Int}, df[!, :Group])
 knockoff_idx = convert(BitVector, df[!, :Knockoff])
-x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr$chr.bed")
+# x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.bed")
+x = SnpArray("ukb_gen_chr10.bed")
 
 #
 # Run simulation (via `julia --threads 16 5`)

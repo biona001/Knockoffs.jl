@@ -10,6 +10,7 @@ using Distributions
 using DataFrames
 using CSV
 using Printf
+BLAS.set_num_threads(1)
 
 function R2(X::AbstractMatrix, y::AbstractVector, β̂::AbstractVector)
     μ = y - X * β̂
@@ -37,7 +38,7 @@ function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int}
         τ = threshold(W, fdr, :knockoff)
         detected = count(x -> x ≥ τ, W)
         if abs(detected - best_k) < best_err
-            best_β = result.beta
+            best_β = copy(result.beta)
             best_err = abs(detected - best_k)
         end
         println("wrapped CV says best_k = $best_k; using k = $cur_k detected $detected")
@@ -245,4 +246,4 @@ end
 # where n is a seed
 #
 seed = parse(Int, ARGS[1])
-run_sims(seed, combine_beta=false)
+run_sims(seed, combine_beta=true)
