@@ -25,6 +25,47 @@ function FDR(correct_snps, signif_snps)
     FDR = FP / length(signif_snps)
     return FDR
 end
+function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int},
+    knockoff::Vector{Int}, fdr::Float64, best_k::Int
+    )
+    # do a grid search for best sparsity level
+    best_β = Float64[]
+    best_err = Inf
+    for cur_k in best_k:5:round(Int, 1.5best_k)
+        result = fit_iht(y, xko_la, k=cur_k, init_beta=true, max_iter=500)
+        W = coefficient_diff(result.beta, original, knockoff)
+        τ = threshold(W, fdr, :knockoff)
+        detected = count(x -> x ≥ τ, W)
+        if abs(detected - best_k) < best_err
+            best_β = result.beta
+            best_err = abs(detected - best_k)
+        end
+        println("wrapped CV says best_k = $best_k; using k = $cur_k detected $detected")
+        GC.gc()
+    end
+    return best_β
+end
+# function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int},
+#     knockoff::Vector{Int}, fdr::Float64, best_k::Int
+#     )
+#     cur_k = best_k
+#     detected = 0
+#     for iter in 1:5
+#         result = fit_iht(y, xko_la, k=cur_k, init_beta=true, max_iter=500)
+#         W = coefficient_diff(result.beta, original, knockoff)
+#         τ = threshold(W, fdr, :knockoff)
+#         detected = count(x -> x ≥ τ, W)
+#         if detected < best_k
+#             cur_k += best_k - detected
+#         else
+#             break
+#         end
+#         GC.gc()
+#     end
+#     @show result
+#     println("wrapped CV says best_k = $best_k; after tuning detected = $detected")
+#     return result.beta
+# end
 
 function run_sims(seed::Int; combine_beta=false, extra_k = 0)
     #
@@ -115,25 +156,10 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
         mses_new = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr,
             path=dense_path, init_beta=true, combine_beta = combine_beta)
         GC.gc()
+        # adjust sparsity level so it best matches sparsity chosen by ko filter
         best_k = dense_path[argmin(mses_new)]
-        cur_k = best_k
-        # wrapped cross validation found best_k non-zero predictors;
-        # so adjust sparsity level until best_k non-zero beta are selected after ko filter
-        for iter in 1:5
-            result = fit_iht(y, xko_la, k=cur_k, init_beta=true, max_iter=500)
-            W = coefficient_diff(result.beta, original, knockoff)
-            τ = threshold(W, fdr, :knockoff)
-            detected = count(x -> x ≥ τ, W)
-            if detected < best_k
-                cur_k += best_k - detected
-            else
-                break
-            end
-            GC.gc()
-        end
-        @show result
-        println("wrapped CV says best_k = $best_k; after tuning detected = $detected")
-        writedlm("iht.knockoff.cv.beta", result.beta)
+        best_β = tune_k(y, xko_la, original, knockoff, fdr, best_k)
+        writedlm("iht.knockoff.cv.beta", best_β)
 
         #
         # Run knockoff lasso
@@ -219,4 +245,4 @@ end
 # where n is a seed
 #
 seed = parse(Int, ARGS[1])
-run_sims(seed, combine_beta=true)
+run_sims(seed, combine_beta=false)
