@@ -217,13 +217,11 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     τ = threshold(W, fdr, method)
     detected_groups = findall(W .≥ τ)
-    # construct original β
-    β = zeros(T, p)
-    for i in 1:p
-        g = groups[i]
-        if g in detected_groups # TODO performance
-            β[i] = β̂_knockoff[original[i]]
-        end
+    # construct the full β
+    β = zeros(T, length(β̂_knockoff))
+    for g in detected_groups
+        group_idx = findall(x -> x == g, groups)
+        β[group_idx] .= @view(β̂_knockoff[group_idx])
     end
-    return β
+    return β[original]
 end
