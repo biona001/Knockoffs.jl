@@ -17,13 +17,13 @@ function R2(X::AbstractMatrix, y::AbstractVector, β̂::AbstractVector)
     tss = y .- mean(y)
     return 1 - dot(μ, μ) / dot(tss, tss)
 end
-function TP(correct_snps, signif_snps)
-    return length(signif_snps ∩ correct_snps) / length(correct_snps)
+function TP(correct_groups, signif_groups)
+    return length(signif_groups ∩ correct_groups) / length(correct_groups)
 end
-function FDR(correct_snps, signif_snps)
-    FP = length(signif_snps) - length(signif_snps ∩ correct_snps) # number of false positives
+function FDR(correct_groups, signif_groups)
+    FP = length(signif_groups) - length(signif_groups ∩ correct_groups) # number of false positives
     # FPR = FP / (FP + TN) # https://en.wikipedia.org/wiki/False_positive_rate#Definition
-    FDR = FP / length(signif_snps)
+    FDR = FP / length(signif_groups)
     return FDR
 end
 function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int},
@@ -46,11 +46,20 @@ function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int}
     end
     return best_β
 end
+function get_signif_groups(β, groups)
+    correct_groups = Int[]
+    for i in findall(!iszero, β)
+        g = groups[i]
+        g ∈ correct_groups || push!(correct_groups, g)
+    end
+    return correct_groups
+end
 
 function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, seed::Int)
     #
     # import data (first 10000 samples of chr 10)
     #
+    chr = 10
     original = findall(knockoff_idx .== false)
     knockoff = findall(knockoff_idx)
     xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
@@ -193,19 +202,19 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             count(!iszero, β_lasso_knockoff)
             ))
         # count TP proportion
-        correct_snps = findall(!iszero, vec(readdlm("beta_true.txt")))
-        push!(df, hcat("TPP", TP(correct_snps, findall(!iszero, β_iht)),
-            TP(correct_snps, findall(!iszero, β_iht_knockoff)),
-            TP(correct_snps, findall(!iszero, β_iht_knockoff_cv)),
-            TP(correct_snps, findall(!iszero, β_lasso)),
-            TP(correct_snps, findall(!iszero, β_lasso_knockoff))
+        correct_groups = get_signif_groups(β, groups)
+        push!(df, hcat("TPP", TP(correct_groups, findall(!iszero, β_iht)),
+            TP(correct_groups, get_signif_groups(β_iht_knockoff, groups)),
+            TP(correct_groups, get_signif_groups(β_iht_knockoff_cv, groups)),
+            TP(correct_groups, get_signif_groups(β_lasso, groups)),
+            TP(correct_groups, get_signif_groups(β_lasso_knockoff, groups))
             ))
         # count FDR
-        push!(df, hcat("FDR", FDR(correct_snps, findall(!iszero, β_iht)),
-            FDR(correct_snps, findall(!iszero, β_iht_knockoff)),
-            FDR(correct_snps, findall(!iszero, β_iht_knockoff_cv)),
-            FDR(correct_snps, findall(!iszero, β_lasso)),
-            FDR(correct_snps, findall(!iszero, β_lasso_knockoff))
+        push!(df, hcat("FDR", FDR(correct_groups, findall(!iszero, β_iht)),
+            FDR(correct_groups, get_signif_groups(β_iht_knockoff, groups)),
+            FDR(correct_groups, get_signif_groups(β_iht_knockoff_cv, groups)),
+            FDR(correct_groups, get_signif_groups(β_lasso, groups)),
+            FDR(correct_groups, get_signif_groups(β_lasso_knockoff, groups))
             ))
 
         @show df
@@ -216,13 +225,11 @@ end
 #
 # import key and data
 #
-# keyfile = "/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.key"
-keyfile = "ukb_gen_chr10.key"
+keyfile = "/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.key"
 df = CSV.read(keyfile, DataFrame)
 groups = convert(Vector{Int}, df[!, :Group])
 knockoff_idx = convert(BitVector, df[!, :Knockoff])
-# x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.bed")
-x = SnpArray("ukb_gen_chr10.bed")
+x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.bed")
 
 #
 # Run simulation (via `julia --threads 16 5`)
