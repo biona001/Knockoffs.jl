@@ -110,13 +110,16 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
         #
         # Run standard IHT
         #
+        Random.seed!(seed)
         path = 10:10:200
         mses = cv_iht(y, xla, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht(y, xla, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
         @show result
         writedlm("iht.beta", result.beta)
@@ -125,19 +128,23 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
         #
         # Run standard lasso
         #
+        Random.seed!(seed)
         cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
         writedlm("lasso.beta", coef(cv))
 
         #
         # run knockoff IHT 
         #
+        Random.seed!(seed)
         path = 10:10:200
         mses = cv_iht(y, xko_la, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht(y, xko_la, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)]+extra_k,
             init_beta=true, max_iter=500)
         @show result
@@ -146,11 +153,13 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
         #
         # run knockoff IHT with wrapped cross validation
         #
+        Random.seed!(seed)
         chr = 10
         path = 10:10:200
         z = ones(Float64, 10000)
         mses = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=path,
             init_beta=true, combine_beta = combine_beta)
+        Random.seed!(seed)
         GC.gc()
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
@@ -158,6 +167,7 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
             path=dense_path, init_beta=true, combine_beta = combine_beta)
         GC.gc()
         # adjust sparsity level so it best matches sparsity chosen by ko filter
+        Random.seed!(seed)
         best_k = dense_path[argmin(mses_new)]
         best_β = tune_k(y, xko_la, original, knockoff, fdr, best_k)
         writedlm("iht.knockoff.cv.beta", best_β)
@@ -165,6 +175,7 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
         #
         # Run knockoff lasso
         #
+        Random.seed!(seed)
         cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
         writedlm("lasso.knockoff.beta", coef(cv))
 
@@ -190,6 +201,7 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
             xpop = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
             Xpop = SnpLinAlg{Float64}(xpop, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
+            Random.seed!(seed)
             ytrue = Xpop * β + rand(ϵ, size(Xpop, 1))
             # IHT
             iht_r2 = R2(Xpop, ytrue, β_iht)

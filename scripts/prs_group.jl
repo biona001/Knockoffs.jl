@@ -93,13 +93,16 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         #
         # Run standard IHT
         #
+        Random.seed!(seed)
         path = 10:10:200
         mses = cv_iht(y, xla, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht(y, xla, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
         @show result
         writedlm("iht.beta", result.beta)
@@ -108,19 +111,23 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         #
         # Run standard lasso
         #
+        Random.seed!(seed)
         cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
         writedlm("lasso.beta", coef(cv))
 
         #
         # run knockoff IHT 
         #
+        Random.seed!(seed)
         path = 10:10:200
         mses = cv_iht(y, xko_la, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht(y, xko_la, path=path, init_beta=true)
         GC.gc()
+        Random.seed!(seed)
         result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)],
             init_beta=true, max_iter=500)
         @show result
@@ -129,16 +136,20 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         #
         # run knockoff IHT with wrapped cross validation
         #
+        Random.seed!(seed)
         path = 10:10:200
         z = ones(Float64, 10000)
         mses = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr, path=path,
             init_beta=true, group_ko=groups)
         GC.gc()
+        Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
         mses_new = cv_iht_knockoff(y, xko_la, z, original, knockoff, fdr,
             path=dense_path, init_beta=true, group_ko=groups)
         GC.gc()
+        # adjust sparsity level so it best matches sparsity chosen by ko filter
+        Random.seed!(seed)
         best_k = dense_path[argmin(mses_new)]
         best_β = tune_k(y, xko_la, original, knockoff, groups, fdr, best_k)
         writedlm("iht.knockoff.cv.beta", best_β)
@@ -146,6 +157,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         #
         # Run knockoff lasso
         #
+        Random.seed!(seed)
         cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
         writedlm("lasso.knockoff.beta", coef(cv))
 
@@ -171,6 +183,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             xpop = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
             Xpop = SnpLinAlg{Float64}(xpop, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
+            Random.seed!(seed)
             ytrue = Xpop * β + rand(ϵ, size(Xpop, 1))
             # IHT
             iht_r2 = R2(Xpop, ytrue, β_iht)
@@ -202,15 +215,16 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             count(!iszero, β_lasso_knockoff)
             ))
         # count TP proportion
+        correct_snps = findall(!iszero, vec(readdlm("beta_true.txt")))
         correct_groups = get_signif_groups(β, groups)
-        push!(df, hcat("TPP", TP(correct_groups, findall(!iszero, β_iht)),
+        push!(df, hcat("TPP", TP(correct_snps, findall(!iszero, β_iht)),
             TP(correct_groups, get_signif_groups(β_iht_knockoff, groups)),
             TP(correct_groups, get_signif_groups(β_iht_knockoff_cv, groups)),
             TP(correct_groups, get_signif_groups(β_lasso, groups)),
             TP(correct_groups, get_signif_groups(β_lasso_knockoff, groups))
             ))
         # count FDR
-        push!(df, hcat("FDR", FDR(correct_groups, findall(!iszero, β_iht)),
+        push!(df, hcat("FDR", FDR(correct_snps, findall(!iszero, β_iht)),
             FDR(correct_groups, get_signif_groups(β_iht_knockoff, groups)),
             FDR(correct_groups, get_signif_groups(β_iht_knockoff_cv, groups)),
             FDR(correct_groups, get_signif_groups(β_lasso, groups)),
@@ -225,15 +239,16 @@ end
 #
 # import key and data
 #
-keyfile = "/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.key"
+seed = parse(Int, ARGS[1])
+resolution = 20
+keyfile = "/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.key"
 df = CSV.read(keyfile, DataFrame)
 groups = convert(Vector{Int}, df[!, :Group])
 knockoff_idx = convert(BitVector, df[!, :Knockoff])
-x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj20_K50_s0/ukb_gen_chr10.bed")
+x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.bed")
 
 #
-# Run simulation (via `julia --threads 16 5`)
-# each seed is a different run
+# Run simulation (via `julia prs.jl n r`)
+# where n is a seed and r is resolution (20, 5, ...etc)
 #
-seed = parse(Int, ARGS[1])
 run_sims(x, knockoff_idx, groups, seed)

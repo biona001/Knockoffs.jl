@@ -57,3 +57,4 @@ for i in 1:size(df_mean, 1)
     print("\\\\ \n")
     i == 12 && println("\\hline\n\\hline")
 end
+df_mean
