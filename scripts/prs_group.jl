@@ -100,7 +100,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht(y, xla, path=path, init_beta=true)
+        mses_new = cv_iht(y, xla, path=dense_path, init_beta=true)
         GC.gc()
         Random.seed!(seed)
         result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
@@ -125,7 +125,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         Random.seed!(seed)
         k_rough_guess = path[argmin(mses)]
         dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht(y, xko_la, path=path, init_beta=true)
+        mses_new = cv_iht(y, xko_la, path=dense_path, init_beta=true)
         GC.gc()
         Random.seed!(seed)
         result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)],
