@@ -6,7 +6,7 @@
 
 **This software is experimental in nature and should NOT be considered production ready**
 
-This is a Julia implementation of the [knockoff filter](https://projecteuclid.org/journals/annals-of-statistics/volume-43/issue-5/Controlling-the-false-discovery-rate-via-knockoffs/10.1214/15-AOS1337.full), taking many inspirations from the MATLAB/R implementation of [knockoff-filter](https://github.com/msesia/knockoff-filter) and also the C++/R code of [snpknock](https://github.com/msesia/snpknock). The knockoff filter is a general framework for controlling the false discovery rate when performing variable selection. As the name suggests, the knockoff filter operates by manufacturing knockoff variables that are cheap — their construction does not require collecting any new data — and are designed to mimic the correlation structure found within the original variables. The knockoffs serve as negative controls and they allow one to identify the truly important predictors, while controlling the false discovery rate (FDR) — the expected fraction of false discoveries among all discoveries.
+This is a Julia implementation of the [knockoff filter](https://web.stanford.edu/group/candes/knockoffs/), taking many inspirations from the MATLAB/R implementation of [knockoff-filter](https://github.com/msesia/knockoff-filter) and also the C++/R code of [knockoffgwas](https://github.com/msesia/knockoffgwas). The knockoff filter is a general framework for controlling the false discovery rate when performing variable selection. As the name suggests, the knockoff filter operates by manufacturing knockoff variables that are cheap — their construction does not require collecting any new data — and are designed to mimic the correlation structure found within the original variables. The knockoffs serve as negative controls and they allow one to identify the truly important predictors, while controlling the false discovery rate (FDR) — the expected fraction of false discoveries among all discoveries.
 
 For more information, please see the [main webpage](https://web.stanford.edu/group/candes/knockoffs/)
 
@@ -47,7 +47,7 @@ Asdp  = modelX_gaussian_knockoffs(X, :sdp, μtrue)
 + Multivariate normal knockoffs based on conditional formulas (done)
 + Parallelized ASDP knockoffs
 + Markov chain knockoffs (work in progress)
-+ HMM knockoffs (wrap code from [snpknock](https://github.com/msesia/snpknock)) (done)
++ HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (done)
 + MRC minimizing knockoffs ([ref](https://arxiv.org/abs/2011.14625))
 + Threshold functions (done)
 + Example with lasso path
