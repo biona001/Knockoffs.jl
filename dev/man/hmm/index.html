@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>HMM Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../assets/warner.js"></script><link rel="canonical" href="https://biona001.github.io/Knockoffs.jl/man/hmm/"/><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.039/juliamono-regular.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.11/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li class="is-active"><a class="tocitem" href>HMM Knockoffs</a><ul class="internal"><li><a class="tocitem" href="#Installation"><span>Installation</span></a></li><li><a class="tocitem" href="#Required-inputs"><span>Required inputs</span></a></li><li><a class="tocitem" href="#Simulate-genotypes"><span>Simulate genotypes</span></a></li><li><a class="tocitem" href="#Step-1:-Partitions"><span>Step 1: Partitions</span></a></li><li><a class="tocitem" href="#Step-2:-Generate-Knockoffs"><span>Step 2: Generate Knockoffs</span></a></li><li><a class="tocitem" href="#Examine-Generated-Knockoffs"><span>Examine Generated Knockoffs</span></a></li><li><a class="tocitem" href="#Step-3:-Model-selection-with-knockoffs"><span>Step 3: Model selection with knockoffs</span></a></li></ul></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>HMM Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>HMM Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/hmm.md#" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Generate-HMM-knockoffs"><a class="docs-heading-anchor" href="#Generate-HMM-knockoffs">Generate HMM knockoffs</a><a id="Generate-HMM-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Generate-HMM-knockoffs" title="Permalink"></a></h1><p>This tutorial closely follows the <a href="https://msesia.github.io/knockoffgwas/tutorial.html">knockoffgwas tutorial</a>. We go over how to generate (SHAPEIT) HMM knockoffs given (simulated) binary PLINK formatted data. </p><h2 id="Installation"><a class="docs-heading-anchor" href="#Installation">Installation</a><a id="Installation-1"></a><a class="docs-heading-anchor-permalink" href="#Installation" title="Permalink"></a></h2><ol><li>Install <a href="https://github.com/msesia/knockoffgwas">knockoffgwas</a> and its dependencies</li><li>Install <a href="https://www.well.ox.ac.uk/~gav/qctool_v2/documentation/download.html">qctools</a> for converting between VCF and BGEN formats</li><li>Install <a href="https://github.com/ZhiGroup/RaPID">RaPID</a> for detecting IBD segments (<strong>this only run on linux</strong>)</li><li>Install the following Julia packages. Within julia, type</li></ol><pre><code class="language-julia hljs">]add SnpArrays Distributions ProgressMeter MendelIHT VCFTools StatsBase
+]add https://github.com/biona001/Knockoffs.jl</code></pre><ol><li><strong>Modify these executable path to the ones installed on your local computer.</strong> Here the <code>partition_script</code> is located under the path you installed knockoffgwas: <code>knockoffgwas/knockoffgwas/utils/partition.R</code>.</li></ol><pre><code class="language-julia hljs">qctools_exe = &quot;/scratch/users/bbchu/qctool/build/release/qctool_v2.0.7&quot;
+snpknock2_exe = &quot;/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2&quot;
+rapid_exe = &quot;/scratch/users/bbchu/RaPID/RaPID_v.1.7&quot;
+partition_script = &quot;/scratch/users/bbchu/knockoffgwas/knockoffgwas/utils/partition.R&quot;;</code></pre><h2 id="Required-inputs"><a class="docs-heading-anchor" href="#Required-inputs">Required inputs</a><a id="Required-inputs-1"></a><a class="docs-heading-anchor-permalink" href="#Required-inputs" title="Permalink"></a></h2><p>We need multiple input files to generate knockoffs</p><ul><li>Unphased genotypes in binary PLINK format</li><li>Phased genotypes in VCF and BGEN format: we will simulate haplotypes, store in VCF format, and convert to BGEN using <a href="https://www.well.ox.ac.uk/~gav/qctool_v2/documentation/examples/converting.html">qctools</a><ul><li>Note: knockoffgwas requires only BGEN format, but RaPID requires VCF formats. Hence, the extra conversion</li></ul></li><li>Map file (providing different group resolution): since data is simulated, we will generate fake map file where every snp is 1cM apart</li><li>IBD segment file (generated by <a href="https://github.com/ZhiGroup/RaPID">RaPID</a> which requires VCF inputs)</li><li>Variant partition files (generated by snpknock2, i.e. module 2 of <a href="https://github.com/msesia/knockoffgwas">knockoffgwas</a>) </li><li>Sample and variant QC files</li></ul><h2 id="Simulate-genotypes"><a class="docs-heading-anchor" href="#Simulate-genotypes">Simulate genotypes</a><a id="Simulate-genotypes-1"></a><a class="docs-heading-anchor-permalink" href="#Simulate-genotypes" title="Permalink"></a></h2><p>Our simulation will try to follow</p><ul><li>Adding population structure (admixture &amp; cryptic relatedness): <a href="https://www.nature.com/articles/nrg2813">New approaches to population stratification in genome-wide association studies</a></li><li>How to simulate siblings: [Using Extended Genealogy to Estimate Components of Heritability for 23 Quantitative and Dichotomous Traits</li></ul><p>](https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003520)</p><h3 id="Population-structure"><a class="docs-heading-anchor" href="#Population-structure">Population structure</a><a id="Population-structure-1"></a><a class="docs-heading-anchor-permalink" href="#Population-structure" title="Permalink"></a></h3><p>Specifically, lets simulate genotypes with 2 populations. We simulate 49950 normally differentiated markers and 50 unusually differentiated markers based on allele frequency difference equal to 0.6. Let <span>$x_{ij}$</span> be the number of alternate allele count for sample <span>$i$</span> at SNP <span>$j$</span> with allele frequency <span>$p_j$</span>. Also let <span>$h_{ij, 1}$</span> denotype haplotype 1 of sample <span>$i$</span> at SNP <span>$j$</span> and <span>$h_{ij, 2}$</span> the second haplotype. Our simulation model is</p><p class="math-container">\[h_{ij, 1} \sim Bernoulli(p_j), \quad h_{ij, 2} \sim Bernoulli(p_j), \quad x_{ij} = h_{ij, 1} + h_{ij, 2}\]</p><p>which is equivalent to  </p><p class="math-container">\[x_{ij} \sim Binomial(2, p_j)\]</p><p>for unphased data. The allele frequency is <span>$p_{j} = Uniform(0, 1)$</span> for normally differentiated markers, and </p><p class="math-container">\[p_{pop1, j} \sim Uniform(0, 0.4), \quad p_{pop2, j} = p_{pop1, j} + 0.6\]</p><p>for abnormally differentiated markers. Each sample is randomly assigned to population 1 or 2. </p><h3 id="Sibling-pairs"><a class="docs-heading-anchor" href="#Sibling-pairs">Sibling pairs</a><a id="Sibling-pairs-1"></a><a class="docs-heading-anchor-permalink" href="#Sibling-pairs" title="Permalink"></a></h3><p>Based on the simulated data above, we can randomly sample pairs of individuals and have them produce offspring. Here, half of all offsprings will be siblings with the other half. This is done by first randomly sampling 2 samples from to represent parent. Assume they have 2 children. Then generate offspring individuals by copying segments of one parent haplotype directly to the corresponding haplotype of the offspring. This recombination event will produce IBD segments. The number of recombination is 1 or 2 per chromosome, and is chosen uniformly across the chromosome. </p><pre><code class="language-julia hljs"># load Julia packages and some helper functions
+using SnpArrays
+using Knockoffs
+using DelimitedFiles
+using Random
+using LinearAlgebra
+using Distributions
+using ProgressMeter
+using MendelIHT
+using VCFTools
+using StatsBase</code></pre><p>These are helper functions needed for this tutorial (essentially data simulation + some glue code). It is not crucial users understand what they are doing.  </p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    simulate_pop_structure(n, p)
+
+Simulate genotypes with K = 2 populations. 300 SNPs will have different allele 
+frequencies between the populations, where 50 of them will be causal
+
+# Inputs
+- `plinkfile`: Output plink file name. 
+- `n`: Number of samples
+- `p`: Number of SNPs
+
+# Output
+- `x1`: n×p matrix of the 1st haplotype for each sample. Each row is a haplotype
+- `x2`: n×p matrix of the 2nd haplotype for each sample. `x = x1 + x2`
+- `populations`: Vector of length `n` indicating population membership for eachsample. 
+- `diff_markers`: Indices of the differentially expressed alleles.
+
+# Reference
+https://www.nature.com/articles/nrg2813
+&quot;&quot;&quot;
+function simulate_pop_structure(n::Int, p::Int)
+    # first simulate genotypes treating all samples equally
+    x1 = BitMatrix(undef, n, p)
+    x2 = BitMatrix(undef, n, p)
+    pmeter = Progress(p, 0.1, &quot;Simulating genotypes...&quot;)
+    @inbounds for j in 1:p
+        d = Bernoulli(rand())
+        for i in 1:n
+            x1[i, j] = rand(d)
+            x2[i, j] = rand(d)
+        end
+        next!(pmeter)
+    end
+    # assign populations and simulate 300 unually differentiated markers
+    populations = rand(1:2, n)
+    diff_markers = sample(1:p, 300, replace=false)
+    @inbounds for j in diff_markers
+        pop1_allele_freq = 0.4rand()
+        pop2_allele_freq = pop1_allele_freq + 0.6
+        pop1_dist = Bernoulli(pop1_allele_freq)
+        pop2_dist = Bernoulli(pop2_allele_freq)
+        for i in 1:n
+            d = isone(populations[i]) ? pop1_dist : pop2_dist
+            x1[i, j] = rand(d)
+            x2[i, j] = rand(d)
+        end
+    end
+    return x1, x2, populations, diff_markers
+end
+
+&quot;&quot;&quot;
+    simulate_IBD(parent_plinkfile, offsprings)
+
+Simulate recombination events. Half of all offsprings will be siblings with the other half.
+This is done by first randomly sampling 2 samples from to represent parent. Assume they have
+2 children. Then generate offspring individuals by copying segments of the parents haplotype
+directly to the offspring to represent IBD segments. The number of segments (i.e. places of
+recombination) is 1 or 2 per chromosome, and is chosen uniformly across the chromosome. 
+
+# Inputs
+- `h1`: `n × p` matrix of the 1st haplotype for each parent. Each row is a haplotype
+- `h2`: `n × p` matrix of the 2nd haplotype for each parent. `H = h1 + h2`
+- `offsprings`: Total number of offsprings
+
+# Output
+- `x1`: `offsprings × p` matrix of the 1st haplotype for each offspring. Each row is a haplotype
+- `x2`: `offsprings × p` matrix of the 2nd haplotype for each offspring. `x = x1 + x2`
+
+# References
+https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003520
+&quot;&quot;&quot;
+function simulate_IBD(h1::AbstractMatrix, h2::AbstractMatrix, offsprings::Int)
+    # first handle errors
+    n, p = size(h1)
+    iseven(offsprings) || error(&quot;number of offsprings should be even&quot;)
+    # randomly designate gender for parents
+    sex = bitrand(n)
+    male_idx = findall(x -&gt; x == true, sex)
+    female_idx = findall(x -&gt; x == false, sex)
+    # simulate new samples
+    x1 = falses(n, p)
+    x2 = falses(n, p)
+    fathers = Int[]
+    mothers = Int[]
+    pmeter = Progress(offsprings &gt;&gt; 1, 0.1, &quot;Simulating IBD segments...&quot;)
+    for i in 1:(offsprings &gt;&gt; 1)
+        # assign parents
+        dad = rand(male_idx)
+        mom = rand(female_idx)
+        push!(fathers, dad)
+        push!(mothers, mom)
+        # child 1
+        recombinations = rand(1:2)
+        breakpoints = sort!(sample(1:p, recombinations, replace=false))
+        parent1, parent2 = rand() &lt; 0.5 ? (dad, mom) : (mom, dad)
+        segments = recombination_segments(breakpoints, p)
+        for j in 1:length(segments)
+            parent = isodd(j) ? parent1 : parent2
+            segment = segments[j]
+            # perform recombination
+            parent_hap = rand() &lt; 0.5 ? h1 : h2
+            child_hap = rand() &lt; 0.5 ? x1 : x2
+            copyto!(@view(child_hap[2i - 1, segment]), @view(parent_hap[parent, segment]))
+        end
+        # child 2
+        recombinations = rand(1:2)
+        breakpoints = sort!(sample(1:p, recombinations, replace=false))
+        parent1, parent2 = rand() &lt; 0.5 ? (dad, mom) : (mom, dad)
+        segments = recombination_segments(breakpoints, p)
+        for j in 1:length(segments)
+            parent = isodd(j) ? parent1 : parent2
+            segment = segments[j]
+            # perform recombination
+            parent_hap = rand() &lt; 0.5 ? h1 : h2
+            child_hap = rand() &lt; 0.5 ? x1 : x2
+            copyto!(@view(child_hap[2i - 1, segment]), @view(parent_hap[parent, segment]))
+        end
+        # update progress
+        next!(pmeter)
+    end
+    return x1, x2, fathers, mothers
+end
+
+function recombination_segments(breakpoints::Vector{Int}, snps::Int)
+    start = 1
+    result = UnitRange{Int}[]
+    for bkpt in breakpoints
+        push!(result, start:bkpt)
+        start = bkpt + 1
+    end
+    push!(result, breakpoints[end]+1:snps)
+    return result
+end
+
+function write_plink(outfile::AbstractString, x1::AbstractMatrix, x2::AbstractMatrix)
+    n, p = size(x1)
+    x = SnpArray(outfile * &quot;.bed&quot;, n, p)
+    for j in 1:p, i in 1:n
+        c = x1[i, j] + x2[i, j]
+        if c == 0
+            x[i, j] = 0x00
+        elseif c == 1
+            x[i, j] = 0x02
+        elseif c == 2
+            x[i, j] = 0x03
+        else
+            error(&quot;matrix entries should be 0, 1, or 2 but was $c!&quot;)
+        end
+    end
+    # create .bim file structure: https://www.cog-genomics.org/plink2/formats#bim
+    open(outfile * &quot;.bim&quot;, &quot;w&quot;) do f
+        for i in 1:p
+            println(f, &quot;1\tsnp$i\t0\t$(100i)\t1\t2&quot;)
+        end
+    end
+    # create .fam file structure: https://www.cog-genomics.org/plink2/formats#fam
+    open(outfile * &quot;.fam&quot;, &quot;w&quot;) do f
+        for i in 1:n
+            println(f, &quot;$i\t1\t0\t0\t1\t-9&quot;)
+        end
+    end
+    return nothing
+end
+
+function make_fake_mapfile(filename, p::Int)
+    open(filename, &quot;w&quot;) do io
+        println(io, &quot;Chromosome\tPosition(bp)\tRate(cM/Mb)\tMap(cM)&quot;)
+        for i in 1:p
+            println(io, &quot;chr1\t&quot;, 100i, &quot;\t1.0\t1.0&quot;)
+        end
+    end
+end</code></pre><pre><code class="nohighlight hljs">make_fake_mapfile (generic function with 1 method)</code></pre><p>Simulate phased data with 2 populations, 49700 usually differentiated markers, and 300 unusually differentiated markers. Then simulate mating, which generates IBD segments. Finally, make unphased data from offspring haplotypes. </p><pre><code class="language-julia hljs"># simulate phased genotypes
+Random.seed!(2021)
+outfile = &quot;sim&quot;
+n = 2000
+p = 50000
+h1, h2, populations, diff_markers = simulate_pop_structure(n, p)
+
+# simulate random mating to get IBD segments
+offsprings = 2000
+x1, x2, fathers, mothers = simulate_IBD(h1, h2, offsprings)
+
+# write phased genotypes to VCF format
+write_vcf(&quot;sim.phased.vcf.gz&quot;, x1, x2)
+
+# write unphased genotypes to PLINK binary format
+write_plink(outfile, x1, x2)
+
+# save pop1/pop2 index and unually differentiated marker indices
+writedlm(&quot;populations.txt&quot;, populations)
+writedlm(&quot;diff_markers.txt&quot;, diff_markers)</code></pre><pre><code class="nohighlight hljs">[32mSimulating genotypes...100%|████████████████████████████| Time: 0:00:02[39m
+[32mSimulating IBD segments...100%|█████████████████████████| Time: 0:00:03[39m
+[32mWriting VCF...100%|█████████████████████████████████████| Time: 0:00:21[39m</code></pre><h2 id="Step-1:-Partitions"><a class="docs-heading-anchor" href="#Step-1:-Partitions">Step 1: Partitions</a><a id="Step-1:-Partitions-1"></a><a class="docs-heading-anchor-permalink" href="#Step-1:-Partitions" title="Permalink"></a></h2><p>We need</p><ul><li>Map file (in particular the (cM) field will determine group resolution)</li><li>PLINK&#39;s bim file</li><li>QC file (all SNP names that pass QC)</li><li>output file name</li></ul><p>Since data is simulated, there are no genomic map file. Let us generate a fake one. </p><pre><code class="language-julia hljs"># generate fake map file
+make_fake_mapfile(&quot;sim.map&quot;, p)
+
+# also generate QC file that contains all SNPs and all samples
+snpdata = SnpData(&quot;sim&quot;)
+snpIDs = snpdata.snp_info[!, :snpid]
+sampleIDs = Matrix(snpdata.person_info[!, 1:2])
+writedlm(&quot;variants_qc.txt&quot;, snpIDs)
+writedlm(&quot;samples_qc.txt&quot;, sampleIDs)</code></pre><p>Now we run the partition script</p><pre><code class="language-julia hljs">plinkfile = &quot;sim&quot;
+mapfile = &quot;sim.map&quot;
+qc_variants = &quot;variants_qc.txt&quot;
+outfile = &quot;sim.partition.txt&quot;
+partition(partition_script, plinkfile, mapfile, qc_variants, outfile)</code></pre><pre><code class="nohighlight hljs">Warning messages:
+1: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
+2: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
+3: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
+
+
+Mean group sizes: 
+res_7 res_6 res_5 res_4 res_3 res_2 res_1 
+    1 10000 10000 10000 10000 10000 10000 
+Partitions written to: sim.partition.txt
+
+
+
+
+
+Process(`[4mRscript[24m [4m--vanilla[24m [4m/scratch/users/bbchu/knockoffgwas/knockoffgwas/utils/partition.R[24m [4msim.map[24m [4msim.bim[24m [4mvariants_qc.txt[24m [4msim.partition.txt[24m`, ProcessExited(0))</code></pre><h2 id="Step-2:-Generate-Knockoffs"><a class="docs-heading-anchor" href="#Step-2:-Generate-Knockoffs">Step 2: Generate Knockoffs</a><a id="Step-2:-Generate-Knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Step-2:-Generate-Knockoffs" title="Permalink"></a></h2><p>First generate IBD segment files. This requires postprocessing the output of RapID, as <a href="https://github.com/msesia/knockoffgwas/issues/2">described here</a>. </p><pre><code class="language-julia hljs">vcffile = &quot;sim.phased.vcf.gz&quot;
+mapfile = &quot;sim.map&quot;
+min_length = 1    # minimum IBD length in cM
+outfolder = &quot;rapid&quot;
+window_size = 5     # number of SNPs per window
+r = 1              # number of runs
+s = 10               # number of successes
+rapid(rapid_exe, vcffile, mapfile, min_length, outfolder, window_size, r, s)</code></pre><pre><code class="nohighlight hljs">Create sub-samples..
+Done!
+100 %
+
+
+
+
+Process(`[4m/scratch/users/bbchu/RaPID/RaPID_v.1.7[24m [4m-i[24m [4msim.phased.vcf.gz[24m [4m-g[24m [4msim.map[24m [4m-d[24m [4m1[24m [4m-o[24m [4mrapid[24m [4m-w[24m [4m5[24m [4m-r[24m [4m1[24m [4m-s[24m [4m10[24m`, ProcessExited(0))</code></pre><p>Next convert VCF file to BGEN format (note: sample file must be saved separately)</p><pre><code class="language-julia hljs"># convert VCF to BGEN format
+outfile = &quot;sim.bgen&quot;
+run(`$qctools_exe -g $vcffile -og $outfile`)
+
+# then save sample file separately
+open(&quot;sim.sample&quot;, &quot;w&quot;) do io
+    println(io, &quot;ID_1 ID_2 missing sex&quot;)
+    println(io, &quot;0 0 0 D&quot;)
+    for i in 1:n
+        println(io, &quot;$i 1 0 1&quot;)
+    end
+end</code></pre><pre><code class="nohighlight hljs">Welcome to qctool
+(version: 2.0.7, revision )
+
+(C) 2009-2017 University of Oxford
+
+Opening genotype files                                      : [******************************] (1/1,0.0s,41.3/s)
+========================================================================
+
+Input SAMPLE file(s):         Output SAMPLE file:             &quot;(n/a)&quot;.
+Sample exclusion output file:   &quot;(n/a)&quot;.
+
+Input GEN file(s):
+                                                    (not computed)  &quot;sim.phased.vcf.gz&quot;
+                                         (total 1 sources, number of snps not computed).
+                      Number of samples: 2000
+Output GEN file(s):             &quot;sim.bgen&quot;
+Output SNP position file(s):    (n/a)
+Sample filter:                  .
+# of samples in input files:    2000.
+# of samples after filtering:   2000 (0 filtered out).
+
+========================================================================
+
+Processing SNPs                                             :  (50000/?,142.7s,350.4/s)39809/?,119.8s,332.3/s):  (42338/?,126.9s,333.7/s)
+Total: 50000SNPs.
+========================================================================
+
+Number of SNPs:
+                     -- in input file(s):                 (not computed).
+ -- in output file(s):                50000
+
+Number of samples in input file(s):   2000.
+
+Output GEN files:                     (50000  snps)  &quot;sim.bgen&quot;
+                                      (total 50000 snps).
+========================================================================
+
+
+Thank you for using qctool.</code></pre><p>The first few lines of the BGEN <code>.sample</code> file looks like:</p><pre><code class="language-julia hljs">;head sim.sample</code></pre><pre><code class="nohighlight hljs">ID_1 ID_2 missing sex
+0 0 0 D
+1 1 0 1
+2 1 0 1
+3 1 0 1
+4 1 0 1
+5 1 0 1
+6 1 0 1
+7 1 0 1
+8 1 0 1</code></pre><p>Finally, generate HMM knockoffs by running the following code in the command line directly. You may need to adjust file directories and change parameters. </p><pre><code class="language-julia hljs">bgenfile = &quot;sim&quot;
+sample_qc = &quot;samples_qc.txt&quot;
+variant_qc = &quot;variants_qc.txt&quot;
+mapfile = &quot;sim.map&quot;
+partfile = &quot;sim.partition.txt&quot;
+ibdfile = &quot;rapid/results.max&quot;
+K = 10
+cluster_size_min = 1000 
+cluster_size_max = 10000 
+hmm_rho = 1
+hmm_lambda = 1e-3 
+windows = 0
+n_threads = 1
+seed = 2020
+compute_references = true
+generate_knockoffs = true
+outfile = &quot;sim.knockoffs&quot;
+
+@time snpknock2(snpknock2_exe, bgenfile, sample_qc, variant_qc, mapfile, partfile, ibdfile, 
+    K, cluster_size_min, cluster_size_max, hmm_rho, hmm_lambda, windows, n_threads, 
+    seed, compute_references, generate_knockoffs, outfile)</code></pre><pre><code class="nohighlight hljs">	+----------------------+
+	|                      |
+	|  SNPKNOCK2, v0.3     |
+	|  July 21, 2020       |
+	|  Matteo Sesia        |
+	|                      |
+	+----------------------+
+
+Copyright (C) 2020 Stanford University.
+Distributed under the GNU GPLv3 open source license.
+
+Use --help for more information.
+
+Command line arguments:
+  --bgen sim
+  --keep samples_qc.txt
+  --extract variants_qc.txt
+  --map sim.map
+  --part sim.partition.txt
+  --ibd rapid/results.max
+  --K 10
+  --cluster_size_min 1000
+  --cluster_size_max 10000
+  --hmm-rho 1
+  --hmm-lambda 0.001
+  --windows 0
+  --n_threads 1
+  --seed 2020
+  --compute-references
+  --generate-knockoffs
+  --out ./knockoffs/sim.knockoffs
+
+Requested operations:
+  --compute-references
+  --generate_knockoffs
+
+
+--------------------------------------------------------------------------------
+Loading metadata
+--------------------------------------------------------------------------------
+Loading sample information from:
+  sim.sample
+Loading legend from:
+  sim.bim
+
+
+┌ Info: snpknock2 command:
+│ `/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2 --bgen sim --keep samples_qc.txt --extract variants_qc.txt --map sim.map --part sim.partition.txt --ibd rapid/results.max --K 10 --cluster_size_min 1000 --cluster_size_max 10000 --hmm-rho 1 --hmm-lambda 0.001 --windows 0 --n_threads 1 --seed 2020 --compute-references --generate-knockoffs --out ./knockoffs/sim.knockoffs`
+└ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/A1mdh/src/hmm_wrapper.jl:66
+┌ Info: Output directory: /home/users/bbchu/hmm/knockoffs
+└ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/A1mdh/src/hmm_wrapper.jl:67
+
+
+Loading partitions from:
+  sim.partition.txt
+Loading IBD segments from:
+  rapid/results.max
+Loaded 0 IBD segments.
+
+Printing summary of 1 windows:
+     0: 0--50000
+Summary of metadata for chromosome 1:
+  number of samples (after | before filtering) : 2000 | 2000
+  number of SNPs (after | before filtering)    : 50000 | 50000
+  number of variant partitions                 : 7
+  size of genomic windows                      : whole-chromosome
+  number of IBD segments                       : 0
+
+
+--------------------------------------------------------------------------------
+Kinship (using only haplotype data)
+--------------------------------------------------------------------------------
+Reached 1
+Chromosome 1 will be loaded from:
+  haplotype file            : sim.bgen
+  sample file               : sim.sample
+  legend file               : sim.bim
+  thinning factor           : 10
+  sample filter file        : samples_qc.txt
+  variant filter file       : variants_qc.txt
+  number of SNPs            : 5000
+  number of haplotypes      : 4000
+
+Reading BGEN file using 1 thread:
+|....................................................................................................|
+|====================================================================================================|
+Solving 1 bifurcating K-means problems using 1 threads.
+
+Kinship clusters written to:
+  ./knockoffs/sim.knockoffs_clust.txt
+  ./knockoffs/sim.knockoffs.sample
+
+Assigning references for the whole chromosome using 1 threads: 
+|....................................................................................................|
+|
+
+
+Bifurcating K-means
+Smallest allowed cluster size: 1000
+ step	 cluster	    size	    left	   right	accepted
+Bifurcating K-means completed after 0 steps.
+Number of clusters: 1.
+
+
+
+====================================================================================================|
+
+Reached 2
+Individual global references written to:
+  ./knockoffs/sim.knockoffs_lref.txt
+
+Individual local references written to:
+  ./knockoffs/sim.knockoffs_ref.txt
+
+
+--------------------------------------------------------------------------------
+Knockoffs for chromosome 1
+--------------------------------------------------------------------------------
+Chromosome 1 will be loaded from:
+  haplotype file            : sim
+  haplotype file format     : bgen
+  sample file               : sim.sample
+  legend file               : sim.bim
+  map file                  : sim.map
+  sample filter file        : samples_qc.txt
+  variant filter file       : variants_qc.txt
+  number of SNPs            : 50000
+  number of windows         : 1
+  number of haplotypes      : 4000
+
+Loading data for chromosome 1
+Reading BGEN file using 1 thread:
+|....................................................................................................|
+|====================================================================================================|
+
+Initializing HMM with user-supplied hyperparameters: rho = 1, lambda = 0.001.
+
+HMM parameters written to:
+  ./knockoffs/sim.knockoffs_hmm.txt
+
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res0_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res0_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 50000 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res0.bed
+  ./knockoffs/sim.knockoffs_res0.bim
+  ./knockoffs/sim.knockoffs_res0.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res0_anc.txt
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res1_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res1_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 5 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res1.bed
+  ./knockoffs/sim.knockoffs_res1.bim
+  ./knockoffs/sim.knockoffs_res1.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res1_anc.txt
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res2_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res2_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 5 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res2.bed
+  ./knockoffs/sim.knockoffs_res2.bim
+  ./knockoffs/sim.knockoffs_res2.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res2_anc.txt
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res3_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res3_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 5 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res3.bed
+  ./knockoffs/sim.knockoffs_res3.bim
+  ./knockoffs/sim.knockoffs_res3.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res3_anc.txt
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res4_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res4_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 5 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res4.bed
+  ./knockoffs/sim.knockoffs_res4.bim
+  ./knockoffs/sim.knockoffs_res4.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res4_anc.txt
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res5_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res5_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 5 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res5.bed
+  ./knockoffs/sim.knockoffs_res5.bim
+  ./knockoffs/sim.knockoffs_res5.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res5_anc.txt
+SNP groups written to:
+  ./knockoffs/sim.knockoffs_res6_grp.txt
+SNP windows written to:
+  ./knockoffs/sim.knockoffs_res6_windows.txt
+
+Generating unrelated knockoffs for chromosome 1 (4000 haplotypes; 50000 variants in 5 groups):
+|....................................................................................................|
+|====================================================================================================|
+
+
+Output (binary) written to:
+  ./knockoffs/sim.knockoffs_res6.bed
+  ./knockoffs/sim.knockoffs_res6.bim
+  ./knockoffs/sim.knockoffs_res6.fam
+Reconstructed ancestries written to:
+  ./knockoffs/sim.knockoffs_res6_anc.txt
+
+Finished.
+
+661.571222 seconds (141.40 k allocations: 9.255 MiB)
+
+
+
+
+
+Process(`[4m/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2[24m [4m--bgen[24m [4msim[24m [4m--keep[24m [4msamples_qc.txt[24m [4m--extract[24m [4mvariants_qc.txt[24m [4m--map[24m [4msim.map[24m [4m--part[24m [4msim.partition.txt[24m [4m--ibd[24m [4mrapid/results.max[24m [4m--K[24m [4m10[24m [4m--cluster_size_min[24m [4m1000[24m [4m--cluster_size_max[24m [4m10000[24m [4m--hmm-rho[24m [4m1[24m [4m--hmm-lambda[24m [4m0.001[24m [4m--windows[24m [4m0[24m [4m--n_threads[24m [4m1[24m [4m--seed[24m [4m2020[24m [4m--compute-references[24m [4m--generate-knockoffs[24m [4m--out[24m [4m./knockoffs/sim.knockoffs[24m`, ProcessExited(0))</code></pre><h2 id="Examine-Generated-Knockoffs"><a class="docs-heading-anchor" href="#Examine-Generated-Knockoffs">Examine Generated Knockoffs</a><a id="Examine-Generated-Knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Examine-Generated-Knockoffs" title="Permalink"></a></h2><p>The generated knockoffs are saved in binary PLINK format, we can import it using SnpArrays</p><pre><code class="language-julia hljs">x = SnpArray(&quot;knockoffs/sim.knockoffs_res0.bed&quot;)</code></pre><pre><code class="nohighlight hljs">2000×100000 SnpArray:
+ 0x02  0x02  0x02  0x02  0x02  0x02  …  0x02  0x02  0x02  0x02  0x02  0x02
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x02  0x02  0x00  0x02  0x02  0x02     0x00  0x00  0x03  0x03  0x03  0x03
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x00  0x00  0x00  0x02  0x02     0x00  0x00  0x00  0x02  0x02  0x02
+ 0x00  0x00  0x00  0x00  0x00  0x00  …  0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x00  0x02  0x00  0x02  0x02     0x02  0x02  0x00  0x02  0x02  0x00
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x00  0x00  0x02  0x00  0x00     0x02  0x02  0x02  0x02  0x03  0x03
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x02  0x02  0x02  0x02  0x02  0x02  …  0x02  0x02  0x03  0x03  0x03  0x03
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x02  0x02  0x02  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
+    ⋮                             ⋮  ⋱           ⋮                    
+ 0x02  0x00  0x03  0x03  0x00  0x02     0x00  0x00  0x00  0x00  0x02  0x02
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x02  0x03  0x03  0x02  0x02  …  0x02  0x02  0x03  0x02  0x03  0x03
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x02  0x00  0x02  0x02  0x02  0x02     0x00  0x02  0x00  0x02  0x02  0x02
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x02  0x02  0x02  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x00  0x00  0x00  0x00  0x00  0x00  …  0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x00  0x00  0x00  0x02  0x00     0x00  0x02  0x02  0x02  0x02  0x02
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x00  0x00  0x00  0x00  0x03     0x00  0x00  0x00  0x02  0x02  0x02
+ 0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00</code></pre><p>Notice there are 100k SNPs: the original 50k SNPs and their knockoffs. Reading the SNP names will tell us which are the originals:</p><pre><code class="language-julia hljs">snpid = SnpData(&quot;knockoffs/sim.knockoffs_res0&quot;).snp_info.snpid</code></pre><pre><code class="nohighlight hljs">100000-element Vector{String}:
+ &quot;snp1.k&quot;
+ &quot;snp1&quot;
+ &quot;snp2&quot;
+ &quot;snp2.k&quot;
+ &quot;snp3.k&quot;
+ &quot;snp3&quot;
+ &quot;snp4.k&quot;
+ &quot;snp4&quot;
+ &quot;snp5.k&quot;
+ &quot;snp5&quot;
+ &quot;snp6&quot;
+ &quot;snp6.k&quot;
+ &quot;snp7&quot;
+ ⋮
+ &quot;snp49995&quot;
+ &quot;snp49995.k&quot;
+ &quot;snp49996.k&quot;
+ &quot;snp49996&quot;
+ &quot;snp49997.k&quot;
+ &quot;snp49997&quot;
+ &quot;snp49998.k&quot;
+ &quot;snp49998&quot;
+ &quot;snp49999&quot;
+ &quot;snp49999.k&quot;
+ &quot;snp50000.k&quot;
+ &quot;snp50000&quot;</code></pre><h2 id="Step-3:-Model-selection-with-knockoffs"><a class="docs-heading-anchor" href="#Step-3:-Model-selection-with-knockoffs">Step 3: Model selection with knockoffs</a><a id="Step-3:-Model-selection-with-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Step-3:-Model-selection-with-knockoffs" title="Permalink"></a></h2><p>Tutorial for this part coming soon! Basically, one constructs a <code>SnpLinAlg</code>, feed that into <a href="https://github.com/OpenMendel/MendelIHT.jl">MendelIHT.jl</a>, and calculate knockoff statistics afterwards using built-in functions like <code>coefficient_diff</code> and <code>threshold</code>.</p><p><code>SnpLinAlg</code> performs compressed linear algebra (often faster than double precision BLAS) and <code>MendelIHT.jl</code> is a very efficient implementation of the iterative hard thresholding algorithm. For model selection, IHT is known to be superior to standard LASSO, elastic net, and MCP solvers. </p><pre><code class="language-julia hljs">xla = SnpLinAlg{Float64}(x, center=true, scale=true, impute=true)</code></pre><pre><code class="nohighlight hljs">2000×100000 SnpLinAlg{Float64}:
+  1.53523    1.40781    0.908525  …   0.892035   0.37139   0.376085
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+  1.53523    1.40781   -0.772373      2.56408    1.83356   1.83945
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+ -0.552097  -0.587668  -0.772373      0.892035   0.37139   0.376085
+ -0.552097  -0.587668  -0.772373  …  -0.780008  -1.09078  -1.08728
+ -0.552097  -0.587668   0.908525      0.892035   0.37139  -1.08728
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+ -0.552097  -0.587668  -0.772373      0.892035   1.83356   1.83945
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+  1.53523    1.40781    0.908525  …   2.56408    1.83356   1.83945
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+ -0.552097   1.40781    0.908525      0.892035   0.37139   0.376085
+  ⋮                               ⋱                       
+  1.53523   -0.587668   2.58942      -0.780008   0.37139   0.376085
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+ -0.552097   1.40781    2.58942   …   0.892035   1.83356   1.83945
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+  1.53523   -0.587668   0.908525      0.892035   0.37139   0.376085
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+ -0.552097   1.40781    0.908525      2.56408    1.83356   1.83945
+ -0.552097  -0.587668  -0.772373  …  -0.780008  -1.09078  -1.08728
+ -0.552097  -0.587668  -0.772373      0.892035   0.37139   0.376085
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728
+ -0.552097  -0.587668  -0.772373      0.892035   0.37139   0.376085
+ -0.552097  -0.587668  -0.772373     -0.780008  -1.09078  -1.08728</code></pre><pre><code class="language-julia hljs"></code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« Home</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.6 on <span class="colophon-date" title="Tuesday 26 October 2021 23:18">Tuesday 26 October 2021</span>. Using Julia version 1.6.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
