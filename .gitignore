@@ -5,3 +5,8 @@
 .ipynb_checkpoints/
 Manifest.toml
 *.DS_Store
+
+
+docs/src/man/rapid
+docs/src/man/sim*
+docs/src/man/*.txt

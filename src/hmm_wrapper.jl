@@ -13,7 +13,7 @@ function rapid(
     rapid_exe::AbstractString,
     vcffile::AbstractString,
     mapfile::AbstractString,
-    min_length::Int,
+    min_length::Number,
     outfolder::AbstractString,
     window_size::Int,
     r::Int,
