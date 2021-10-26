@@ -2,7 +2,7 @@
     threshold(w::AbstractVector, q::Number, method=:knockoff)
 
 Chooses a threshold τ > 0 by setting
-τ = min{ t > 0 : {#j: w[j] ≤ -t} / {#j: w[j] ≥ -t} ≤ q }.
+τ = min{ t > 0 : {#j: w[j] ≤ -t} / {#j: w[j] ≥ t} ≤ q }.
 
 # Inputs
 + `w`: Vector of feature important statistics
