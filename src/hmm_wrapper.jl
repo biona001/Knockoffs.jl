@@ -45,12 +45,11 @@ function rapid(
     args = String[]
     push!(args, "-i", vcffile)
     push!(args, "-g", mapfile)
-    push!(args, "-d", d)
+    push!(args, "-d", string(d))
     push!(args, "-o", outfolder)
-    push!(args, "-w", w)
-    push!(args, "-r", r)
-    push!(args, "-s", s)
-    push!(args, "-s", s)
+    push!(args, "-w", string(w))
+    push!(args, "-r", string(r))
+    push!(args, "-s", string(s))
     a && push!(args, "-a")
     cmd = `$rapid_exe $args`
     @info "RaPID command:\n$cmd\n"
