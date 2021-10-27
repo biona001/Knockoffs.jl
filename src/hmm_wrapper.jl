@@ -9,18 +9,53 @@ function partition(
     run(`Rscript --vanilla $rscriptPath $mapfile $bimfile $qc_variants $outfile`)
 end
 
+"""
+    rapid(rapid_exe, vcffile, mapfile, d, outfolder, w, r, s, [a])
+
+Wrapper for the RaPID program. 
+
+# Inputs
+- `rapid_exe`: Full path to the `RaPID_v.1.7` executable file
+- `vcffile`: Phased VCF file name
+- `mapfile`: Map file name
+- `d`: Actual Minimum IBD length in cM
+- `outfolder`: Output folder name
+- `w`: Number of SNPs in a window for sub-sampling
+- `r`: Number of runs
+- `s`: Minimum number of successes to consider a hit
+
+# Optional Inputs
+- `a`: If `true`, ignore MAFs. By default (`a=false`) the sites are selected at random weighted
+    by their MAFs.
+"""
 function rapid(
     rapid_exe::AbstractString,
     vcffile::AbstractString,
     mapfile::AbstractString,
-    min_length::Number,
+    d::Number,
     outfolder::AbstractString,
-    window_size::Int,
+    w::Int,
     r::Int,
-    s::Int
+    s::Int;
+    a::Bool = false
     )
+    d ≥ 0 || error("d must be ≥ 0 but was $d.")
+    s ≥ 0 || error("s must be ≥ 1 but was $s.")
     isdir(outfolder) || mkdir(outfolder)
-    run(`$rapid_exe -i $vcffile -g $mapfile -d $min_length -o $outfolder -w $window_size -r $r -s $s`)
+    args = String[]
+    push!(args, "-i", vcffile)
+    push!(args, "-g", mapfile)
+    push!(args, "-d", d)
+    push!(args, "-o", outfolder)
+    push!(args, "-w", w)
+    push!(args, "-r", r)
+    push!(args, "-s", s)
+    push!(args, "-s", s)
+    a && push!(args, "-a")
+    cmd = `$rapid_exe $args`
+    @info "RaPID command:\n$cmd\n"
+    @info "Output directory: $outfolder\n"
+    run(cmd)
 end
 
 function snpknock2(
@@ -62,7 +97,7 @@ function snpknock2(
     compute_references && push!(args, "--compute-references")
     generate_knockoffs && push!(args, "--generate-knockoffs")
     push!(args, "--out", "./knockoffs/$outfile")
-    cmd = pipeline(`$snpknock2_exe $args`)
+    cmd = `$snpknock2_exe $args`
     @info "snpknock2 command:\n$cmd\n"
     @info "Output directory: $(pwd() * "/knockoffs")\n"
     run(cmd)
