@@ -3,14 +3,15 @@
 
 This tutorial closely follows the [knockoffgwas tutorial](https://msesia.github.io/knockoffgwas/tutorial.html). We go over how to generate (SHAPEIT) HMM knockoffs given (simulated) genotypes. 
 
-    !!! note
+!!! note
+
     It is highly recommended to run this tutorial on linux machines, because RaPID (for detecting IBD segments) only run on linux. Currently users of windows and macOS machines must assume no IBD segments exist. 
 
 ## Installation
 
 1. Install [knockoffgwas](https://github.com/msesia/knockoffgwas) and its dependencies
 2. Install [qctools](https://www.well.ox.ac.uk/~gav/qctool_v2/documentation/download.html) for converting between VCF and BGEN formats
-3. Install [RaPID](https://github.com/ZhiGroup/RaPID) for detecting IBD segments
+3. Install [RaPID](https://github.com/ZhiGroup/RaPID) for detecting IBD segments (*this only run on linux*)
 4. Install the following Julia packages. Within julia, type
 ```julia
 ]add SnpArrays Distributions ProgressMeter MendelIHT VCFTools StatsBase CodecZlib
@@ -47,7 +48,7 @@ Our simulation will try to follow
 
 ### Population structure
 
-Specifically, lets simulate genotypes with 2 populations. We simulate 49950 normally differentiated markers and 50 unusually differentiated markers based on allele frequency difference equal to 0.6. Let $x_{ij}$ be the number of alternate allele count for sample $i$ at SNP $j$ with allele frequency $p_j$. Also let $h_{ij, 1}$ denotype haplotype 1 of sample $i$ at SNP $j$ and $h_{ij, 2}$ the second haplotype. Our simulation model is
+Specifically, lets simulate genotypes with 2 populations. We simulate 49700 normally differentiated markers and 300 unusually differentiated markers based on allele frequency difference equal to 0.6. Let $x_{ij}$ be the number of alternate allele count for sample $i$ at SNP $j$ with allele frequency $p_j$. Also let $h_{ij, 1}$ denotype haplotype 1 of sample $i$ at SNP $j$ and $h_{ij, 2}$ the second haplotype. Our simulation model is
 
 $$h_{ij, 1} \sim Bernoulli(p_j), \quad h_{ij, 2} \sim Bernoulli(p_j), \quad x_{ij} = h_{ij, 1} + h_{ij, 2}$$
 
@@ -63,9 +64,9 @@ for abnormally differentiated markers. Each sample is randomly assigned to popul
 
 ### Sibling pairs
 
-Based on the simulated data above, we can randomly sample pairs of individuals and have them produce offspring. Here, half of all offsprings will be siblings with the other half. This is done by first randomly sampling 2 samples from to represent parent. Assume they have 2 children. Then generate offspring individuals by copying segments of one parent haplotype directly to the corresponding haplotype of the offspring. This recombination event will produce IBD segments. The number of recombination is 1 or 2 per chromosome, and is chosen uniformly across the chromosome. 
+Based on the simulated data above, we can randomly sample pairs of individuals and have them produce offspring. Here, half of all offsprings will be siblings with the other half. This is done by first randomly sampling 2 person to represent parent. Assume they have 2 children. Then generate offspring individuals by copying segments of one parent haplotype directly to the corresponding haplotype of the offspring. This recombination event will produce IBD segments. The number of recombination is 1 or 2 per chromosome, and is chosen uniformly across the chromosome. 
 
-## Step 0
+## Step 0: simulate genotypes
 
 Load Julia packages needed for this tutorial
 
@@ -139,7 +140,7 @@ function simulate_pop_structure(n::Int, p::Int)
 end
 
 """
-    simulate_IBD(h1::AbstractMatrix, h2::AbstractMatrix, k::Int)
+    simulate_IBD(h1::BitMatrix, h2::BitMatrix, k::Int)
 
 Simulate recombination events. Parent haplotypes `h1` and `h2` will be used to generate 
 `k` children, then both parent and children haplotypes will be returned. 
@@ -163,8 +164,7 @@ recombination) is 1 or 2 per chromosome, and is chosen uniformly across the chro
 # References
 https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003520
 """
-function simulate_IBD(h1::AbstractMatrix, h2::AbstractMatrix, k::Int)
-    # first handle errors
+function simulate_IBD(h1::BitMatrix, h2::BitMatrix, k::Int)
     n, p = size(h1)
     iseven(k) || error("number of offsprings should be even")
     # randomly designate gender for parents
@@ -176,46 +176,23 @@ function simulate_IBD(h1::AbstractMatrix, h2::AbstractMatrix, k::Int)
     x2 = falses(k, p)
     fathers = Int[]
     mothers = Int[]
-    pmeter = Progress(k >> 1, 0.1, "Simulating IBD segments...")
-    for i in 1:(k >> 1)
+    pmeter = Progress(k, 0.1, "Simulating IBD segments...")
+    for i in 1:k
         # assign parents
         dad = rand(male_idx)
         mom = rand(female_idx)
         push!(fathers, dad)
         push!(mothers, mom)
-        # child 1
-        recombinations = rand(1:2)
-        breakpoints = sort!(sample(1:p, recombinations, replace=false))
-        parent1, parent2 = rand() < 0.5 ? (dad, mom) : (mom, dad)
-        segments = recombination_segments(breakpoints, p)
-        for j in 1:length(segments)
-            parent = isodd(j) ? parent1 : parent2
-            segment = segments[j]
-            # perform recombination
-            parent_hap = rand() < 0.5 ? h1 : h2
-            child_hap = rand() < 0.5 ? x1 : x2
-            copyto!(@view(child_hap[2i - 1, segment]), @view(parent_hap[parent, segment]))
-        end
-        # child 2
-        recombinations = rand(1:2)
-        breakpoints = sort!(sample(1:p, recombinations, replace=false))
-        parent1, parent2 = rand() < 0.5 ? (dad, mom) : (mom, dad)
-        segments = recombination_segments(breakpoints, p)
-        for j in 1:length(segments)
-            parent = isodd(j) ? parent1 : parent2
-            segment = segments[j]
-            # perform recombination
-            parent_hap = rand() < 0.5 ? h1 : h2
-            child_hap = rand() < 0.5 ? x1 : x2
-            copyto!(@view(child_hap[2i - 1, segment]), @view(parent_hap[parent, segment]))
-        end
+        # recombination
+        recombine!(@view(x1[i, :]), @view(x2[i, :]), @view(h1[dad, :]),
+                   @view(h2[dad, :]), @view(h1[mom, :]), @view(h2[mom, :]))
         # update progress
         next!(pmeter)
     end
     # combine offsprings and parents
     H1 = [h1; x1]
     H2 = [h2; x2]
-    return H1, H2
+    return H1, H2, fathers, mothers
 end
 
 function recombination_segments(breakpoints::Vector{Int}, snps::Int)
@@ -227,6 +204,19 @@ function recombination_segments(breakpoints::Vector{Int}, snps::Int)
     end
     push!(result, breakpoints[end]+1:snps)
     return result
+end
+
+function recombine!(child_h1, child_h2, dad_h1, dad_h2, mom_h1, mom_h2)
+    p = length(child_h1)
+    recombinations = rand(1:5)
+    breakpoints = sort!(sample(1:p, recombinations, replace=false))
+    segments = recombination_segments(breakpoints, p)
+    for segment in segments
+        dad_hap = rand() < 0.5 ? dad_h1 : dad_h2
+        mom_hap = rand() < 0.5 ? mom_h1 : mom_h2
+        copyto!(@view(child_h1[segment]), @view(dad_hap[segment]))
+        copyto!(@view(child_h2[segment]), @view(mom_hap[segment]))
+    end
 end
 
 function write_plink(outfile::AbstractString, x1::AbstractMatrix, x2::AbstractMatrix)
@@ -337,7 +327,7 @@ writedlm("populations.txt", populations)
 writedlm("diff_markers.txt", diff_markers)
 ```
 
-    [32mSimulating genotypes...100%|████████████████████████████| Time: 0:00:00[39m
+    [32mSimulating genotypes...100%|████████████████████████████| Time: 0:00:01[39m
     [32mWriting VCF...100%|█████████████████████████████████████| Time: 0:00:24[39m
 
 
@@ -383,13 +373,6 @@ partition(partition_exe, plinkfile, mapfile, qc_variants, outfile)
     Partitions written to: sim.partition.txt
 
 
-    Warning messages:
-    1: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
-    2: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
-    3: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
-    4: Quick-TRANSfer stage steps exceeded maximum (= 2500000) 
-
-
 
 
 
@@ -416,23 +399,23 @@ outfolder = "rapid"
 d = 3    # minimum IBD length in cM
 w = 3    # number of SNPs per window
 r = 10   # number of runs
-s = 9    # Minimum number of successes to consider a hit
+s = 2    # Minimum number of successes to consider a hit
 @time rapid(rapid_exe, vcffile, mapfile, d, outfolder, w, r, s)
 
 # unzip output file
 run(pipeline(`gunzip -c ./rapid/results.max.gz`, stdout="./rapid/results.max"))
 ```
 
-    Create sub-samples..
-    Done!
-     42.199697 seconds (2.98 k allocations: 151.328 KiB)
-
-
     ┌ Info: RaPID command:
-    │ `/scratch/users/bbchu/RaPID/RaPID_v.1.7 -i sim.phased.vcf.gz -g sim.rapid.map -d 3 -o rapid -w 3 -r 10 -s 9`
+    │ `/scratch/users/bbchu/RaPID/RaPID_v.1.7 -i sim.phased.vcf.gz -g sim.rapid.map -d 3 -o rapid -w 3 -r 10 -s 2`
     └ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/69ZxJ/src/hmm_wrapper.jl:55
     ┌ Info: Output directory: rapid
     └ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/69ZxJ/src/hmm_wrapper.jl:56
+
+
+    Create sub-samples..
+    Done!
+     43.120301 seconds (3.04 k allocations: 159.828 KiB)
 
 
 
@@ -450,28 +433,11 @@ countlines("./rapid/results.max") # d = 3, w = 3, r = 10, s = 9
 
 
 
-    6474
+    140
 
 
 
-We identified >6000 IBD segments! The first few lines of the output IBD file looks like
-
-
-```julia
-;head ./rapid/results.max
-```
-
-    1	54	2079	1	0	100	3406500	3.40637	0	34064
-    1	344	2053	1	1	100	3376200	3.37607	0	33761
-    1	373	2033	1	0	100	3303900	3.30377	0	33038
-    1	389	2081	0	1	100	4936200	4.9361	0	49361
-    1	400	2087	1	1	100	4923900	4.9238	0	49238
-    1	605	2039	0	0	100	3357600	3.35747	0	33575
-    1	606	2069	1	0	850900	5000000	4.14918	8508	49999
-    1	608	2057	1	0	100	3146400	3.14626	0	31463
-    1	616	2081	0	0	100	4072800	4.07268	0	40727
-    1	636	2029	0	1	967000	5000000	4.03308	9669	49999
-
+Here we identified 140 IBD segments. Because we only simulated 100 offsprings, and all 2000 parents are unrelated, the "IBD related families" are small. When there are too many segments, one might have to prune the IBD segments so that the families are not too connected. See [this issue](https://github.com/msesia/knockoffgwas/issues/3) for details. 
 
 where the column format is: 
 ```
@@ -485,21 +451,23 @@ Then we need to do some postprocessing to this output, as [described here](https
 process_rapid_output("./rapid/results.max", "sim.snpknock.ibdmap")
 ```
 
+The output looks like follows. The last 5 columns (site.start site.end cM FAM1 FAM2) are not actually currently used. They need to be there (the file should have 12 fields in total), but it doesn't matter what values you put in them.
+
 
 ```julia
 ;head sim.snpknock.ibdmap
 ```
 
     CHR ID1 HID1 ID2 HID2 BP.start BP.end site.start site.end cM FAM1 FAM2
-    1 54 1 2079 0 100 3406500 0 34064 3.40637 1 1
-    1 344 1 2053 1 100 3376200 0 33761 3.37607 1 1
-    1 373 1 2033 0 100 3303900 0 33038 3.30377 1 1
-    1 389 0 2081 1 100 4936200 0 49361 4.9361 1 1
-    1 400 1 2087 1 100 4923900 0 49238 4.9238 1 1
-    1 605 0 2039 0 100 3357600 0 33575 3.35747 1 1
-    1 606 1 2069 0 850900 5000000 8508 49999 4.14918 1 1
-    1 608 1 2057 0 100 3146400 0 31463 3.14626 1 1
-    1 616 0 2081 0 100 4072800 0 40727 4.07268 1 1
+    1 29 0 2053 0 100 5000000 0 49999 4.9999 1 1
+    1 64 0 2003 1 100 4712700 0 47126 4.71259 1 1
+    1 97 1 2051 0 100 5000000 0 49999 4.9999 1 1
+    1 99 1 2017 0 967300 5000000 9672 49999 4.03278 1 1
+    1 106 1 2024 1 100 4078800 0 40787 4.07868 1 1
+    1 151 1 2009 0 100 5000000 0 49999 4.9999 1 1
+    1 155 1 2069 0 100 5000000 0 49999 4.9999 1 1
+    1 163 1 2073 1 100 3309000 0 33089 3.30887 1 1
+    1 231 1 2080 1 1153000 5000000 11529 49999 3.84708 1 1
 
 
 Next convert VCF file to BGEN format (note: sample file must be saved separately)
@@ -520,7 +488,7 @@ make_bgen_samplefile("sim.sample", n + offsprings)
     
     (C) 2009-2017 University of Oxford
     
-    Opening genotype files                                      : [******************************] (1/1,0.0s,76.8/s)
+    Opening genotype files                                      : [******************************] (1/1,0.0s,32.2/s)
     ========================================================================
     
     Input SAMPLE file(s):         Output SAMPLE file:             "(n/a)".
@@ -538,7 +506,7 @@ make_bgen_samplefile("sim.sample", n + offsprings)
     
     ========================================================================
     
-    Processing SNPs                                             :  (50000/?,161.7s,309.2/s)
+    Processing SNPs                                             :  (50000/?,169.4s,295.2/s)60.3s,275.2/s)
     Total: 50000SNPs.
     ========================================================================
     
@@ -602,7 +570,7 @@ outfile = "sim.knockoffs"
       --extract variants_qc.txt
       --map sim.partition.map
       --part sim.partition.txt
-      --ibd sim.snpknock.map
+      --ibd sim.snpknock.ibdmap
       --K 10
       --cluster_size_min 1000
       --cluster_size_max 10000
@@ -619,6 +587,15 @@ outfile = "sim.knockoffs"
       --compute-references
       --generate_knockoffs
     
+
+
+    ┌ Info: snpknock2 command:
+    │ `/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2 --bgen sim --keep samples_qc.txt --extract variants_qc.txt --map sim.partition.map --part sim.partition.txt --ibd sim.snpknock.ibdmap --K 10 --cluster_size_min 1000 --cluster_size_max 10000 --hmm-rho 1 --hmm-lambda 0.001 --windows 0 --n_threads 1 --seed 2021 --compute-references --generate-knockoffs --out ./knockoffs/sim.knockoffs`
+    └ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/69ZxJ/src/hmm_wrapper.jl:100
+    ┌ Info: Output directory: /home/users/bbchu/hmm/knockoffs
+    └ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/69ZxJ/src/hmm_wrapper.jl:101
+
+
     
     --------------------------------------------------------------------------------
     Loading metadata
@@ -627,20 +604,11 @@ outfile = "sim.knockoffs"
       sim.sample
     Loading legend from:
       sim.bim
-
-
-    ┌ Info: snpknock2 command:
-    │ `/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2 --bgen sim --keep samples_qc.txt --extract variants_qc.txt --map sim.partition.map --part sim.partition.txt --ibd sim.snpknock.map --K 10 --cluster_size_min 1000 --cluster_size_max 10000 --hmm-rho 1 --hmm-lambda 0.001 --windows 0 --n_threads 1 --seed 2021 --compute-references --generate-knockoffs --out ./knockoffs/sim.knockoffs`
-    └ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/69ZxJ/src/hmm_wrapper.jl:100
-    ┌ Info: Output directory: /home/users/bbchu/hmm/knockoffs
-    └ @ Knockoffs /home/users/bbchu/.julia/packages/Knockoffs/69ZxJ/src/hmm_wrapper.jl:101
-
-
     Loading partitions from:
       sim.partition.txt
     Loading IBD segments from:
-      sim.snpknock.map
-    Loaded 21 IBD segments.
+      sim.snpknock.ibdmap
+    Loaded 140 IBD segments.
     
     Printing summary of 1 windows:
          0: 0--50000
@@ -649,7 +617,7 @@ outfile = "sim.knockoffs"
       number of SNPs (after | before filtering)    : 50000 | 50000
       number of variant partitions                 : 7
       size of genomic windows                      : whole-chromosome
-      number of IBD segments                       : 21
+      number of IBD segments                       : 140
     
     
     --------------------------------------------------------------------------------
@@ -728,11 +696,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res0_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 50000 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 50000 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 50000 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 50000 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -748,11 +716,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res1_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 738 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 738 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 738 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 738 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -768,11 +736,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res2_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 143 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 143 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 143 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 143 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -788,11 +756,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res3_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 72 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 72 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 72 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 72 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -808,11 +776,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res4_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 37 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 37 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 37 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 37 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -828,11 +796,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res5_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 15 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 15 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 15 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 15 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -848,11 +816,11 @@ outfile = "sim.knockoffs"
     SNP windows written to:
       ./knockoffs/sim.knockoffs_res6_windows.txt
     
-    Generating related knockoffs for chromosome 1 (42 haplotypes in 21 families, 50000 variants in 5 groups):
-    |.....................|
-    |=====================|
+    Generating related knockoffs for chromosome 1 (279 haplotypes in 139 families, 50000 variants in 5 groups):
+    |....................................................................................................|
+    |====================================================================================================|
     
-    Generating unrelated knockoffs for chromosome 1 (4158 haplotypes; 50000 variants in 5 groups):
+    Generating unrelated knockoffs for chromosome 1 (3921 haplotypes; 50000 variants in 5 groups):
     |....................................................................................................|
     |====================================================================================================|
     
@@ -866,13 +834,13 @@ outfile = "sim.knockoffs"
     
     Finished.
     
-    842.037610 seconds (921.59 k allocations: 53.340 MiB, 0.00% gc time, 0.06% compilation time)
+    1484.517148 seconds (409.38 k allocations: 24.636 MiB, 0.01% compilation time)
 
 
 
 
 
-    Process(`[4m/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2[24m [4m--bgen[24m [4msim[24m [4m--keep[24m [4msamples_qc.txt[24m [4m--extract[24m [4mvariants_qc.txt[24m [4m--map[24m [4msim.partition.map[24m [4m--part[24m [4msim.partition.txt[24m [4m--ibd[24m [4msim.snpknock.map[24m [4m--K[24m [4m10[24m [4m--cluster_size_min[24m [4m1000[24m [4m--cluster_size_max[24m [4m10000[24m [4m--hmm-rho[24m [4m1[24m [4m--hmm-lambda[24m [4m0.001[24m [4m--windows[24m [4m0[24m [4m--n_threads[24m [4m1[24m [4m--seed[24m [4m2021[24m [4m--compute-references[24m [4m--generate-knockoffs[24m [4m--out[24m [4m./knockoffs/sim.knockoffs[24m`, ProcessExited(0))
+    Process(`[4m/scratch/users/bbchu/knockoffgwas/snpknock2/bin/snpknock2[24m [4m--bgen[24m [4msim[24m [4m--keep[24m [4msamples_qc.txt[24m [4m--extract[24m [4mvariants_qc.txt[24m [4m--map[24m [4msim.partition.map[24m [4m--part[24m [4msim.partition.txt[24m [4m--ibd[24m [4msim.snpknock.ibdmap[24m [4m--K[24m [4m10[24m [4m--cluster_size_min[24m [4m1000[24m [4m--cluster_size_max[24m [4m10000[24m [4m--hmm-rho[24m [4m1[24m [4m--hmm-lambda[24m [4m0.001[24m [4m--windows[24m [4m0[24m [4m--n_threads[24m [4m1[24m [4m--seed[24m [4m2021[24m [4m--compute-references[24m [4m--generate-knockoffs[24m [4m--out[24m [4m./knockoffs/sim.knockoffs[24m`, ProcessExited(0))
 
 
 
@@ -889,32 +857,32 @@ x = SnpArray("knockoffs/sim.knockoffs_res0.bed")
 
 
     2100×100000 SnpArray:
-     0x02  0x03  0x02  0x02  0x03  0x03  …  0x02  0x02  0x02  0x03  0x03  0x03
+     0x03  0x03  0x02  0x02  0x03  0x03  …  0x02  0x02  0x02  0x03  0x03  0x03
      0x02  0x02  0x03  0x03  0x00  0x02     0x02  0x02  0x03  0x03  0x02  0x03
      0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x02  0x02  0x03  0x03
-     0x00  0x03  0x02  0x02  0x02  0x02     0x02  0x02  0x03  0x03  0x03  0x03
+     0x00  0x03  0x02  0x02  0x02  0x02     0x03  0x02  0x03  0x03  0x03  0x03
      0x03  0x03  0x00  0x00  0x03  0x02     0x02  0x02  0x03  0x03  0x03  0x03
-     0x00  0x02  0x02  0x02  0x02  0x02  …  0x03  0x03  0x03  0x02  0x03  0x03
-     0x02  0x00  0x00  0x02  0x02  0x02     0x03  0x00  0x02  0x02  0x03  0x03
-     0x02  0x02  0x02  0x02  0x00  0x02     0x02  0x02  0x02  0x02  0x03  0x03
+     0x02  0x02  0x02  0x02  0x02  0x02  …  0x03  0x03  0x03  0x02  0x03  0x03
+     0x02  0x00  0x00  0x00  0x02  0x02     0x03  0x00  0x02  0x02  0x03  0x03
+     0x02  0x02  0x02  0x02  0x00  0x02     0x02  0x02  0x02  0x03  0x03  0x03
      0x02  0x03  0x02  0x02  0x03  0x03     0x02  0x02  0x02  0x00  0x03  0x03
-     0x03  0x02  0x02  0x02  0x02  0x00     0x02  0x02  0x02  0x02  0x03  0x03
-     0x02  0x00  0x02  0x03  0x02  0x03  …  0x02  0x02  0x02  0x00  0x03  0x03
+     0x02  0x02  0x02  0x02  0x02  0x00     0x02  0x02  0x02  0x02  0x03  0x03
+     0x03  0x00  0x02  0x03  0x02  0x03  …  0x02  0x02  0x02  0x02  0x03  0x03
      0x00  0x03  0x03  0x02  0x02  0x02     0x03  0x03  0x02  0x02  0x03  0x03
-     0x00  0x02  0x03  0x03  0x03  0x03     0x00  0x02  0x02  0x02  0x03  0x03
+     0x02  0x02  0x03  0x03  0x03  0x03     0x00  0x02  0x02  0x02  0x03  0x03
         ⋮                             ⋮  ⋱           ⋮                    
-     0x00  0x00  0x00  0x00  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
-     0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
-     0x03  0x02  0x03  0x03  0x02  0x00  …  0x02  0x02  0x02  0x02  0x02  0x02
-     0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
-     0x00  0x00  0x02  0x02  0x00  0x00     0x03  0x03  0x03  0x03  0x03  0x03
-     0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
-     0x02  0x00  0x00  0x00  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
-     0x00  0x00  0x00  0x00  0x00  0x00  …  0x00  0x00  0x00  0x00  0x00  0x00
-     0x00  0x00  0x00  0x00  0x00  0x00     0x02  0x02  0x02  0x02  0x02  0x02
-     0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
-     0x00  0x02  0x02  0x02  0x02  0x02     0x00  0x00  0x02  0x02  0x02  0x02
-     0x00  0x00  0x00  0x00  0x00  0x00     0x00  0x00  0x00  0x00  0x00  0x00
+     0x00  0x00  0x03  0x03  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+     0x00  0x02  0x03  0x03  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+     0x00  0x02  0x03  0x03  0x02  0x02  …  0x00  0x00  0x02  0x00  0x03  0x03
+     0x00  0x00  0x02  0x02  0x03  0x03     0x02  0x02  0x03  0x03  0x03  0x03
+     0x00  0x02  0x03  0x03  0x02  0x02     0x00  0x00  0x02  0x02  0x03  0x03
+     0x00  0x00  0x02  0x02  0x03  0x02     0x03  0x03  0x02  0x02  0x03  0x03
+     0x02  0x03  0x02  0x00  0x03  0x02     0x03  0x03  0x00  0x00  0x03  0x03
+     0x03  0x02  0x03  0x00  0x03  0x03  …  0x02  0x02  0x02  0x02  0x03  0x03
+     0x03  0x03  0x02  0x02  0x03  0x03     0x02  0x02  0x03  0x03  0x02  0x02
+     0x03  0x00  0x00  0x00  0x02  0x02     0x02  0x02  0x03  0x03  0x03  0x03
+     0x00  0x03  0x03  0x02  0x02  0x02     0x00  0x00  0x00  0x00  0x03  0x03
+     0x02  0x00  0x00  0x00  0x02  0x02     0x02  0x02  0x02  0x02  0x03  0x03
 
 
 
@@ -962,7 +930,8 @@ snpid = SnpData("knockoffs/sim.knockoffs_res0").snp_info.snpid
 
 Tutorial for this part coming soon! Basically, one constructs a `SnpLinAlg`, feed that into [MendelIHT.jl](https://github.com/OpenMendel/MendelIHT.jl), and calculate knockoff statistics afterwards using built-in functions like `coefficient_diff` and `threshold`.
 
-`SnpLinAlg` performs compressed linear algebra (often faster than double precision BLAS) and `MendelIHT.jl` is a very efficient implementation of the iterative hard thresholding algorithm. For model selection, IHT is known to be superior to standard LASSO, elastic net, and MCP solvers. 
++ `SnpLinAlg` performs compressed linear algebra (often faster than double precision BLAS)
++ `MendelIHT.jl` is a very efficient implementation of the iterative hard thresholding algorithm. For model selection, IHT is known to be superior to standard LASSO, elastic net, and MCP solvers. 
 
 
 ```julia
@@ -973,32 +942,32 @@ xla = SnpLinAlg{Float64}(x, center=true, scale=true, impute=true)
 
 
     2100×100000 SnpLinAlg{Float64}:
-      0.345218   1.73033   -0.261617  …   1.25296    0.257722   0.278685
-      0.345218   0.287244   1.17659       1.25296   -3.75129    0.278685
-      0.345218   0.287244  -0.261617     -0.171629   0.257722   0.278685
-     -1.11052    1.73033   -0.261617      1.25296    0.257722   0.278685
-      1.80096    1.73033   -1.69983       1.25296    0.257722   0.278685
-     -1.11052    0.287244  -0.261617  …  -0.171629   0.257722   0.278685
-      0.345218  -1.15585   -1.69983      -0.171629   0.257722   0.278685
-      0.345218   0.287244  -0.261617     -0.171629   0.257722   0.278685
-      0.345218   1.73033   -0.261617     -1.59622    0.257722   0.278685
-      1.80096    0.287244  -0.261617     -0.171629   0.257722   0.278685
-      0.345218  -1.15585   -0.261617  …  -1.59622    0.257722   0.278685
-     -1.11052    1.73033    1.17659      -0.171629   0.257722   0.278685
-     -1.11052    0.287244   1.17659      -0.171629   0.257722   0.278685
-      ⋮                               ⋱                        
-     -1.11052   -1.15585   -1.69983      -0.171629  -3.75129   -3.44894
-     -1.11052   -1.15585   -1.69983      -1.59622   -7.7603    -7.17657
-      1.80096    0.287244   1.17659   …  -0.171629  -3.75129   -3.44894
-     -1.11052   -1.15585   -1.69983      -1.59622   -7.7603    -7.17657
-     -1.11052   -1.15585   -0.261617      1.25296    0.257722   0.278685
-     -1.11052   -1.15585   -1.69983      -1.59622   -7.7603    -7.17657
-      0.345218  -1.15585   -1.69983      -0.171629  -3.75129   -3.44894
-     -1.11052   -1.15585   -1.69983   …  -1.59622   -7.7603    -7.17657
-     -1.11052   -1.15585   -1.69983      -0.171629  -3.75129   -3.44894
-     -1.11052   -1.15585   -1.69983      -1.59622   -7.7603    -7.17657
-     -1.11052    0.287244  -0.261617     -0.171629  -3.75129   -3.44894
-     -1.11052   -1.15585   -1.69983      -1.59622   -7.7603    -7.17657
+      1.76602    1.68237   -0.311698  …   1.20757    0.0817861   0.12776
+      0.316766   0.246784   1.13646       1.20757  -12.1861      0.12776
+      0.316766   0.246784  -0.311698     -0.22433    0.0817861   0.12776
+     -1.13249    1.68237   -0.311698      1.20757    0.0817861   0.12776
+      1.76602    1.68237   -1.75985       1.20757    0.0817861   0.12776
+      0.316766   0.246784  -0.311698  …  -0.22433    0.0817861   0.12776
+      0.316766  -1.1888    -1.75985      -0.22433    0.0817861   0.12776
+      0.316766   0.246784  -0.311698      1.20757    0.0817861   0.12776
+      0.316766   1.68237   -0.311698     -1.65623    0.0817861   0.12776
+      0.316766   0.246784  -0.311698     -0.22433    0.0817861   0.12776
+      1.76602   -1.1888    -0.311698  …  -0.22433    0.0817861   0.12776
+     -1.13249    1.68237    1.13646      -0.22433    0.0817861   0.12776
+      0.316766   0.246784   1.13646      -0.22433    0.0817861   0.12776
+      ⋮                               ⋱                         
+     -1.13249   -1.1888     1.13646       1.20757    0.0817861   0.12776
+     -1.13249    0.246784   1.13646       1.20757    0.0817861   0.12776
+     -1.13249    0.246784   1.13646   …  -1.65623    0.0817861   0.12776
+     -1.13249   -1.1888    -0.311698      1.20757    0.0817861   0.12776
+     -1.13249    0.246784   1.13646      -0.22433    0.0817861   0.12776
+     -1.13249   -1.1888    -0.311698     -0.22433    0.0817861   0.12776
+      0.316766   1.68237   -0.311698     -1.65623    0.0817861   0.12776
+      1.76602    0.246784   1.13646   …  -0.22433    0.0817861   0.12776
+      1.76602    1.68237   -0.311698      1.20757  -12.1861     -7.7633
+      1.76602   -1.1888    -1.75985       1.20757    0.0817861   0.12776
+     -1.13249    1.68237    1.13646      -1.65623    0.0817861   0.12776
+      0.316766  -1.1888    -1.75985      -0.22433    0.0817861   0.12776
 
 
 
