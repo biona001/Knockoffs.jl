@@ -70,20 +70,20 @@ function simulate_pop_structure(n::Int, p::Int)
 end
 
 """
-    simulate_IBD(h1::BitMatrix, h2::BitMatrix, k::Int)
+    simulate_IBD(h1::BitMatrix, h2::BitMatrix, populations::Vector{Int}, k::Int)
 
 Simulate recombination events. Parent haplotypes `h1` and `h2` will be used to generate 
 `k` children, then both parent and children haplotypes will be returned. 
 
-In offspring simulation, half of all offsprings will be siblings with the other half.
-This is done by first randomly sampling 2 samples from to represent parent. Assume they have
-2 children. Then generate offspring individuals by copying segments of the parents haplotype
+In offspring simulation, we first randomly sample 2 parents from the same population. 
+Then generate offspring individuals by copying segments of the parents haplotype
 directly to the offspring to represent IBD segments. The number of segments (i.e. places of
-recombination) is 1 or 2 per chromosome, and is chosen uniformly across the chromosome. 
+recombination) is 1 to 5 per sample chosen uniformly across all SNPs. 
 
 # Inputs
 - `h1`: `n × p` matrix of the 1st haplotype for each parent. Each row is a haplotype
 - `h2`: `n × p` matrix of the 2nd haplotype for each parent. `H = h1 + h2`
+- `populations`: `populations[i]` is the population (represented as integer) of sample `i`. 
 - `k`: Total number of offsprings
 
 # Output
@@ -94,9 +94,9 @@ recombination) is 1 or 2 per chromosome, and is chosen uniformly across the chro
 # References
 https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003520
 """
-function simulate_IBD(h1::BitMatrix, h2::BitMatrix, k::Int)
+function simulate_IBD(h1::BitMatrix, h2::BitMatrix, populations::Vector{Int}, k::Int)
     n, p = size(h1)
-    iseven(k) || error("number of offsprings should be even")
+    unique_populations = unique(populations)
     # randomly designate gender for parents
     sex = bitrand(n)
     male_idx = findall(x -> x == true, sex)
@@ -108,9 +108,13 @@ function simulate_IBD(h1::BitMatrix, h2::BitMatrix, k::Int)
     mothers = Int[]
     pmeter = Progress(k, 0.1, "Simulating IBD segments...")
     for i in 1:k
-        # assign parents
+        # assign parents (mom has to be from same population as dad)
         dad = rand(male_idx)
-        mom = rand(female_idx)
+        mom = 0
+        while true
+            mom = rand(female_idx)
+            populations[mom] == populations[dad] && break
+        end
         push!(fathers, dad)
         push!(mothers, mom)
         # recombination
@@ -228,7 +232,7 @@ function simulate_genotypes(n, p, offsprings, seed)
     h1, h2, populations, diff_markers = simulate_pop_structure(n, p)
 
     # simulate random mating to get IBD segments
-    x1, x2 = simulate_IBD(h1, h2, offsprings)
+    x1, x2 = simulate_IBD(h1, h2, populations, offsprings)
 
     # write phased genotypes to VCF format
     write_vcf("sim.phased.vcf.gz", x1, x2)
@@ -298,23 +302,31 @@ function make_knockoffs(n, p, offsprings, seed)
         seed, compute_references, generate_knockoffs, outfile)
 end
 
+# there is 100 causal snps, 50 on normally differentiated SNPs and 50 on abnormally diff snps
 function simulate_beta_and_y(x::AbstractMatrix, diff_markers, seed)
     n, p = size(x)
     Random.seed!(seed)
-    k = 100  # number of causal SNPs
     h2 = 0.5 # heritability
+    k = 100 # number of causal snps
     d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
     # simulate β
     β = zeros(p)
-    β[1:k>>1] .= rand(d, k>>1)
+    norm_markers = setdiff(1:p, diff_markers)
+    norm_causal_snps = sample(norm_markers, k >> 1, replace=false)
+    β[norm_causal_snps] .= rand(d, k >> 1)
     shuffle!(diff_markers)
-    β[diff_markers[1:50]] .= rand(d, k>>1)
-    shuffle!(β)
+    diff_causal_markers = diff_markers[1:k >> 1]
+    β[diff_causal_markers] .= rand(d, k >> 1)
     # simulate y
     ϵ = Normal(0, 1 - h2)
     y = x * β + rand(ϵ, n)
+    # save results
     writedlm("y_true.txt", y)
     writedlm("beta_true.txt", β)
+    writedlm("normal_markers.txt", norm_markers)
+    writedlm("normal_causal_markers.txt", norm_causal_snps)
+    writedlm("diff_markers.txt", diff_markers)
+    writedlm("diff_causal_markers.txt", diff_causal_markers)
     return y, β
 end
 
@@ -422,8 +434,7 @@ function one_simulation(n, p, offsprings, seed)
     make_knockoffs(n, p, offsprings, seed)
     
     # loop over group resolution
-#     for group in 0:3
-    for group in 0
+    for group in 0:3
         x = SnpArray(data_dir * "knockoffs/sim.knockoffs_res$(group).bed")
         snpid = SnpData(data_dir * "knockoffs/sim.knockoffs_res$(group)").snp_info.snpid
         knockoff_idx = endswith.(snpid, ".k")
@@ -438,10 +449,9 @@ function one_simulation(n, p, offsprings, seed)
         isdir(group_dir) || mkdir(group_dir)
         cd(group_dir)
 
-#         for fdr in [0.05, 0.1, 0.25, 0.5]
-        for fdr in 0.1
-            top_dir = group_dir * "/fdr$fdr/"
-            new_dir = group_dir * "/fdr$fdr/sim$seed"
+        for fdr in [0.05, 0.1, 0.25, 0.5]
+            top_dir = group_dir * "fdr$fdr/"
+            new_dir = group_dir * "fdr$fdr/sim$seed"
             isdir(top_dir) || mkdir(top_dir)
             isdir(new_dir) || mkdir(new_dir)
             cd(new_dir)
@@ -449,6 +459,7 @@ function one_simulation(n, p, offsprings, seed)
             #
             # simulate beta and y
             #
+            Random.seed!(seed)
             y, β = simulate_beta_and_y(xla, diff_markers, seed)
             
             #
@@ -466,7 +477,8 @@ function one_simulation(n, p, offsprings, seed)
             Random.seed!(seed)
             result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
             @show result
-            writedlm("iht.beta", result.beta)
+            β_iht = result.beta
+            writedlm("iht.beta", β_iht)
             GC.gc()
             
             #
@@ -474,7 +486,8 @@ function one_simulation(n, p, offsprings, seed)
             #
             Random.seed!(seed)
             cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
-            writedlm("lasso.beta", GLMNet.coef(cv))
+            β_lasso = GLMNet.coef(cv)
+            writedlm("lasso.beta", β_lasso)
 
             #
             # run knockoff IHT 
@@ -492,7 +505,9 @@ function one_simulation(n, p, offsprings, seed)
             result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)],
                 init_beta=true, max_iter=500)
             @show result
+            β_iht_knockoff = extract_beta(result.beta, fdr, groups, original, knockoff)
             writedlm("iht.knockoff.beta", result.beta)
+            writedlm("iht.knockoff.postfilter.beta", β_iht_knockoff)
 
             #
             # run knockoff IHT with wrapped cross validation
@@ -513,24 +528,24 @@ function one_simulation(n, p, offsprings, seed)
             Random.seed!(seed)
             best_k = dense_path[argmin(mses_new)]
             best_β = tune_k(y, xko_la, original, knockoff, groups, fdr, best_k)
+            β_iht_knockoff_cv = extract_beta(best_β, fdr, groups, original, knockoff)
             writedlm("iht.knockoff.cv.beta", best_β)
+            writedlm("iht.knockoff.cv.postfilter.beta", β_iht_knockoff_cv)
             
             #
             # Run knockoff lasso
             #
             Random.seed!(seed)
             cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
+            β_lasso_knockoff = extract_beta(GLMNet.coef(cv), fdr, groups, original, knockoff)
             writedlm("lasso.knockoff.beta", GLMNet.coef(cv))
+            writedlm("lasso.knockoff.postfilter.beta", β_lasso_knockoff)
 
             #
             # process results
             #
-            β_iht = vec(readdlm("iht.beta"))
-            β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), fdr, groups, original, knockoff)
-            β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")), fdr, groups, original, knockoff)
-            β_lasso = vec(readdlm("lasso.beta"))
-            β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")), fdr, groups, original, knockoff)
             summarize_result(groups[original], β, β_iht, β_iht_knockoff, β_iht_knockoff_cv, β_lasso, β_lasso_knockoff)
+            GC.gc()
         end
         GC.gc()
     end
@@ -538,6 +553,6 @@ end
 
 n = 5000
 p = 50000
-offsprings = 100
-seed = 2021
+offsprings = 500
+seed = parse(Int, ARGS[1])
 one_simulation(n, p, offsprings, seed)
