@@ -155,8 +155,8 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     p = length(β̂_knockoff) >> 1
-    length(original) == length(knockoff) == p || error("Length of " * 
-        "β should be twice of original and knockoff.")
+    # length(original) == length(knockoff) == p || error("Length of " * 
+    #     "β should be twice of original and knockoff.")
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, method)
     τ = threshold(W, fdr)
@@ -183,8 +183,8 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     # first handle errors
     p = length(β̂_knockoff) >> 1
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    length(original) == length(knockoff) == p || error("Length of " * 
-        "β should be twice of original and knockoff.")
+    # length(original) == length(knockoff) == p || error("Length of " * 
+    #     "β should be twice of original and knockoff.")
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, original, knockoff)
     τ = threshold(W, fdr, method)
@@ -209,10 +209,10 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     # first handle errors
     p = length(β̂_knockoff) >> 1
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    length(β̂_knockoff) == length(groups) ||
-        error("β̂_knockoff should have same length as groups")
-    length(original) == length(knockoff) == p ||
-        error("Length of β should be twice of original and knockoff.")
+    # length(β̂_knockoff) == length(groups) ||
+    #     error("β̂_knockoff should have same length as groups")
+    # length(original) == length(knockoff) == p ||
+    #     error("Length of β should be twice of original and knockoff.")
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     τ = threshold(W, fdr, method)
