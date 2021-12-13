@@ -11,6 +11,21 @@ using Printf
 f = "sim1/summary.txt"
 df = CSV.read(f, DataFrame)
 
+# check cross validation result is the same for every run
+# for fdr in [0.05, 0.1, 0.25, 0.5], sim in 1:100
+#     f = "/scratch/users/bbchu/ukb/prs/Radj20_K50_s0/fdr$fdr/sim$sim/summary.txt"
+#     g = "/scratch/users/bbchu/ukb/prs/Radj20_K50_s0/fdr$fdr/sim$sim/summary.txt"
+#     if isfile(f) && isfile(g)
+#         df = CSV.read(f, DataFrame)
+#         dg = CSV.read(g, DataFrame)
+#         if !all(df[!, 2] .≈ df[!, 2])
+#             println("sim $sim fdr $fdr failed!")
+#             println(df[!, 2])
+#             println(dg[!, 2])
+#         end
+#     end
+# end
+
 # all results
 df_sum = zeros(16, 5)
 successes = 0
@@ -18,7 +33,9 @@ for sim in 1:100
     f = "sim$sim/summary.txt"
     if isfile(f)
         df = CSV.read(f, DataFrame)
-        df_sum += Matrix{Float64}(df[:, 2:end])
+        m = Matrix{Float64}(df[:, 2:end])
+        any(isnan.(m)) && continue
+        df_sum += m
         successes += 1
     else
         @warn "sim $sim failed!"

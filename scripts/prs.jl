@@ -12,20 +12,36 @@ using CSV
 using Printf
 BLAS.set_num_threads(1)
 
+# predict with estimated β̂ (R2 = 1 - RSS/TSS)
 function R2(X::AbstractMatrix, y::AbstractVector, β̂::AbstractVector)
     μ = y - X * β̂
     tss = y .- mean(y)
     return 1 - dot(μ, μ) / dot(tss, tss)
 end
+
+# predict with a low dimensional fit
+function R2(Xtrain, Xtest, ytrain, ytest, β̂)
+    # fit low dimensional model on original data
+    idx = findall(!iszero, β̂)
+    β_new = zeros(length(β̂))
+    β_new[idx] .= Xtrain[:, idx] \ ytrain
+    # predict with low diemensional model on new data
+    μ = ytest - Xtest * β_new
+    t = ytest .- mean(ytest)
+    return 1 - dot(μ, μ) / dot(t, t)
+end
+
 function TP(correct_snps, signif_snps)
     return length(signif_snps ∩ correct_snps) / length(correct_snps)
 end
-function FDR(correct_snps, signif_snps)
-    FP = length(signif_snps) - length(signif_snps ∩ correct_snps) # number of false positives
+
+function FDR(correct_groups, signif_groups)
+    FP = length(signif_groups) - length(signif_groups ∩ correct_groups) # number of false positives
     # FPR = FP / (FP + TN) # https://en.wikipedia.org/wiki/False_positive_rate#Definition
-    FDR = FP / length(signif_snps)
-    return FDR
+    FDR = FP / length(signif_groups)
+    return length(signif_groups) == 0 ? 0 : FDR
 end
+
 function tune_k(y::AbstractVector, xko_la::AbstractMatrix, original::Vector{Int},
     knockoff::Vector{Int}, fdr::Float64, best_k::Int
     )
@@ -68,6 +84,7 @@ end
 #     return result.beta
 # end
 
+# todo: use_PCA and bolt
 function run_sims(seed::Int; combine_beta=false, extra_k = 0)
     #
     # import data
@@ -83,72 +100,110 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
     knockoff = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.knockoff.snp.index", Int))
     cur_dir = pwd()
 
+    #
+    # simulate phenotypes using UKB chr10 subset
+    #
+    n, p = size(x)
+    # simulate β
+    Random.seed!(seed)
+    k = 100 # number of causal SNPs
+    h2 = 0.5 # heritability
+    d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
+    β = zeros(p)
+    β[1:k] .= rand(d, k)
+    shuffle!(β)
+    # simulate y
+    ϵ = Normal(0, 1 - h2)
+    y = xla * β + rand(ϵ, n)
+
+    #
+    # Run standard IHT
+    #
+    Random.seed!(seed)
+    path = 10:10:200
+    mses = cv_iht(y, xla, path=path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    k_rough_guess = path[argmin(mses)]
+    dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
+    mses_new = cv_iht(y, xla, path=dense_path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    iht_result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
+    @show iht_result
+    GC.gc()
+
+    #
+    # Run standard lasso
+    #
+    Random.seed!(seed)
+    lasso_cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
+
+    #
+    # run knockoff IHT 
+    #
+    Random.seed!(seed)
+    path = 10:10:200
+    mses = cv_iht(y, xko_la, path=path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    k_rough_guess = path[argmin(mses)]
+    dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
+    mses_new = cv_iht(y, xko_la, path=dense_path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    iht_ko_result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)]+extra_k,
+        init_beta=true, max_iter=500)
+    @show iht_ko_result
+
+    #
+    # Run knockoff lasso
+    #
+    Random.seed!(seed)
+    lasso_ko_cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
+
+    #
+    # Run bolt lmm (need to make covariate and phenotype file first)
+    #
+    # bedfile = data_dir * "train"
+    # covfile = "cov_bolt.txt"
+    # phefile = "y_bolt.txt"
+    # outfile = "bolt_output.txt"
+    # open(phefile, "w") do io
+    #     println(io, "FID IID trait1") 
+    #     for i in 1:size(xla, 1)
+    #         println(io, "$i 1 $(ytrain[i])") 
+    #     end
+    # end
+    # if use_PCA
+    #     open(covfile, "w") do io
+    #         println(io, "FID IID PC1 PC2 PC3 PC4 PC5") 
+    #         for i in 1:size(xla, 1)
+    #             println(io, "$i 1 ", z[i, 1], ' ', z[i, 2], ' ',  z[i, 3], ' ', z[i, 4], ' ', z[i, 5]) 
+    #         end
+    #     end
+    #     run(`$bolt_exe --bfile=$bedfile --covarFile=$covfile 
+    #         --phenoFile=$phefile --phenoCol=trait1 
+    #         --qCovarCol=PC\{1:5\} --lmmInfOnly --numLeaveOutChunks=2 --statsFile $outfile`)
+    # else
+    #     run(`$bolt_exe --bfile=$bedfile --phenoFile=$phefile --phenoCol=trait1 
+    #         --lmmInfOnly --numLeaveOutChunks=2 --statsFile $outfile`)
+    # end
+
     for fdr in [0.05, 0.1, 0.25, 0.5]
         top_dir = cur_dir * "/fdr$fdr/"
         new_dir = cur_dir * "/fdr$fdr/sim$seed"
         isdir(top_dir) || mkdir(top_dir)
         isdir(new_dir) || mkdir(new_dir)
         cd(new_dir)
-        #
-        # simulate phenotypes using UKB chr10 subset
-        #
-        n, p = size(x)
-        # simulate β
-        Random.seed!(seed)
-        k = 100 # number of causal SNPs
-        h2 = 0.5 # heritability
-        d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
-        β = zeros(p)
-        β[1:k] .= rand(d, k)
-        shuffle!(β)
-        # simulate y
-        ϵ = Normal(0, 1 - h2)
-        y = xla * β + rand(ϵ, n)
         writedlm("y_true.txt", y)
         writedlm("beta_true.txt", β)
 
-        #
-        # Run standard IHT
-        #
-        Random.seed!(seed)
-        path = 10:10:200
-        mses = cv_iht(y, xla, path=path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        k_rough_guess = path[argmin(mses)]
-        dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht(y, xla, path=dense_path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
-        @show result
-        writedlm("iht.beta", result.beta)
-        GC.gc()
-
-        #
-        # Run standard lasso
-        #
-        Random.seed!(seed)
-        cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
-        writedlm("lasso.beta", coef(cv))
-
-        #
-        # run knockoff IHT 
-        #
-        Random.seed!(seed)
-        path = 10:10:200
-        mses = cv_iht(y, xko_la, path=path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        k_rough_guess = path[argmin(mses)]
-        dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht(y, xko_la, path=dense_path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)]+extra_k,
-            init_beta=true, max_iter=500)
-        @show result
-        writedlm("iht.knockoff.beta", result.beta)
+        # save IHT, lasso, iht+knockoff, lasso+knockoff results
+        writedlm("iht.beta", iht_result.beta)
+        writedlm("lasso.beta", coef(lasso_cv))
+        writedlm("iht.knockoff.beta", iht_ko_result.beta)
+        writedlm("lasso.knockoff.beta", coef(lasso_ko_cv))
 
         #
         # run knockoff IHT with wrapped cross validation
@@ -173,13 +228,6 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
         writedlm("iht.knockoff.cv.beta", best_β)
 
         #
-        # Run knockoff lasso
-        #
-        Random.seed!(seed)
-        cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
-        writedlm("lasso.knockoff.beta", coef(cv))
-
-        #
         # compare R2 across populations, save result in a dataframe
         #
         β_iht = vec(readdlm("iht.beta"))
@@ -198,21 +246,21 @@ function run_sims(seed::Int; combine_beta=false, extra_k = 0)
             IHT_ko_cv_R2 = Float64[], LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
 
         for pop in populations
-            xpop = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
-            Xpop = SnpLinAlg{Float64}(xpop, center=true, scale=true, impute=true)
+            xtest = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
+            Xtest = SnpLinAlg{Float64}(xtest, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
-            ytrue = Xpop * β + rand(ϵ, size(Xpop, 1))
+            ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
             # IHT
-            iht_r2 = R2(Xpop, ytrue, β_iht)
-            # knockoff IHT
-            iht_ko_r2 = R2(Xpop, ytrue, β_iht_knockoff)
-            # knockoff IHT cv
-            iht_ko_cv_r2 = R2(Xpop, ytrue, β_iht_knockoff_cv)
+            iht_r2 = R2(Xtest, ytest, β_iht)
+            # IHT knockoff (low dimensional fit)
+            iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
+            # knockoff IHT cv (low dimensional)
+            iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
             # lasso β
-            lasso_r2 = R2(Xpop, ytrue, β_lasso)
-            # knockoff lasso β
-            lasso_ko_r2 = R2(Xpop, ytrue, β_lasso_knockoff)
+            lasso_r2 = R2(Xtest, ytest, β_lasso)
+            # knockoff lasso β (low dimensional)
+            lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
             # save to dataframe
             push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
                 lasso_r2, lasso_ko_r2))
