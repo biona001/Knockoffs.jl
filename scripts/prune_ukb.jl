@@ -27,6 +27,7 @@ function prune(chr::Int, threshold::Real, outfile::AbstractString, ko_outfile::A
     sample_idx = 1:size(x, 1) # keep all samples
     snp_idx = setdiff(1:size(x, 2), snps_to_exclude)
     SnpArrays.filter(plinkfile, sample_idx, snp_idx, des=outfile)
+    writedlm("snps_kept.txt", snp_idx)
     # filter knockoff genotypes
     ko_plinkfile = "/scratch/users/bbchu/ukb/subset/ukb.10k.merged.chr$chr"
     original = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.original.snp.index", Int))
@@ -34,12 +35,43 @@ function prune(chr::Int, threshold::Real, outfile::AbstractString, ko_outfile::A
     ko_snp_idx = original[snp_idx] ∪ knockoff[snp_idx]
     SnpArrays.filter(ko_plinkfile, sample_idx, ko_snp_idx, des=ko_outfile)
     # also save which ones are knockoffs which are original SNPs
-    writedlm("/scratch/users/bbchu/ukb/low_LD/ukb.chr$chr.original.snp.index.lowLD", original[snp_idx])
-    writedlm("/scratch/users/bbchu/ukb/low_LD/ukb.chr$chr.knockoff.snp.index.lowLD", knockoff[snp_idx])
+    new_original = Int[]
+    new_knockoff = Int[]
+    offset = 0
+    for i in 1:size(x, 2)
+        if i in snps_to_exclude
+            offset += 2
+            continue
+        end
+        push!(new_original, original[i] - offset)
+        push!(new_knockoff, knockoff[i] - offset)
+    end
+    writedlm("/scratch/users/bbchu/ukb/low_LD/ukb.chr$chr.original.snp.index.lowLD", new_original)
+    writedlm("/scratch/users/bbchu/ukb/low_LD/ukb.chr$chr.knockoff.snp.index.lowLD", new_knockoff)
 end
 
+#
+# First filter 10k subset of UKB chr10
+#
 chr = 10
 threshold = 0.7
 outfile = "/scratch/users/bbchu/ukb/low_LD/ukb.10k.lowLD.chr$chr.threshold$threshold"
 ko_outfile = "/scratch/users/bbchu/ukb/low_LD/ukb.10k.lowLD.chr$chr.threshold$threshold.knockoff"
 prune(chr, threshold, outfile, ko_outfile)
+
+#
+# also need to filter test data the same way
+#
+snp_idx = Int.(vec(readdlm("snps_kept.txt")))
+cd("/scratch/users/bbchu/ukb/populations/chr10/lowLD")
+
+populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
+    "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
+for pop in populations
+    plinkfile = "/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop"
+    outfile = "/scratch/users/bbchu/ukb/populations/chr10/lowLD/ukb.chr$chr.$pop.lowLD"
+    x = SnpArray(plinkfile * ".bed")
+    sample_idx = 1:size(x, 1)
+    SnpArrays.filter(plinkfile, sample_idx, snp_idx, des=outfile)
+end
+writedlm("snps_kept.txt", snp_idx)
