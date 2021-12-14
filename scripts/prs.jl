@@ -19,14 +19,6 @@ function R2(X::AbstractMatrix, y::AbstractVector, β̂::AbstractVector)
     return 1 - dot(μ, μ) / dot(tss, tss)
 end
 
-# predict with estimated β̂ (R2 = 1 - RSS/TSS) and ĉ (estimated beta for non-genetic covariates)
-function R2(X::AbstractMatrix, y::AbstractVector,
-    Z::AbstractMatrix, ĉ::AbstractVector, β̂::AbstractVector)
-    μ = y - X * β̂ - Z * ĉ
-    tss = y .- mean(y)
-    return 1 - dot(μ, μ) / dot(tss, tss)
-end
-
 # predict with a low dimensional fit
 function R2(Xtrain::AbstractMatrix, Xtest::AbstractMatrix,
     ytrain::AbstractVector, ytest::AbstractVector, β̂::AbstractVector)
@@ -40,27 +32,8 @@ function R2(Xtrain::AbstractMatrix, Xtest::AbstractMatrix,
     return 1 - dot(μ, μ) / dot(t, t)
 end
 
-# predict with a low dimensional fit (but possibly including non-genetic covariates)
-function R2(Xtrain::AbstractMatrix, Xtest::AbstractMatrix,
-    ytrain::AbstractVector, ytest::AbstractVector, 
-    Z::AbstractMatrix, ĉ::AbstractVector, β̂::AbstractVector)
-    β_idx = findall(!iszero, β̂)
-    c_idx = findall(!iszero, ĉ)
-    β_new = zeros(length(β̂))
-    c_new = zeros(length(β̂))
-    # fit low dimensional model on original data
-    design_matrix = hcat(Xtrain[:, β_idx], Z[:, c_idx])
-    β_full = design_matrix \ ytrain
-    β_new[β_idx] .= β_full[1:length(β_idx)]
-    c_new[c_idx] .= β_full[length(β_idx)+1:end]
-    # predict with low diemensional model on new data
-    μ = ytest - Xtest * β_new - Z * c_new
-    t = ytest .- mean(ytest)
-    return 1 - dot(μ, μ) / dot(t, t)
-end
-
-function TP(correct_snps, signif_snps)
-    return length(signif_snps ∩ correct_snps) / length(correct_snps)
+function TP(correct_groups, signif_groups)
+    return length(signif_groups ∩ correct_groups) / length(correct_groups)
 end
 
 function FDR(correct_groups, signif_groups)
@@ -112,7 +85,7 @@ end
 #     return result.beta
 # end
 
-# todo: use_PCA and bolt
+# todo: bolt
 function run_sims(seed::Int; use_PCA = false, combine_beta=false, extra_k = 0)
     #
     # import data
