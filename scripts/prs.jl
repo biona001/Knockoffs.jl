@@ -86,21 +86,21 @@ end
 # end
 
 # todo: bolt
-function run_sims(seed::Int; use_PCA = false, combine_beta=false, extra_k = 0)
+function run_sims(seed::Int; 
+    k = 10, # number of causal SNPs
+    use_PCA = false, 
+    combine_beta=false,
+    extra_k = 0,
+    counfounders = 0 # number of counfounders in phenotype simulation
+    )
     #
     # import data
     #
     chr = 10
-    # full chr10 data
     plinkname = "/scratch/users/bbchu/ukb/subset/ukb.10k.chr$chr"
     knockoffname = "/scratch/users/bbchu/ukb/subset/ukb.10k.merged.chr$chr"
     original = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.original.snp.index", Int))
     knockoff = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.knockoff.snp.index", Int))
-    # SNPs filtered by LD
-    # plinkname = "/scratch/users/bbchu/ukb/low_LD/ukb.10k.lowLD.chr$chr.threshold0.7"
-    # knockoffname = "/scratch/users/bbchu/ukb/low_LD/ukb.10k.lowLD.chr$chr.threshold0.7.knockoff"
-    # original = vec(readdlm("/scratch/users/bbchu/ukb/low_LD/ukb.chr10.original.snp.index.lowLD", Int))
-    # knockoff = vec(readdlm("/scratch/users/bbchu/ukb/low_LD/ukb.chr10.knockoff.snp.index.lowLD", Int))
     x = SnpArray(plinkname * ".bed")
     xko = SnpArray(knockoffname * ".bed")
     xla = convert(Matrix{Float64}, x, center=true, scale=true, impute=true)
@@ -122,7 +122,6 @@ function run_sims(seed::Int; use_PCA = false, combine_beta=false, extra_k = 0)
     n, p = size(x)
     # simulate β
     Random.seed!(seed)
-    k = 100 # number of causal SNPs
     h2 = 0.5 # heritability
     d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
     β = zeros(p)
@@ -131,6 +130,21 @@ function run_sims(seed::Int; use_PCA = false, combine_beta=false, extra_k = 0)
     # simulate y
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
+    # todo: should confounders be added to ytest? Should we correlate confounders with snps so explicitiy? 
+    if counfounders > 0
+        z = zeros(n, counfounders)
+        # find n snps, make them correlated with n binary variables
+        col = 1
+        for j in sample(1:p, counfounders, replace=false)
+            for i in 1:n
+                x[i, j] == 0x00 || (z[i, col] = 1)
+            end
+            col += 1
+        end
+        standardize!(z)
+        γ = rand(d, counfounders)
+        y += z * γ
+    end
 
     #
     # Run standard IHT
@@ -258,6 +272,10 @@ function run_sims(seed::Int; use_PCA = false, combine_beta=false, extra_k = 0)
         β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")), fdr,
             original, knockoff, :knockoff, combine_beta)[1:p]
 
+        writedlm("iht.knockoff.beta.postfilter", β_iht_knockoff)
+        writedlm("iht.knockoff.cv.beta.postfilter", β_iht_knockoff_cv)
+        writedlm("lasso.knockoff.beta.postfilter", β_lasso_knockoff)
+
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
             "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
 
@@ -326,4 +344,6 @@ end
 # where n is a seed
 #
 seed = parse(Int, ARGS[1])
-run_sims(seed, use_PCA=false)
+k = 10
+counfounders = 5
+# run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
