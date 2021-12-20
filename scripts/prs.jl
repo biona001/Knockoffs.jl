@@ -130,16 +130,15 @@ function run_sims(seed::Int;
     # simulate y
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
-    # todo: should confounders be added to ytest? Should we correlate confounders with snps so explicitiy? 
+    # todo: should confounders be added to ytest? 
     if counfounders > 0
         z = zeros(n, counfounders)
-        # find n snps, make them correlated with n binary variables
-        col = 1
-        for j in sample(1:p, counfounders, replace=false)
-            for i in 1:n
-                x[i, j] == 0x00 || (z[i, col] = 1)
-            end
-            col += 1
+        # non-correlated confounders
+        z[:, 1] .= rand(10000:10000:1000000, n) # income
+        z[:, 2] .= rand(20:80, n) # age
+        z[:, 3] .= rand(0:1, n) # sex
+        for j in 4:counfounders
+            z[:, j] .= rand(0:1, n) # binary variables
         end
         standardize!(z)
         γ = rand(d, counfounders)
@@ -346,4 +345,4 @@ end
 seed = parse(Int, ARGS[1])
 k = 10
 counfounders = 5
-# run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
+run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
