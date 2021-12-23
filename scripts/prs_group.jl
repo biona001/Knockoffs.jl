@@ -203,7 +203,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
 
         for pop in populations
             xtest = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
-            Xtest = SnpLinAlg{Float64}(xpop, center=true, scale=true, impute=true)
+            Xtest = SnpLinAlg{Float64}(xtest, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
             ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
