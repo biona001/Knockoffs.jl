@@ -91,7 +91,8 @@ function run_sims(seed::Int;
     use_PCA = false, 
     combine_beta=false,
     extra_k = 0,
-    counfounders = 0 # number of counfounders in phenotype simulation
+    causal_counfounders = 0, # number of counfounders that correlate with causal snps
+    noncausal_counfounders = 0 # number of counfounders that correlate with non-causal snps
     )
     #
     # import data
@@ -107,7 +108,10 @@ function run_sims(seed::Int;
     xko_la = convert(Matrix{Float64}, xko, center=true, scale=true, impute=true)
     cur_dir = pwd()
 
-    # if using PCA, make augmented design matrix for lasso and covarirate matrix for IHT
+    #
+    # Import PCs
+    # if use_PCA, make augmented design matrix for lasso and covarirate matrix for IHT
+    # 
     if use_PCA
         z = readdlm("/scratch/users/bbchu/ukb/subset_pca/ukb.10k.chr$chr.projections.txt")
         standardize!(z)
@@ -130,18 +134,37 @@ function run_sims(seed::Int;
     # simulate y
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
-    # todo: should confounders be added to ytest? 
-    if counfounders > 0
-        z = zeros(n, counfounders)
-        # non-correlated confounders
-        z[:, 1] .= rand(10000:10000:1000000, n) # income
-        z[:, 2] .= rand(20:80, n) # age
-        z[:, 3] .= rand(0:1, n) # sex
-        for j in 4:counfounders
-            z[:, j] .= rand(0:1, n) # binary variables
+    #
+    # make confounders correlated with a noncausal/causal snp
+    # if correlated with noncausal snps: aims to increase false positives
+    # if correlated with causal snps: aims to affect prediction
+    #
+    if causal_counfounders > 0
+        z = zeros(n, causal_counfounders)
+        snps = rand(findall(!iszero, β), causal_counfounders)
+        for j in 1:causal_counfounders
+            snp = snps[j]
+            # this creates correlation roughly between 0 and 0.7 (empirically)
+            for i in 1:n
+                x[i, snp] ≥ 1 && rand() < 0.9 && (z[i, j] = 1)
+            end
         end
         standardize!(z)
-        γ = rand(d, counfounders)
+        γ = rand(d, causal_counfounders)
+        y += z * γ
+    end
+    if noncausal_counfounders > 0
+        z = zeros(n, noncausal_counfounders)
+        snps = rand(findall(iszero, β), noncausal_counfounders)
+        for j in 1:noncausal_counfounders
+            snp = snps[j]
+            # this creates correlation roughly between 0.15 and 0.75 (empirically)
+            for i in 1:n
+                x[i, snp] ≥ 1 && rand() < 0.9 && (z[i, j] = 1)
+            end
+        end
+        standardize!(z)
+        γ = rand(d, noncausal_counfounders)
         y += z * γ
     end
 
@@ -166,7 +189,7 @@ function run_sims(seed::Int;
     # Run standard lasso
     #
     Random.seed!(seed)
-    lasso_cv = glmnetcv(xla_full, y, nfolds=5, parallel=true) 
+    @time lasso_cv = glmnetcv(xla_full, y, nfolds=5, parallel=true) 
 
     #
     # run knockoff IHT 
@@ -189,7 +212,7 @@ function run_sims(seed::Int;
     # Run knockoff lasso
     #
     Random.seed!(seed)
-    lasso_ko_cv = glmnetcv(xko_la_full, y, nfolds=5, parallel=true)
+    @time lasso_ko_cv = glmnetcv(xko_la_full, y, nfolds=5, parallel=true)
 
     #
     # Run bolt lmm (need to make covariate and phenotype file first)
@@ -262,13 +285,13 @@ function run_sims(seed::Int;
         # compare R2 across populations, save result in a dataframe
         #
         p = length(β)
-        β_iht = vec(readdlm("iht.beta"))
-        β_lasso = vec(readdlm("lasso.beta"))[1:p]
-        β_iht_knockoff = extract_beta(vec(readdlm("iht.knockoff.beta")), fdr,
+        β_iht = iht_result.beta
+        β_lasso = coef(lasso_cv)[1:p]
+        β_iht_knockoff = extract_beta(iht_ko_result.beta, fdr,
             original, knockoff, :knockoff, combine_beta)
-        β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")),
+        β_iht_knockoff_cv = extract_beta(best_result.beta,
             fdr, original, knockoff, :knockoff, combine_beta)
-        β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")), fdr,
+        β_lasso_knockoff = extract_beta(coef(lasso_ko_cv), fdr,
             original, knockoff, :knockoff, combine_beta)[1:p]
 
         writedlm("iht.knockoff.beta.postfilter", β_iht_knockoff)
@@ -283,33 +306,34 @@ function run_sims(seed::Int;
 
         for pop in populations
             xtest = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed") # 10k samples with all snps
-            # xtest = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/lowLD/ukb.chr$chr.$pop.lowLD.bed") # 10k samples with low LD snps
             Xtest = SnpLinAlg{Float64}(xtest, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
             ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
             # IHT
-            iht_r2 = R2(Xtest, ytest, β_iht)
-            # IHT knockoff (low dimensional fit)
-            iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
-            # knockoff IHT cv (low dimensional)
-            iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
+            # iht_r2 = R2(Xtest, ytest, β_iht)
+            # # IHT knockoff (low dimensional fit)
+            # iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
+            # # knockoff IHT cv (low dimensional)
+            # iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
             # lasso β
             lasso_r2 = R2(Xtest, ytest, β_lasso)
             # knockoff lasso β (low dimensional)
             lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
             # save to dataframe
-            push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
-                lasso_r2, lasso_ko_r2))
+            # push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
+            #     lasso_r2, lasso_ko_r2))
+            push!(df, hcat(pop, 0, 0, 0, lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
         # count non-zero entries of β returned from cross validation
         push!(df, hcat("beta_non_zero_count", count(!iszero, β_iht), 
-            count(!iszero, vec(readdlm("iht.knockoff.beta"))),
-            count(!iszero, vec(readdlm("iht.knockoff.cv.beta"))),
+            # count(!iszero, iht_ko_result.beta),
+            # count(!iszero, best_result.beta),
+            0, 0,
             count(!iszero, β_lasso),
-            count(!iszero, vec(readdlm("lasso.knockoff.beta")))
+            count(!iszero, coef(lasso_ko_cv))
             ))
         # count non-zero entries after knockoff filter
         push!(df, hcat("beta_selected", count(!iszero, β_iht), 
@@ -318,7 +342,7 @@ function run_sims(seed::Int;
             count(!iszero, β_lasso_knockoff)
             ))
         # count TP proportion
-        correct_snps = findall(!iszero, vec(readdlm("beta_true.txt")))
+        correct_snps = findall(!iszero, β)
         push!(df, hcat("TPP", TP(correct_snps, findall(!iszero, β_iht)),
             TP(correct_snps, findall(!iszero, β_iht_knockoff)),
             TP(correct_snps, findall(!iszero, β_iht_knockoff_cv)),
@@ -342,7 +366,7 @@ end
 # Run simulation (via `julia prs.jl n`)
 # where n is a seed
 #
-seed = parse(Int, ARGS[1])
-k = 10
-counfounders = 5
-run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
+# seed = parse(Int, ARGS[1])
+# k = 100
+# counfounders = 1000
+# run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
