@@ -91,8 +91,7 @@ function run_sims(seed::Int;
     use_PCA = false, 
     combine_beta=false,
     extra_k = 0,
-    causal_counfounders = 0, # number of counfounders that correlate with causal snps
-    noncausal_counfounders = 0 # number of counfounders that correlate with non-causal snps
+    counfounders = 0, # number of counfounders
     )
     #
     # import data
@@ -112,10 +111,8 @@ function run_sims(seed::Int;
     # Import PCs
     # if use_PCA, make augmented design matrix for lasso and covarirate matrix for IHT
     # 
-    if use_PCA
-        z = readdlm("/scratch/users/bbchu/ukb/subset_pca/ukb.10k.chr$chr.projections.txt")
-        standardize!(z)
-    end
+    z = readdlm("/scratch/users/bbchu/ukb/subset_pca/ukb.10k.chr$chr.projections.txt")
+    standardize!(z)
     xla_full = use_PCA ? [xla z] : xla
     xko_la_full = use_PCA ? [xko_la z] : xko_la
     covar = use_PCA ? [ones(size(xla, 1)) z] : ones(size(xla, 1))
@@ -135,37 +132,12 @@ function run_sims(seed::Int;
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
     #
-    # make confounders correlated with a noncausal/causal snp
-    # if correlated with noncausal snps: aims to increase false positives
-    # if correlated with causal snps: aims to affect prediction
+    # confounders are PCs and have effect size ±0.2
     #
-    if causal_counfounders > 0
-        z = zeros(n, causal_counfounders)
-        snps = rand(findall(!iszero, β), causal_counfounders)
-        for j in 1:causal_counfounders
-            snp = snps[j]
-            # this creates correlation roughly between 0 and 0.7 (empirically)
-            for i in 1:n
-                x[i, snp] ≥ 1 && rand() < 0.9 && (z[i, j] = 1)
-            end
-        end
-        standardize!(z)
-        γ = rand(d, causal_counfounders)
-        y += z * γ
-    end
-    if noncausal_counfounders > 0
-        z = zeros(n, noncausal_counfounders)
-        snps = rand(findall(iszero, β), noncausal_counfounders)
-        for j in 1:noncausal_counfounders
-            snp = snps[j]
-            # this creates correlation roughly between 0.15 and 0.75 (empirically)
-            for i in 1:n
-                x[i, snp] ≥ 1 && rand() < 0.9 && (z[i, j] = 1)
-            end
-        end
-        standardize!(z)
-        γ = rand(d, noncausal_counfounders)
-        y += z * γ
+    if counfounders > 0
+        PCs = z[:, 1:counfounders]
+        γ = [rand(-1:2:1) * 0.2 for i in 1:counfounders]
+        y += PCs * γ
     end
 
     #
@@ -311,27 +283,25 @@ function run_sims(seed::Int;
             Random.seed!(seed)
             ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
             # IHT
-            # iht_r2 = R2(Xtest, ytest, β_iht)
-            # # IHT knockoff (low dimensional fit)
-            # iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
-            # # knockoff IHT cv (low dimensional)
-            # iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
+            iht_r2 = R2(Xtest, ytest, β_iht)
+            # IHT knockoff (low dimensional fit)
+            iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
+            # knockoff IHT cv (low dimensional)
+            iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
             # lasso β
             lasso_r2 = R2(Xtest, ytest, β_lasso)
             # knockoff lasso β (low dimensional)
             lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
             # save to dataframe
-            # push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
-            #     lasso_r2, lasso_ko_r2))
-            push!(df, hcat(pop, 0, 0, 0, lasso_r2, lasso_ko_r2))
+            push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
+                lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
         # count non-zero entries of β returned from cross validation
         push!(df, hcat("beta_non_zero_count", count(!iszero, β_iht), 
-            # count(!iszero, iht_ko_result.beta),
-            # count(!iszero, best_result.beta),
-            0, 0,
+            count(!iszero, iht_ko_result.beta),
+            count(!iszero, best_result.beta),
             count(!iszero, β_lasso),
             count(!iszero, coef(lasso_ko_cv))
             ))
@@ -366,7 +336,7 @@ end
 # Run simulation (via `julia prs.jl n`)
 # where n is a seed
 #
-# seed = parse(Int, ARGS[1])
-# k = 100
-# counfounders = 1000
-# run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
+seed = parse(Int, ARGS[1])
+k = 100
+counfounders = 1 # 1 PC
+run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
