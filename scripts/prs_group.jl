@@ -72,7 +72,13 @@ function get_signif_groups(β, groups)
 end
 
 # todo: use_PCA and bolt
-function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, seed::Int)
+function run_sims(
+    x::SnpArray,
+    knockoff_idx::BitVector,
+    groups::Vector{Int},
+    seed::Int,
+    confounders::Int = 0
+    )
     #
     # import data (first 10000 samples of chr 10)
     #
@@ -82,6 +88,12 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
     xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
     xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
     cur_dir = pwd()
+
+    #
+    # Import PCs
+    # 
+    z = readdlm("/scratch/users/bbchu/ukb/subset_pca/ukb.10k.chr$chr.projections.txt")
+    standardize!(z)
 
     #
     # simulate phenotypes using UKB chr10 subset
@@ -98,6 +110,14 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
     # simulate y
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
+    #
+    # confounders are PCs and have effect size ±0.2
+    #
+    if confounders > 0
+        PCs = z[:, 1:confounders]
+        γ = [rand(-1:2:1) * 0.2 for i in 1:confounders]
+        y += PCs * γ
+    end
 
     #
     # Run standard IHT
@@ -120,7 +140,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
     # Run standard lasso
     #
     Random.seed!(seed)
-    lasso_cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
+    @time lasso_cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
 
     #
     # run knockoff IHT 
@@ -143,7 +163,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
     # Run knockoff lasso
     #
     Random.seed!(seed)
-    ko_lasso_cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
+    @time ko_lasso_cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
 
     for fdr in [0.05, 0.1, 0.25, 0.5]
         top_dir = cur_dir * "/fdr$fdr/"
@@ -152,6 +172,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         isdir(new_dir) || mkdir(new_dir)
         cd(new_dir)
         writedlm("y_true.txt", y)
+        # writedlm("y_true_confound.txt", y)
         writedlm("beta_true.txt", β)
 
         #
@@ -191,8 +212,9 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             original, knockoff)
         β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")),
             fdr, groups, original, knockoff)
-        β_lasso = vec(readdlm("lasso.beta"))
-        β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")),
+        # β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
+        β_lasso = coef(lasso_cv)
+        β_lasso_knockoff = extract_beta(coef(ko_lasso_cv),
             fdr, groups, original, knockoff)
 
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
@@ -220,6 +242,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             # save to dataframe
             push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
                 lasso_r2, lasso_ko_r2))
+            # push!(df, hcat(pop, 0, 0, 0, lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
@@ -227,8 +250,9 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         push!(df, hcat("beta_non_zero_count", count(!iszero, β_iht), 
             count(!iszero, vec(readdlm("iht.knockoff.beta"))),
             count(!iszero, vec(readdlm("iht.knockoff.cv.beta"))),
+            # 0, 0,
             count(!iszero, β_lasso),
-            count(!iszero, vec(readdlm("lasso.knockoff.beta")))
+            count(!iszero, coef(ko_lasso_cv))
             ))
         # count non-zero entries after knockoff filter
         push!(df, hcat("beta_selected", count(!iszero, β_iht), 
@@ -263,6 +287,7 @@ end
 #
 seed = parse(Int, ARGS[1])
 resolution = 5
+confounders = 1 # 1 PC
 keyfile = "/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.key"
 df = CSV.read(keyfile, DataFrame)
 groups = convert(Vector{Int}, df[!, :Group])
