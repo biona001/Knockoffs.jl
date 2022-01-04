@@ -91,7 +91,9 @@ function run_sims(seed::Int;
     use_PCA = false, 
     combine_beta=false,
     extra_k = 0,
-    counfounders = 0, # number of counfounders
+    confounders = 0, # number of confounders
+    causal_snp_upper_r2 = 1, # causal SNPs and their knockoffs must have correlation less than causal_snp_upper_r2
+    causal_snp_lower_r2 = 0  # causal SNPs and their knockoffs must have correlation larger than causal_snp_lower_r2
     )
     #
     # import data
@@ -126,17 +128,25 @@ function run_sims(seed::Int;
     h2 = 0.5 # heritability
     d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
     β = zeros(p)
-    β[1:k] .= rand(d, k)
-    shuffle!(β)
+    # β[1:k] .= rand(d, k)
+    # shuffle!(β)
+    # causal SNPs can only be those that aren't very correlated with their knockoffs
+    possible_causal_snp_idx = Int[]
+    for snp in 1:size(xla, 2)
+        r2 = cor(@view(xko_la[:, 2snp]), @view(xko_la[:, 2snp - 1]))
+        causal_snp_lower_r2 ≤ r2 ≤ causal_snp_upper_r2 && push!(possible_causal_snp_idx, snp)
+    end
+    shuffle!(possible_causal_snp_idx)
+    β[possible_causal_snp_idx[1:k]] .= rand(d, k)
     # simulate y
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
     #
     # confounders are PCs and have effect size ±0.2
     #
-    if counfounders > 0
-        PCs = z[:, 1:counfounders]
-        γ = [rand(-1:2:1) * 0.2 for i in 1:counfounders]
+    if confounders > 0
+        PCs = z[:, 1:confounders]
+        γ = [rand(-1:2:1) * 0.2 for i in 1:confounders]
         y += PCs * γ
     end
 
@@ -337,6 +347,9 @@ end
 # where n is a seed
 #
 seed = parse(Int, ARGS[1])
+causal_snp_upper_r2 = parse(Int, ARGS[2]) # 0.1, 0.2, ..., 1.0
+causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
 k = 100
-counfounders = 1 # 1 PC
-run_sims(seed, k=k, use_PCA=false, counfounders=counfounders)
+confounders = 0 # 1 PC
+run_sims(seed, k=k, use_PCA=false, confounders=confounders, 
+    causal_snp_upper_r2=causal_snp_upper_r2, causal_snp_lower_r2=causal_snp_lower_r2)
