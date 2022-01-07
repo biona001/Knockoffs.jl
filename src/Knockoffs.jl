@@ -4,6 +4,7 @@ using LinearAlgebra
 using Statistics
 using Convex
 using SCS
+using SnpArrays
 import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
