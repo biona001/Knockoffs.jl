@@ -101,3 +101,60 @@ function snpknock2(
     @info "Output directory: $(pwd() * "/knockoffs")\n"
     run(cmd)
 end
+
+"""
+    decorrelate_knockoffs(plinkfile, original, knockoff)
+
+If a SNP and its knockoffs has correlation > `r2_threshold`, this function is randomly
+change some entries in the knockoff variable, i.e. decorrelate the knockoff. 
+"""
+function decorrelate_knockoffs(
+    plinkfile::AbstractString,
+    original::Vector{Int},
+    knockoff::Vector{Int};
+    outfile = "decorrelated_knockoffs",
+    outdir = pwd(),
+    r2_threshold = 0.95
+    )
+    x = SnpArray(plinkfile * ".bed")
+    n, p = size(x)
+    p >> 1 == length(original) == length(knockoff) || error("Number of SNPs should be the same")
+    xnew = SnpArray(joinpath(outdir, outfile * ".bed"), n, p)
+    swap_probability = 1 - r2_threshold
+    # calculate correlation of knockoffs with their original snps
+    r2, snp1, snp2 = sizehint!(Float64[], p >> 1), zeros(n), zeros(n)
+    for i in 1:p>>1
+        copyto!(snp1, @view(x[:, original[i]]), center=true, scale=true)
+        copyto!(snp2, @view(x[:, knockoff[i]]), center=true, scale=true)
+        push!(r2, abs(cor(snp1, snp2)))
+    end
+    # loop over snps
+    for j in 1:p>>1
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # copy knockoffs
+        jj = knockoff[j]
+        if r2[j] ≤ r2_threshold
+            copyto!(@view(xnew[:, jj]), @view(x[:, jj]))
+        else
+            # loop over each sample
+            for i in 1:n
+                # We change the an entry of knockoff with probability `swap_probability`
+                # if xij is 0 or 2, set it equal to 1. If xij is 1, let it equal 0 or 2 randomly
+                if rand() < swap_probability
+                    if x[i, jj] == 0x01 || x[i, jj] == 0x03
+                        xnew[i, jj] = 0x02
+                    else
+                        xnew[i, jj] = (rand() < 0.5 ? 0x02 : 0x03)
+                    end
+                else
+                    xnew[i, jj] = x[i, jj]
+                end
+            end
+        end
+    end
+    # copy bim and fam files
+    cp(plinkfile * ".bim", joinpath(outdir, outfile * ".bim"), force=true)
+    cp(plinkfile * ".fam", joinpath(outdir, outfile * ".fam"), force=true)
+    return xnew
+end
