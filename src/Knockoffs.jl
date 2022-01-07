@@ -8,7 +8,7 @@ import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
     coefficient_diff, threshold, extract_beta, extract_combine_beta,
-    partition, rapid, snpknock2
+    partition, rapid, snpknock2, decorrelate_knockoffs
 
 include("struct.jl")
 include("fixed.jl")
