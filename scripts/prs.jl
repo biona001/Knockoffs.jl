@@ -96,24 +96,39 @@ function run_sims(seed::Int;
     causal_snp_lower_r2 = 0  # causal SNPs and their knockoffs must have correlation larger than causal_snp_lower_r2
     )
     #
-    # import data
+    # import fastphase knockoffs
+    #
+    # chr = 10
+    # plinkname = "/scratch/users/bbchu/ukb/subset/ukb.10k.chr$chr"
+    # original = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.original.snp.index", Int))
+    # knockoff = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.knockoff.snp.index", Int))
+    # x = SnpArray(plinkname)
+    # xko = SnpArray(knockoffname)
+    # xla = convert(Matrix{Float64}, x, center=true, scale=true, impute=true)
+    # xko_la = convert(Matrix{Float64}, xko, center=true, scale=true, impute=true)
+    # cur_dir = pwd()
+
+    #
+    # import shapeit knockoffs
     #
     chr = 10
-    plinkname = "/scratch/users/bbchu/ukb/subset/ukb.10k.chr$chr"
-    knockoffname = "/scratch/users/bbchu/ukb/subset/ukb.10k.merged.chr$chr"
-    original = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.original.snp.index", Int))
-    knockoff = vec(readdlm("/scratch/users/bbchu/ukb/subset/ukb.chr$chr.knockoff.snp.index", Int))
-    x = SnpArray(plinkname * ".bed")
-    xko = SnpArray(knockoffname * ".bed")
-    xla = convert(Matrix{Float64}, x, center=true, scale=true, impute=true)
-    xko_la = convert(Matrix{Float64}, xko, center=true, scale=true, impute=true)
+    plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/knockoffs/ukb_gen_chr$(chr)_ibd1_res0" #shapeit knockoffs
+    xdata = SnpData(plinkname)
+    isknockoff = endswith.(xdata.snp_info[!, :snpid], ".k")
+    original, knockoff = Int[], Int[]
+    for i in 1:size(xdata)[2]
+        isknockoff[i] ? push!(knockoff, i) : push!(original, i)
+    end
+    x = xdata.snparray
+    xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
+    xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
     cur_dir = pwd()
 
     #
     # Import PCs
     # if use_PCA, make augmented design matrix for lasso and covarirate matrix for IHT
     # 
-    z = readdlm("/scratch/users/bbchu/ukb/subset_pca/ukb.10k.chr$chr.projections.txt")
+    z = readdlm("/scratch/users/bbchu/ukb_SHAPEIT/subset_pca/ukb.10k.chr$chr.projections.txt")
     standardize!(z)
     xla_full = use_PCA ? [xla z] : xla
     xko_la_full = use_PCA ? [xko_la z] : xko_la
@@ -266,7 +281,9 @@ function run_sims(seed::Int;
         #
         # compare R2 across populations, save result in a dataframe
         #
+        # combine_beta = false
         p = length(β)
+        # β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
         β_iht = iht_result.beta
         β_lasso = coef(lasso_cv)[1:p]
         β_iht_knockoff = extract_beta(iht_ko_result.beta, fdr,
@@ -287,7 +304,7 @@ function run_sims(seed::Int;
             IHT_ko_cv_R2 = Float64[], LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
 
         for pop in populations
-            xtest = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed") # 10k samples with all snps
+            xtest = SnpArray("/scratch/users/bbchu/ukb_SHAPEIT/populations/chr10/ukb.chr$chr.$pop.bed") # 10k samples with all snps
             Xtest = SnpLinAlg{Float64}(xtest, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
@@ -305,6 +322,7 @@ function run_sims(seed::Int;
             # save to dataframe
             push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
                 lasso_r2, lasso_ko_r2))
+            # push!(df, hcat(pop, 0, 0, 0, lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
@@ -312,6 +330,7 @@ function run_sims(seed::Int;
         push!(df, hcat("beta_non_zero_count", count(!iszero, β_iht), 
             count(!iszero, iht_ko_result.beta),
             count(!iszero, best_result.beta),
+            # 0, 0,
             count(!iszero, β_lasso),
             count(!iszero, coef(lasso_ko_cv))
             ))
@@ -347,9 +366,8 @@ end
 # where n is a seed
 #
 seed = parse(Int, ARGS[1])
-causal_snp_upper_r2 = parse(Int, ARGS[2]) # 0.1, 0.2, ..., 1.0
-causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
+# causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
+# causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
 k = 100
 confounders = 0 # 1 PC
-run_sims(seed, k=k, use_PCA=false, confounders=confounders, 
-    causal_snp_upper_r2=causal_snp_upper_r2, causal_snp_lower_r2=causal_snp_lower_r2)
+run_sims(seed, k=k, use_PCA=false, confounders=confounders)
