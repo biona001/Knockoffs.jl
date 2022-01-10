@@ -74,7 +74,8 @@ end
 # todo: use_PCA and bolt
 function run_sims(
     x::SnpArray,
-    knockoff_idx::BitVector,
+    original::Vector{Int},
+    knockoff::Vector{Int},
     groups::Vector{Int},
     seed::Int,
     confounders::Int = 0
@@ -83,8 +84,6 @@ function run_sims(
     # import data (first 10000 samples of chr 10)
     #
     chr = 10
-    original = findall(knockoff_idx .== false)
-    knockoff = findall(knockoff_idx)
     xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
     xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
     cur_dir = pwd()
@@ -92,7 +91,7 @@ function run_sims(
     #
     # Import PCs
     # 
-    z = readdlm("/scratch/users/bbchu/ukb/subset_pca/ukb.10k.chr$chr.projections.txt")
+    z = readdlm("/scratch/users/bbchu/ukb_SHAPEIT/subset_pca/ukb.10k.chr$chr.projections.txt")
     standardize!(z)
 
     #
@@ -224,7 +223,7 @@ function run_sims(
             IHT_ko_cv_R2 = Float64[], LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
 
         for pop in populations
-            xtest = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
+            xtest = SnpArray("/scratch/users/bbchu/ukb_SHAPEIT/populations/chr10/ukb.chr$chr.$pop.bed")
             Xtest = SnpLinAlg{Float64}(xtest, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
@@ -250,7 +249,6 @@ function run_sims(
         push!(df, hcat("beta_non_zero_count", count(!iszero, β_iht), 
             count(!iszero, vec(readdlm("iht.knockoff.beta"))),
             count(!iszero, vec(readdlm("iht.knockoff.cv.beta"))),
-            # 0, 0,
             count(!iszero, β_lasso),
             count(!iszero, coef(ko_lasso_cv))
             ))
@@ -283,19 +281,39 @@ function run_sims(
 end
 
 #
-# import key and data
+# import key and data (fastphase knockoffs)
+#
+# seed = parse(Int, ARGS[1])
+# resolution = 5
+# confounders = 0 # 1 PC
+# keyfile = "/scratch/users/bbchu/ukb_fastPHASE/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.key"
+# df = CSV.read(keyfile, DataFrame)
+# groups = convert(Vector{Int}, df[!, :Group])
+# knockoff_idx = convert(BitVector, df[!, :Knockoff])
+# original = findall(knockoff_idx .== false)
+# knockoff = findall(knockoff_idx)
+# x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.bed")
+# x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/decorrelated/ukb_gen_chr10_decorrelated.bed") # decorrelated knockoffs
+
+#
+# import shapeit knockoffs
 #
 seed = parse(Int, ARGS[1])
 resolution = 5
-confounders = 1 # 1 PC
-keyfile = "/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.key"
-df = CSV.read(keyfile, DataFrame)
-groups = convert(Vector{Int}, df[!, :Group])
-knockoff_idx = convert(BitVector, df[!, :Knockoff])
-x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.bed")
+confounders = 0 # 1 PC
+df = CSV.read("ukb_gen_chr10_ibd1_res$(resolution)_grp.txt", DataFrame)
+groups = repeat(df[!, :Group], inner=2)
+plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/knockoffs/ukb_gen_chr10_ibd1_res$(resolution)"
+xdata = SnpData(plinkname)
+isknockoff = endswith.(xdata.snp_info[!, :snpid], ".k")
+original, knockoff = Int[], Int[]
+for i in 1:size(xdata)[2]
+    isknockoff[i] ? push!(knockoff, i) : push!(original, i)
+end
+x = xdata.snparray
 
 #
 # Run simulation (via `julia prs.jl n r`)
 # where n is a seed and r is resolution (20, 5, ...etc)
 #
-run_sims(x, knockoff_idx, groups, seed)
+run_sims(x, original, knockoff, groups, seed)
