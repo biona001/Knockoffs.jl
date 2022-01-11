@@ -205,34 +205,45 @@ function fastphase(
     return nothing
 end
 
-function process_fastphase_output(;
-    dir::AbstractString=pwd()
-    )
-    # import output files from fastPHASE
-    rfile = joinpath(dir, "out_rhat.txt") # 2p × 1
-    θfile = joinpath(dir, "out_thetahat.txt") # 2p × K
-    αfile = joinpath(dir, "out_alphahat.txt") # 2p × K
-    isfile(rfile) && isfile(θfile) && isfile(αfile) || error("Files not found!")
-    # r = readdlm(rfile, comments=true, comment_char = '>', header=false)
-    # θ = readdlm(θfile, ' ', comments=true, comment_char = '>', header=false)
-    # α = readdlm(αfile, comments=true, comment_char = '>', header=false, ignorerepeated=true, delim=' ')
-    rdf = CSV.read(rfile, DataFrame, comment = "> ", header=false) 
-    θdf = CSV.read(θfile, DataFrame, comment = "> ", header=false, ignorerepeated=true, delim=' ')
-    αdf = CSV.read(αfile, DataFrame, comment = "> ", header=false, ignorerepeated=true, delim=' ')
-    r = Matrix(rdf)
-    θ = Matrix(θdf)
-    α = Matrix(αdf)
+"""
+    process_fastphase_output(datadir::AbstractString, T::Int)
 
-    # form transition matrices of haplotypes
-    p = size(α, 1) >> 1
-    Q1 = haplotype_transition_matrices(@view(r[1:p]), @view(θ[1:p,     :]), @view(α[1:p,     :]))
-    Q2 = haplotype_transition_matrices(@view(r[1:p]), @view(θ[p+1:end, :]), @view(α[p+1:end, :]))
+Reads fastPHASE results and performs averaging over `T` runs
+
+# Inputs
++ `datadir`: Directory that stores fastPHASE's results (`out_rhat.txt`, `out_thetahat.txt`, `out_alphahat.txt`)
++ `T`: the number of different initial conditions for EM used in fastPHASE
+"""
+function process_fastphase_output(datadir::AbstractString, T::Int; extension="out_")
+    # read full data 
+    rfile = joinpath(datadir, "$(extension)rhat.txt") # T*p × 1
+    θfile = joinpath(datadir, "$(extension)thetahat.txt") # T*p × K
+    αfile = joinpath(datadir, "$(extension)alphahat.txt") # T*p × K
+    isfile(rfile) && isfile(θfile) && isfile(αfile) || error("Files not found!")
+    r_full = readdlm(rfile, comments=true, comment_char = '>', header=false)
+    θ_full = readdlm(θfile, comments=true, comment_char = '>', header=false)
+    α_full = readdlm(θfile, comments=true, comment_char = '>', header=false)
+
+    # compute averages across T simulations as suggested by Scheet et al 2006
+    p = Int(size(r_full, 1) / T)
+    K = size(θdf, 2)
+    r, θ, α = zeros(p), zeros(p, K), zeros(p, K)
+    for i in 1:Tf
+        rows = (i - 1) * p + 1:p*i
+        r .+= @view(r_full[rows])
+        θ .+= @view(θ_full[rows, :])
+        α .+= @view(α_full[rows, :])
+    end
+    r ./= T
+    θ ./= T
+    α ./= T
+    return r, θ, α
 end
 
-function haplotype_transition_matrices(
-    r::AbstractVecOrMat,
-    θ::AbstractMatrix,
-    α::AbstractMatrix,
+function get_haplotype_transition_matrix(
+    r::AbstractVecOrMat, # p × 1
+    θ::AbstractMatrix,   # p × K
+    α::AbstractMatrix,   # p × K
     )
     K = size(θ, 2)
     p = size(r, 1)
@@ -243,7 +254,7 @@ function haplotype_transition_matrices(
         for k in 1:K
             Qj[k, k] = exp(-r[j]) + (1 - exp(-r[j])) * α[j, k]
         end
-        # lower triangular entries of Qj
+        # lower triangular entries of Qj (Qj[row, col] = P(Zj = row | Zj-1 = col))
         for col in 1:K, row in col+1:K
             Qj[row, col] = (1 - exp(-r[j])) * α[j, row]
         end
@@ -252,5 +263,30 @@ function haplotype_transition_matrices(
             Qj[row, col] = (1 - exp(-r[j])) * α[j, row]
         end
     end
+    return Q
+end
+
+function genotype_transition_matrices(datadir::AbstractString, T::Int)
+    # get r, α, θ estimated by fastPHASE
+    r, θ, α = process_fastphase_output(datadir, T)
+
+    # form transition matrices of haplotypes
+    Q = get_haplotype_transition_matrix(r, θ, α)
+
+    # form transition matrices of genotypes
+    K = size(Q1[1], 1)
+    statespace = (k * (k + 1)) >> 1
+    # Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
+    # for j in 1:p
+    #     Qj, Q1j, Q2j = Q[j], Q1[j], Q2[j]
+    #     for ka in 1:K, kb in 1:K
+    #         for (ka_new, kb_new) in with_replacement_combinations(1:k, 2)
+    #             Qj[row, col] = Q1j[ka_new, ka] * Q2j[ka_new, ka]
+    #             if ka_new != kb_new
+    #                 Qj[row, col] += Q1j[kb_new, ka] * Q2j[ka_new, kb]
+    #             end
+    #         end
+    #     end
+    # end
     return Q
 end
