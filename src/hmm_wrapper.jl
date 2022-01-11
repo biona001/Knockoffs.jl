@@ -265,7 +265,7 @@ function get_genotype_transition_matrix(datadir::AbstractString, T::Int)
     # get r, α, θ estimated by fastPHASE
     r, θ, α = process_fastphase_output(datadir, T)
 
-    # form transition matrices of haplotypes (TODO: H rows does not sum to 1)
+    # form transition matrices of haplotypes
     H = get_haplotype_transition_matrix(r, θ, α)
 
     # form transition matrices of genotypes
@@ -274,11 +274,11 @@ function get_genotype_transition_matrix(datadir::AbstractString, T::Int)
     Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
     for j in 1:p
         Qj, Hj = Q[j], H[j]
-        for (col, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-            for (row, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
-                Qj[row, col] = Hj[ka_new, ka] * Hj[kb_new, kb]
+        for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+            for (col, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
+                Qj[row, col] = Hj[ka, ka_new] * Hj[kb, kb_new]
                 if ka_new != kb_new
-                    Qj[row, col] += Hj[kb_new, ka] * Hj[ka_new, kb]
+                    Qj[row, col] += Hj[ka, kb_new] * Hj[kb, ka_new]
                 end
             end
         end
