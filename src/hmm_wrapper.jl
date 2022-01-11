@@ -228,7 +228,7 @@ function process_fastphase_output(datadir::AbstractString, T::Int; extension="ou
     p = Int(size(r_full, 1) / T)
     K = size(θdf, 2)
     r, θ, α = zeros(p), zeros(p, K), zeros(p, K)
-    for i in 1:Tf
+    for i in 1:T
         rows = (i - 1) * p + 1:p*i
         r .+= @view(r_full[rows])
         θ .+= @view(θ_full[rows, :])
@@ -237,6 +237,7 @@ function process_fastphase_output(datadir::AbstractString, T::Int; extension="ou
     r ./= T
     θ ./= T
     α ./= T
+    α = α ./ sum(α, dims = 2) # normalize rows to sum to 1
     return r, θ, α
 end
 
@@ -248,45 +249,39 @@ function get_haplotype_transition_matrix(
     K = size(θ, 2)
     p = size(r, 1)
     Q = [Matrix{Float64}(undef, K, K) for _ in 1:p]
-    for j in 1:p
+    @inbounds for j in 1:p
         Qj = Q[j]
-        # diagonal entries of Qj
-        for k in 1:K
-            Qj[k, k] = exp(-r[j]) + (1 - exp(-r[j])) * α[j, k]
-        end
-        # lower triangular entries of Qj (Qj[row, col] = P(Zj = row | Zj-1 = col))
-        for col in 1:K, row in col+1:K
-            Qj[row, col] = (1 - exp(-r[j])) * α[j, row]
-        end
-        # upper triangular entries of Qj
-        for col in 1:K, row in 1:col-1
-            Qj[row, col] = (1 - exp(-r[j])) * α[j, row]
+        for k in 1:K, knew in 1:K
+            Qj[k, knew] = (1 - exp(-r[j])) * α[j, knew] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
+            if k == knew
+                Qj[k, knew] += exp(-r[j])
+            end
         end
     end
     return Q
 end
 
-function genotype_transition_matrices(datadir::AbstractString, T::Int)
+function get_genotype_transition_matrix(datadir::AbstractString, T::Int)
     # get r, α, θ estimated by fastPHASE
     r, θ, α = process_fastphase_output(datadir, T)
 
-    # form transition matrices of haplotypes
-    Q = get_haplotype_transition_matrix(r, θ, α)
+    # form transition matrices of haplotypes (TODO: H rows does not sum to 1)
+    H = get_haplotype_transition_matrix(r, θ, α)
 
     # form transition matrices of genotypes
-    K = size(Q1[1], 1)
-    statespace = (k * (k + 1)) >> 1
-    # Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
-    # for j in 1:p
-    #     Qj, Q1j, Q2j = Q[j], Q1[j], Q2[j]
-    #     for ka in 1:K, kb in 1:K
-    #         for (ka_new, kb_new) in with_replacement_combinations(1:k, 2)
-    #             Qj[row, col] = Q1j[ka_new, ka] * Q2j[ka_new, ka]
-    #             if ka_new != kb_new
-    #                 Qj[row, col] += Q1j[kb_new, ka] * Q2j[ka_new, kb]
-    #             end
-    #         end
-    #     end
-    # end
+    K = size(α, 2)
+    statespace = (K * (K + 1)) >> 1
+    Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
+    for j in 1:p
+        Qj, Hj = Q[j], H[j]
+        for (col, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+            for (row, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
+                Qj[row, col] = Hj[ka_new, ka] * Hj[kb_new, kb]
+                if ka_new != kb_new
+                    Qj[row, col] += Hj[kb_new, ka] * Hj[ka_new, kb]
+                end
+            end
+        end
+    end
     return Q
 end
