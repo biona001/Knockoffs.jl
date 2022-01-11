@@ -241,6 +241,17 @@ function process_fastphase_output(datadir::AbstractString, T::Int; extension="ou
     return r, θ, α
 end
 
+"""
+get_haplotype_transition_matrix(r, θ, α)
+
+Compute transition matrices for the hidden Markov chains in haplotypes. 
+This is 2 equations above eq8 in "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
+
+# Inputs
+`r`: Length `p` vector, the "recombination rates"
+`θ`: Size `p × K` matrix, `θ[j, k]` is probability that the allele is 1 for SNP `p` at `k`th haplotype motif
+`α`: Size `p × K` matrix, probabilities that haplotype motifs succeed each other. Rows should sum to 1. 
+"""
 function get_haplotype_transition_matrix(
     r::AbstractVecOrMat, # p × 1
     θ::AbstractMatrix,   # p × K
@@ -261,16 +272,18 @@ function get_haplotype_transition_matrix(
     return Q
 end
 
-function get_genotype_transition_matrix(datadir::AbstractString, T::Int, extension="ukb_chr10_n1000_")
-    # get r, α, θ estimated by fastPHASE
-    r, θ, α = process_fastphase_output(datadir, T, extension=extension)
+"""
+    get_genotype_transition_matrix(H::Vector{Matrix}, K::Int)
 
-    # form transition matrices of haplotypes
-    H = get_haplotype_transition_matrix(r, θ, α)
+Compute transition matrices for the hidden Markov chains in unphased genotypes. 
+This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
 
-    # form transition matrices of genotypes
-    K = size(α, 2)
+# Inputs
+`H`: Length `p` vector of haplotype transition matrices, each with dimension `K × K`
+"""
+function get_genotype_transition_matrix(H::Vector{Matrix})
     p = length(H)
+    K = size(H[1], 1)
     statespace = (K * (K + 1)) >> 1
     Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
     @showprogress for j in 1:p
@@ -286,3 +299,39 @@ function get_genotype_transition_matrix(datadir::AbstractString, T::Int, extensi
     end
     return Q # note: rows of Q must sum to 1
 end
+
+function get_initial_probabilities(α::AbstractMatrix)
+    K = size(α, 2)
+    statespace = (K * (K + 1)) >> 1
+    q = zeros(statespace)
+    for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+        q[i] = ka == kb ? abs2(α[1, ka]) : 2 * α[1, ka] * α[1, kb]
+    end
+    # @assert sum(q) ≈ 1 "initial probability does not sum to 1!"
+    return q
+end
+
+function get_initial_probabilities(α1::AbstractVector)
+    K = length(α1)
+    statespace = (K * (K + 1)) >> 1
+    q = zeros(statespace)
+    for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+        q[i] = (ka == kb ? abs2(α1[ka]) : 2 * α1[ka] * α1[kb])
+    end
+    @assert sum(q) ≈ 1 "initial probability sums to $(sum(q)) but it should sum to 1!"
+    return q
+end
+
+function sample_hidden_states()
+    # get r, α, θ estimated by fastPHASE
+    r, θ, α = process_fastphase_output(datadir, T, extension=extension)
+
+    # form transition matrices of haplotypes and genotypes
+    H = get_haplotype_transition_matrix(r, θ, α)
+    Q = get_genotype_transition_matrix(H)
+    q1 = get_initial_probabilities(@view(α[1, :]))
+
+end
+
+q1 = get_initial_probabilities(α) # 13.840 μs
+q1_new = get_initial_probabilities($(@view(α[1, :])))
