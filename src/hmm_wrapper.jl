@@ -204,3 +204,53 @@ function fastphase(
     run(`./fastPHASE -T$T -K$K -C$C -o$(out) -Pp fastphase.inp`)
     return nothing
 end
+
+function process_fastphase_output(;
+    dir::AbstractString=pwd()
+    )
+    # import output files from fastPHASE
+    rfile = joinpath(dir, "out_rhat.txt") # 2p × 1
+    θfile = joinpath(dir, "out_thetahat.txt") # 2p × K
+    αfile = joinpath(dir, "out_alphahat.txt") # 2p × K
+    isfile(rfile) && isfile(θfile) && isfile(αfile) || error("Files not found!")
+    # r = readdlm(rfile, comments=true, comment_char = '>', header=false)
+    # θ = readdlm(θfile, ' ', comments=true, comment_char = '>', header=false)
+    # α = readdlm(αfile, comments=true, comment_char = '>', header=false, ignorerepeated=true, delim=' ')
+    rdf = CSV.read(rfile, DataFrame, comment = "> ", header=false) 
+    θdf = CSV.read(θfile, DataFrame, comment = "> ", header=false, ignorerepeated=true, delim=' ')
+    αdf = CSV.read(αfile, DataFrame, comment = "> ", header=false, ignorerepeated=true, delim=' ')
+    r = Matrix(rdf)
+    θ = Matrix(θdf)
+    α = Matrix(αdf)
+
+    # form transition matrices of haplotypes
+    p = size(α, 1) >> 1
+    Q1 = haplotype_transition_matrices(@view(r[1:p]), @view(θ[1:p,     :]), @view(α[1:p,     :]))
+    Q2 = haplotype_transition_matrices(@view(r[1:p]), @view(θ[p+1:end, :]), @view(α[p+1:end, :]))
+end
+
+function haplotype_transition_matrices(
+    r::AbstractVecOrMat,
+    θ::AbstractMatrix,
+    α::AbstractMatrix,
+    )
+    K = size(θ, 2)
+    p = size(r, 1)
+    Q = [Matrix{Float64}(undef, K, K) for _ in 1:p]
+    for j in 1:p
+        Qj = Q[j]
+        # diagonal entries of Qj
+        for k in 1:K
+            Qj[k, k] = exp(-r[j]) + (1 - exp(-r[j])) * α[j, k]
+        end
+        # lower triangular entries of Qj
+        for col in 1:K, row in col+1:K
+            Qj[row, col] = (1 - exp(-r[j])) * α[j, row]
+        end
+        # upper triangular entries of Qj
+        for col in 1:K, row in 1:col-1
+            Qj[row, col] = (1 - exp(-r[j])) * α[j, row]
+        end
+    end
+    return Q
+end
