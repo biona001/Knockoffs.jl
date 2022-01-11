@@ -226,7 +226,7 @@ function process_fastphase_output(datadir::AbstractString, T::Int; extension="ou
 
     # compute averages across T simulations as suggested by Scheet et al 2006
     p = Int(size(r_full, 1) / T)
-    K = size(θdf, 2)
+    K = size(θ_full, 2)
     r, θ, α = zeros(p), zeros(p, K), zeros(p, K)
     for i in 1:T
         rows = (i - 1) * p + 1:p*i
@@ -237,7 +237,7 @@ function process_fastphase_output(datadir::AbstractString, T::Int; extension="ou
     r ./= T
     θ ./= T
     α ./= T
-    α = α ./ sum(α, dims = 2) # normalize rows to sum to 1
+    α ./= sum(α, dims = 2) # normalize rows to sum to 1
     return r, θ, α
 end
 
@@ -261,18 +261,19 @@ function get_haplotype_transition_matrix(
     return Q
 end
 
-function get_genotype_transition_matrix(datadir::AbstractString, T::Int)
+function get_genotype_transition_matrix(datadir::AbstractString, T::Int, extension="ukb_chr10_n1000_")
     # get r, α, θ estimated by fastPHASE
-    r, θ, α = process_fastphase_output(datadir, T)
+    r, θ, α = process_fastphase_output(datadir, T, extension=extension)
 
     # form transition matrices of haplotypes
     H = get_haplotype_transition_matrix(r, θ, α)
 
     # form transition matrices of genotypes
     K = size(α, 2)
+    p = length(H)
     statespace = (K * (K + 1)) >> 1
     Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
-    for j in 1:p
+    @showprogress for j in 1:p
         Qj, Hj = Q[j], H[j]
         for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
             for (col, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
@@ -283,5 +284,5 @@ function get_genotype_transition_matrix(datadir::AbstractString, T::Int)
             end
         end
     end
-    return Q
+    return Q # note: rows of Q must sum to 1
 end
