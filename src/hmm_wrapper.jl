@@ -269,7 +269,7 @@ function get_haplotype_transition_matrix(
             end
         end
     end
-    return Q
+    return Q # Rows of Q should sum to 1
 end
 
 """
@@ -281,14 +281,14 @@ This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia
 # Inputs
 `H`: Length `p` vector of haplotype transition matrices, each with dimension `K × K`
 """
-function get_genotype_transition_matrix(H::Vector{Matrix})
+function get_genotype_transition_matrix(H::Vector{Matrix{T}}) where T <: AbstractFloat
     p = length(H)
     K = size(H[1], 1)
     statespace = (K * (K + 1)) >> 1
     Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
     @showprogress for j in 1:p
         Qj, Hj = Q[j], H[j]
-        for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+        @inbounds for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
             for (col, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
                 Qj[row, col] = Hj[ka, ka_new] * Hj[kb, kb_new]
                 if ka_new != kb_new
@@ -297,41 +297,51 @@ function get_genotype_transition_matrix(H::Vector{Matrix})
             end
         end
     end
-    return Q # note: rows of Q must sum to 1
+    return Q #Rows of Q should sum to 1
 end
 
 function get_initial_probabilities(α::AbstractMatrix)
     K = size(α, 2)
     statespace = (K * (K + 1)) >> 1
     q = zeros(statespace)
-    for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-        q[i] = ka == kb ? abs2(α[1, ka]) : 2 * α[1, ka] * α[1, kb]
-    end
-    # @assert sum(q) ≈ 1 "initial probability does not sum to 1!"
-    return q
-end
-
-function get_initial_probabilities(α1::AbstractVector)
-    K = length(α1)
-    statespace = (K * (K + 1)) >> 1
-    q = zeros(statespace)
-    for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+    α1 = α[:, 1]
+    @inbounds for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
         q[i] = (ka == kb ? abs2(α1[ka]) : 2 * α1[ka] * α1[kb])
     end
-    @assert sum(q) ≈ 1 "initial probability sums to $(sum(q)) but it should sum to 1!"
+    @assert sum(q) ≈ 1 "initial probability should sum to 1!"
     return q
 end
 
-function sample_hidden_states()
-    # get r, α, θ estimated by fastPHASE
-    r, θ, α = process_fastphase_output(datadir, T, extension=extension)
+# function get_emission_probabilities(θ::AbstractMatrix, Z::Vector{Int})
+#     p, K = size(θ)
+#     f = zeros(p, 3) # f[j, 1] = Pr(x_j = 0), f[j, 2] = Pr(x_j = 1), f[j, 3] = Pr(x_j = 3)
+#     for j in 1:p
+#         ka, kb = Z[j]
+#         f[j, 1] = (1 - θ[j, ka]) * (1 - θ[j, kb])
+#         f[j, 2] = 
+#         f[j, 3] = 
+#     end
+# end
 
-    # form transition matrices of haplotypes and genotypes
+"""
+    forward_backward_sampling()
+
+Samples Z, the hidden states of a HMM, from observed sequence of unphased genotypes X.
+This is algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
+"""
+function forward_backward_sampling()
+    # get r, α, θ estimated by fastPHASE
+    r, θ, α = process_fastphase_output(datadir, T, extension="ukb_chr10_n1000_")
+
+    # form transition matrices, initial state and emission probabilities
     H = get_haplotype_transition_matrix(r, θ, α)
     Q = get_genotype_transition_matrix(H)
-    q1 = get_initial_probabilities(@view(α[1, :]))
+    q = get_initial_probabilities(α)
 
+    # forward probabilities
+    # a = 
+
+    # Z = sample_markov_chain(Q, q)
+
+    # f = get_emission_probabilities(θ, Z)
 end
-
-q1 = get_initial_probabilities(α) # 13.840 μs
-q1_new = get_initial_probabilities($(@view(α[1, :])))
