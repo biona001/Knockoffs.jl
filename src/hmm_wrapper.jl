@@ -304,7 +304,7 @@ function get_initial_probabilities(α::AbstractMatrix)
     K = size(α, 2)
     statespace = (K * (K + 1)) >> 1
     q = zeros(statespace)
-    α1 = α[:, 1]
+    α1 = α[1, :]
     @inbounds for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
         q[i] = (ka == kb ? abs2(α1[ka]) : 2 * α1[ka] * α1[kb])
     end
