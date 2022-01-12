@@ -4,8 +4,11 @@ authors = ["Benjamin Chu <benchu99@hotmail.com> and contributors"]
 version = "0.1.0"
 
 [deps]
+Combinatorics = "861a8166-3701-5b0c-9a16-15d98fcdc6aa"
 Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SCS = "c946c3f1-0d1f-5ce8-9dea-7daa1f7e2d13"
 SnpArrays = "4e780e97-f5bf-4111-9dc4-b70aaf691b06"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
