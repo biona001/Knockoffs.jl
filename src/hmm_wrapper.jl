@@ -259,9 +259,9 @@ function get_haplotype_transition_matrix(
     )
     K = size(θ, 2)
     p = size(r, 1)
-    Q = [Matrix{Float64}(undef, K, K) for _ in 1:p]
+    Q = Array{Float64, 3}(undef, K, K, p)
     @inbounds for j in 1:p
-        Qj = Q[j]
+        Qj = @view(Q[:, :, j])
         for k in 1:K, knew in 1:K
             Qj[k, knew] = (1 - exp(-r[j])) * α[j, knew] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
             if k == knew
@@ -285,9 +285,9 @@ function get_genotype_transition_matrix(H::Vector{Matrix{T}}) where T <: Abstrac
     p = length(H)
     K = size(H[1], 1)
     statespace = (K * (K + 1)) >> 1
-    Q = [Matrix{Float64}(undef, statespace, statespace) for _ in 1:p]
+    Q = Array{Float64, 3}(undef, statespace, statespace, p)
     @showprogress for j in 1:p
-        Qj, Hj = Q[j], H[j]
+        Qj, Hj = @view(Q[:, :, j]), @view(H[:, :, j])
         @inbounds for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
             for (col, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
                 Qj[row, col] = Hj[ka, ka_new] * Hj[kb, kb_new]
