@@ -273,7 +273,7 @@ function get_haplotype_transition_matrix(
 end
 
 """
-    get_genotype_transition_matrix(H::Vector{Matrix}, K::Int)
+    get_genotype_transition_matrix(H::AbstractArray{T, 3})
 
 Compute transition matrices for the hidden Markov chains in unphased genotypes. 
 This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
@@ -281,9 +281,9 @@ This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia
 # Inputs
 `H`: Length `p` vector of haplotype transition matrices, each with dimension `K × K`
 """
-function get_genotype_transition_matrix(H::Vector{Matrix{T}}) where T <: AbstractFloat
-    p = length(H)
-    K = size(H[1], 1)
+function get_genotype_transition_matrix(H::AbstractArray{T, 3}) where T <: AbstractFloat
+    K = size(H, 2)
+    p = size(H, 3)
     statespace = (K * (K + 1)) >> 1
     Q = Array{Float64, 3}(undef, statespace, statespace, p)
     @showprogress for j in 1:p
@@ -312,16 +312,39 @@ function get_initial_probabilities(α::AbstractMatrix)
     return q
 end
 
-# function get_emission_probabilities(θ::AbstractMatrix, Z::Vector{Int})
-#     p, K = size(θ)
-#     f = zeros(p, 3) # f[j, 1] = Pr(x_j = 0), f[j, 2] = Pr(x_j = 1), f[j, 3] = Pr(x_j = 3)
-#     for j in 1:p
-#         ka, kb = Z[j]
-#         f[j, 1] = (1 - θ[j, ka]) * (1 - θ[j, kb])
-#         f[j, 2] = 
-#         f[j, 3] = 
-#     end
-# end
+"""
+    get_haplotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
+
+Computes emission probabilities for unphased HMM. This is the equation above eq8 of 
+"Gene hunting with hidden Markov model knockoffs" by Sesia et al.
+"""
+function get_haplotype_emission_probabilities(θ::AbstractMatrix, j::Int, hj::Int, zj::Int)
+    if hj == 0
+        return 1 - θ[j, zj]
+    elseif hj == 1
+        return θ[j, zj]
+    else
+        error("hj should be 0 or 1 but was $hj")
+    end
+end
+
+"""
+    get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
+
+Computes emission probabilities for unphased HMM. This is equation 10 of 
+"Gene hunting with hidden Markov model knockoffs" by Sesia et al.
+"""
+function get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
+    if xj == 0
+        return (1 - θ[j, ka]) * (1 - θ[j, kb])
+    elseif xj == 1
+        return θ[j, ka] * (1 - θ[j, kb]) + θ[j, kb] * (1 - θ[j, ka])
+    elseif xj == 2
+        return θ[j, ka] * θ[j, kb]
+    else
+        error("xj should be 0, 1, or 2 but was $xj")
+    end
+end
 
 """
     forward_backward_sampling()
