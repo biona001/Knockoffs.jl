@@ -383,18 +383,23 @@ function forward_backward_sampling(x::SnpArray)
     for j in 2:p
         Qj = @view(Q[:, :, j])
         for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-            fj = get_genotype_emission_probabilities(θ, xi[j], ka, kb, j) # P(Xj = xj | ka, kb, θ)
-            s = 0
             for (l, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
-                s += Qj[l, k] * α[j - 1, l] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
+                α[j, k] += α[j - 1, l] * Qj[l, k] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
             end
-            α[j, k] = fj * s
+            α[j, k] *= get_genotype_emission_probabilities(θ, xi[j], ka, kb, j) # P(Xj = xj | ka, kb, θ)
         end
     end
+    α_old = copy(α)
+
+    α = zeros(p, statespace)
+    for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+        α[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], ka, kb, 1)
+    end
     for j in 2:p
-        mul!(@view(α[j, :]), @view(Q[:, :, j]), @view(α[j - 1, :]))
+        mul!(@view(α[j, :]), Transpose(Q[:, :, j]), α[j - 1, :])
         for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
             α[j, k] = α[j, k] * get_genotype_emission_probabilities(θ, xi[j], ka, kb, j)
         end
     end
+    [α[:, 1] α_old[:, 1]]
 end
