@@ -279,7 +279,7 @@ Compute transition matrices for the hidden Markov chains in unphased genotypes.
 This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
 
 # Inputs
-`H`: Length `p` vector of haplotype transition matrices, each with dimension `K × K`
+`H`: A `p`-dimensional vector of `K × K` matrices. `H[:, :, j]` is the `j`th transition matrix. 
 """
 function get_genotype_transition_matrix(H::AbstractArray{T, 3}) where T <: AbstractFloat
     K = size(H, 2)
@@ -290,7 +290,7 @@ function get_genotype_transition_matrix(H::AbstractArray{T, 3}) where T <: Abstr
         Qj, Hj = @view(Q[:, :, j]), @view(H[:, :, j])
         @inbounds for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
             for (col, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
-                Qj[row, col] = Hj[ka, ka_new] * Hj[kb, kb_new]
+                Qj[row, col] = Hj[ka, ka_new] * Hj[kb, kb_new] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
                 if ka_new != kb_new
                     Qj[row, col] += Hj[ka, kb_new] * Hj[kb, ka_new]
                 end
@@ -331,10 +331,10 @@ end
 """
     get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
 
-Computes emission probabilities for unphased HMM. This is equation 10 of 
+Computes P(xj | k={ka,kb}, θ): emission probabilities for genotypes. This is eq 10 of 
 "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
 """
-function get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
+function get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Number, ka::Int, kb::Int, j::Int)
     if xj == 0
         return (1 - θ[j, ka]) * (1 - θ[j, kb])
     elseif xj == 1
@@ -347,24 +347,54 @@ function get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::In
 end
 
 """
-    forward_backward_sampling()
+    forward_backward_sampling(x::SnpArray)
 
 Samples Z, the hidden states of a HMM, from observed sequence of unphased genotypes X.
 This is algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
 """
-function forward_backward_sampling()
-    # get r, α, θ estimated by fastPHASE
-    r, θ, α = process_fastphase_output(datadir, T, extension="ukb_chr10_n1000_")
+function forward_backward_sampling(x::SnpArray)
+    n, p = size(x)
+
+    # get r, α, θ estimated by fastPHASE (note we use a to represent α)
+    r, θ, a = process_fastphase_output(datadir, T, extension="ukb_chr10_n1000_")
 
     # form transition matrices, initial state and emission probabilities
-    H = get_haplotype_transition_matrix(r, θ, α)
+    H = get_haplotype_transition_matrix(r, θ, a)
     Q = get_genotype_transition_matrix(H)
-    q = get_initial_probabilities(α)
+    q = get_initial_probabilities(a)
+
+    # 1st sample
+    # i = 1
+    # xi = convert(Vector{Float64}, @view(x[i, :]))
+
+    # emission probabilities
+    K = size(a, 2)
+    statespace = (K * (K + 1)) >> 1
+    # f = zeros(p, statespace)
+    # for j in 1:p, (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+    #     f[j, k] = get_genotype_emission_probabilities(θ, xi[j], ka, kb, j)
+    # end
 
     # forward probabilities
-    # a = 
-
-    # Z = sample_markov_chain(Q, q)
-
-    # f = get_emission_probabilities(θ, Z)
+    α = zeros(p, statespace)
+    for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+        α[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], ka, kb, 1)
+    end
+    for j in 2:p
+        Qj = @view(Q[:, :, j])
+        for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+            fj = get_genotype_emission_probabilities(θ, xi[j], ka, kb, j) # P(Xj = xj | ka, kb, θ)
+            s = 0
+            for (l, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
+                s += Qj[l, k] * α[j - 1, l] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
+            end
+            α[j, k] = fj * s
+        end
+    end
+    for j in 2:p
+        mul!(@view(α[j, :]), @view(Q[:, :, j]), @view(α[j - 1, :]))
+        for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+            α[j, k] = α[j, k] * get_genotype_emission_probabilities(θ, xi[j], ka, kb, j)
+        end
+    end
 end
