@@ -259,7 +259,7 @@ function get_haplotype_transition_matrix(
     )
     K = size(θ, 2)
     p = size(r, 1)
-    Q = Array{Float64, 3}(undef, K, K, p)
+    Q = Array{Float64, 3}(undef, K, K, p) # todo: is this length p or p - 1??
     @inbounds for j in 1:p
         Qj = @view(Q[:, :, j])
         for k in 1:K, knew in 1:K
@@ -313,12 +313,12 @@ function get_initial_probabilities(α::AbstractMatrix)
 end
 
 """
-    get_haplotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
+    get_haplotype_emission_probabilities(θ::AbstractMatrix, j::Int, hj::Number, zj::Int)
 
 Computes emission probabilities for unphased HMM. This is the equation above eq8 of 
 "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
 """
-function get_haplotype_emission_probabilities(θ::AbstractMatrix, j::Int, hj::Int, zj::Int)
+function get_haplotype_emission_probabilities(θ::AbstractMatrix, j::Int, hj::Number, zj::Int)
     if hj == 0
         return 1 - θ[j, zj]
     elseif hj == 1
@@ -329,7 +329,7 @@ function get_haplotype_emission_probabilities(θ::AbstractMatrix, j::Int, hj::In
 end
 
 """
-    get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Int, ka::Int, kb::Int, j::Int)
+    get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Number, ka::Int, kb::Int, j::Int)
 
 Computes P(xj | k={ka,kb}, θ): emission probabilities for genotypes. This is eq 10 of 
 "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
@@ -378,7 +378,7 @@ function forward_backward_sampling(x::SnpArray)
 
     # form transition matrices, initial state and emission probabilities
     H = get_haplotype_transition_matrix(r, θ, a)
-    Q = get_genotype_transition_matrix(H)
+    Q = get_genotype_transition_matrix(H) # todo: is this length p or p-1?
     q = get_initial_probabilities(a)
 
     # 1st sample
@@ -407,7 +407,6 @@ function forward_backward_sampling(x::SnpArray)
     end
 
     # backwards sampling
-    Z = zeros(Int, 2, p)
     prob = zeros(statespace)
     denom = sum(@view(α̂[p, :]))
     for k in 1:statespace
@@ -425,6 +424,8 @@ function forward_backward_sampling(x::SnpArray)
             d.p[k] = Q[k, z_latest, j + 1] * α̂[j, k] / denom
         end
         z_latest = rand(d)
-        Z[1, j], Z[2, j] = states[zj]
+        Z[1, j], Z[2, j] = states[z_latest]
     end
+
+    return Z
 end
