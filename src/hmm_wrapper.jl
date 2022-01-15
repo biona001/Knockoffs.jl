@@ -384,42 +384,47 @@ function forward_backward_sampling(x::SnpArray)
     # 1st sample
     i = 1
     xi = convert(Vector{Float64}, @view(x[i, :]))
+    Z = zeros(Int, 2, p)
 
-    # forward probabilities
+    # (scaled) forward probabilities
     K = size(a, 2)
+    states = collect(with_replacement_combinations(1:K, 2))
     statespace = (K * (K + 1)) >> 1
     α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
-    c = zeros(p) # normalizing constants. c[k] = p(x_k | x_1,...,x_{k-1}) and P(x_1,...,x_k) = c1 * c2 * ... * ck
-    for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+    c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
+    for (k, (ka, kb)) in enumerate(states)
         α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], ka, kb, 1)
         c[1] += α̂[1, k]
     end
     α̂[1, :] ./= c[1]
-    
     for j in 2:p
         mul!(@view(α̂[j, :]), Transpose(@view(Q[:, :, j])), @view(α̂[j - 1, :])) # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
-        for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+        for (k, (ka, kb)) in enumerate(states)
             α̂[j, k] *= get_genotype_emission_probabilities(θ, xi[j], ka, kb, j)
             c[j] += α̂[j, k]
         end
         α̂[j, :] ./= c[j]
     end
 
-    # α_old = copy(α)
-    # α = zeros(p, statespace)
-    # for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-    #     α[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], ka, kb, 1)
-    # end
-    # for j in 2:p
-    #     Qj = @view(Q[:, :, j])
-    #     for (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-    #         for (l, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
-    #             α[j, k] += α[j - 1, l] * Qj[l, k] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
-    #         end
-    #         α[j, k] *= get_genotype_emission_probabilities(θ, xi[j], ka, kb, j) # P(Xj = xj | ka, kb, θ)
-    #     end
-    # end
-    # [α[:, 1] α_old[:, 1]]
-
-    # backwards probabilities
+    # backwards sampling
+    Z = zeros(Int, 2, p)
+    prob = zeros(statespace)
+    denom = sum(@view(α̂[p, :]))
+    for k in 1:statespace
+        prob[k] = α̂[p, k] / denom
+    end
+    d = Categorical(prob)
+    z_latest = rand(d)
+    Z[1, p], Z[2, p] = states[z_latest]
+    for j in Iterators.reverse(1:p-1)
+        denom = 0.0
+        for k in 1:statespace
+            denom += Q[k, z_latest, j + 1] * α̂[j, k]
+        end
+        for k in 1:statespace
+            d.p[k] = Q[k, z_latest, j + 1] * α̂[j, k] / denom
+        end
+        z_latest = rand(d)
+        Z[1, j], Z[2, j] = states[zj]
+    end
 end
