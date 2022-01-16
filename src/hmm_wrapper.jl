@@ -259,7 +259,7 @@ function get_haplotype_transition_matrix(
     )
     K = size(θ, 2)
     p = size(r, 1)
-    Q = Array{Float64, 3}(undef, K, K, p) # todo: is this length p or p - 1??
+    Q = Array{Float64, 3}(undef, K, K, p)
     @inbounds for j in 1:p
         Qj = @view(Q[:, :, j])
         for k in 1:K, knew in 1:K
@@ -281,31 +281,36 @@ This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia
 # Inputs
 `H`: A `p`-dimensional vector of `K × K` matrices. `H[:, :, j]` is the `j`th transition matrix. 
 """
-function get_genotype_transition_matrix(H::AbstractArray{T, 3}) where T <: AbstractFloat
+function get_genotype_transition_matrix(H::AbstractArray{T, 3}, table::MarkovChainTable) where T <: AbstractFloat
     K = size(H, 2)
     p = size(H, 3)
     statespace = (K * (K + 1)) >> 1
     Q = Array{Float64, 3}(undef, statespace, statespace, p)
-    @showprogress for j in 1:p
+    for j in 1:p
         Qj, Hj = @view(Q[:, :, j]), @view(H[:, :, j])
-        @inbounds for (row, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-            for (col, (ka_new, kb_new)) in enumerate(with_replacement_combinations(1:K, 2))
-                Qj[row, col] = Hj[ka, ka_new] * Hj[kb, kb_new] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
-                if ka_new != kb_new
-                    Qj[row, col] += Hj[ka, kb_new] * Hj[kb, ka_new]
+        @inbounds for (row, geno) in enumerate(table)
+            for (col, geno_new) in enumerate(table)
+                Qj[row, col] = Hj[geno.a, geno_new.a] * Hj[geno.b, geno_new.b] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
+                if geno_new.a != geno_new.b
+                    Qj[row, col] += Hj[geno.a, geno_new.b] * Hj[geno.b, geno_new.a]
                 end
             end
         end
     end
     return Q #Rows of Q should sum to 1
 end
+# helper functions from HMMBase.jl
+# istransmat(A::AbstractMatrix) =
+#     issquare(A) && all([isprobvec(A[i, :]) for i = 1:size(A, 1)])
+# @assert all(i -> istransmat(@view(Q[:, :, i])), 1:size(Q, 3))
 
-function get_initial_probabilities(α::AbstractMatrix)
+function get_initial_probabilities(α::AbstractMatrix, table::MarkovChainTable)
     K = size(α, 2)
     statespace = (K * (K + 1)) >> 1
     q = zeros(statespace)
     α1 = α[1, :]
-    @inbounds for (i, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+    @inbounds for (i, geno) in enumerate(table)
+        ka, kb = geno.a, geno.b
         q[i] = (ka == kb ? abs2(α1[ka]) : 2 * α1[ka] * α1[kb])
     end
     @assert sum(q) ≈ 1 "initial probability should sum to 1!"
@@ -345,6 +350,12 @@ function get_genotype_emission_probabilities(θ::AbstractMatrix, xj::Number, ka:
         error("xj should be 0, 1, or 2 but was $xj")
     end
 end
+# for j in 1:p, (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
+#     p0 = get_genotype_emission_probabilities(θ, 0, ka, kb, j)
+#     p1 = get_genotype_emission_probabilities(θ, 1, ka, kb, j)
+#     p2 = get_genotype_emission_probabilities(θ, 2, ka, kb, j)
+#     p0 + p1 + p2 ≈ 1 || error("shouldn't happen")
+# end
 
 """
     form_emission_prob_matrix(a, θ, xi::AbstractVector)
@@ -354,12 +365,12 @@ end
 + `θ`: `p × K` matrix with values estimated from fastPHASE
 + `xi`: Length `p` vector with sample `i`'s genotypes (entries 0, 1 or 2) 
 """
-function form_emission_prob_matrix(a, θ, xi::AbstractVector)
+function form_emission_prob_matrix(a, θ, xi::AbstractVector, table::MarkovChainTable)
     p, K = size(a)
     statespace = (K * (K + 1)) >> 1
     f = zeros(p, statespace)
-    for j in 1:p, (k, (ka, kb)) in enumerate(with_replacement_combinations(1:K, 2))
-        f[j, k] = get_genotype_emission_probabilities(θ, xi[j], ka, kb, j)
+    for j in 1:p, (k, geno) in enumerate(table)
+        f[j, k] = get_genotype_emission_probabilities(θ, xi[j], geno.a, geno.b, j)
     end
     return f
 end
@@ -370,43 +381,34 @@ end
 Samples Z, the hidden states of a HMM, from observed sequence of unphased genotypes X.
 This is algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
 """
-function forward_backward_sampling(x::SnpArray)
-    n, p = size(x)
-
-    # get r, α, θ estimated by fastPHASE (note we use a to represent α)
-    r, θ, a = process_fastphase_output(datadir, T, extension="ukb_chr10_n1000_")
-
-    # form transition matrices, initial state and emission probabilities
-    H = get_haplotype_transition_matrix(r, θ, a)
-    Q = get_genotype_transition_matrix(H) # todo: is this length p or p-1?
-    q = get_initial_probabilities(a)
-
-    # 1st sample
-    i = 1
-    xi = convert(Vector{Float64}, @view(x[i, :]))
-    Z = zeros(Int, 2, p)
+function forward_backward_sampling(
+    xi::Vector,
+    Q::Array{T, 3},
+    q::Vector{T},
+    table::MarkovChainTable
+    ) where T 
+    statespace, p = size(Q, 2), size(Q, 3)
+    length(xi) == p || error("forward_backward_sampling: length(xi) not equal to p")
 
     # (scaled) forward probabilities
-    K = size(a, 2)
-    states = collect(with_replacement_combinations(1:K, 2))
-    statespace = (K * (K + 1)) >> 1
     α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
     c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
-    for (k, (ka, kb)) in enumerate(states)
-        α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], ka, kb, 1)
+    for (k, geno) in enumerate(table)
+        α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], geno.a, geno.b, 1)
         c[1] += α̂[1, k]
     end
     α̂[1, :] ./= c[1]
     for j in 2:p
         mul!(@view(α̂[j, :]), Transpose(@view(Q[:, :, j])), @view(α̂[j - 1, :])) # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
-        for (k, (ka, kb)) in enumerate(states)
-            α̂[j, k] *= get_genotype_emission_probabilities(θ, xi[j], ka, kb, j)
+        for (k, geno) in enumerate(table)
+            α̂[j, k] *= get_genotype_emission_probabilities(θ, xi[j], geno.a, geno.b, j)
             c[j] += α̂[j, k]
         end
         α̂[j, :] ./= c[j]
     end
 
     # backwards sampling
+    Z = zeros(Int, 2, p)
     prob = zeros(statespace)
     denom = sum(@view(α̂[p, :]))
     for k in 1:statespace
@@ -414,7 +416,7 @@ function forward_backward_sampling(x::SnpArray)
     end
     d = Categorical(prob)
     z_latest = rand(d)
-    Z[1, p], Z[2, p] = states[z_latest]
+    Z[1, p], Z[2, p] = index_to_pair(table, z_latest)
     for j in Iterators.reverse(1:p-1)
         denom = 0.0
         for k in 1:statespace
@@ -424,8 +426,52 @@ function forward_backward_sampling(x::SnpArray)
             d.p[k] = Q[k, z_latest, j + 1] * α̂[j, k] / denom
         end
         z_latest = rand(d)
-        Z[1, j], Z[2, j] = states[z_latest]
+        Z[1, j], Z[2, j] = index_to_pair(table, z_latest)
     end
 
     return Z
 end
+# todo: how to test correctness?
+
+function hmm_knockoff(plinkname::AbstractString; T=10, datadir=pwd(), extension="ukb_chr10_n1000_")
+    xdata = SnpData(plinkname)
+    x = xdata.snparray
+    n, p = size(x)
+
+    # get r, α, θ estimated by fastPHASE
+    r, θ, α = process_fastphase_output(datadir, T, extension=extension)
+    K = size(θ, 2) # number of haplotype motifs
+    table = MarkovChainTable(K)
+
+    # form transition matrices, initial state and emission probabilities
+    H = get_haplotype_transition_matrix(r, θ, α)
+    Q = get_genotype_transition_matrix(H, table)
+    q = get_initial_probabilities(α, table)
+
+    xi = zeros(Float64, p)
+    for i in 1:n
+        # sample hidden states
+        xi = copyto!(xi, @view(x[i, :]))
+        Z = forward_backward_sampling(xi, Q, q, table)
+
+        # sample knockoff of markov chain
+
+        # sample knockoffs of genotypes
+    end
+end
+
+# using LinearAlgebra
+# using DelimitedFiles
+# using Combinatorics
+# using Distributions
+# using ProgressMeter
+# using HMMBase
+# using SnpArrays
+# # using Knockoffs
+# plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/subset/ukb.10k.chr10"
+# xdata = SnpData(plinkname)
+# x = xdata.snparray
+# n, p = size(x)
+# datadir = pwd()
+# T = 10
+# extension="ukb_chr10_n1000_"

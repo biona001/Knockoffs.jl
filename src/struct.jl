@@ -71,12 +71,13 @@ struct MarkovChainTable
 end
 function MarkovChainTable(K::Int)
     table = GenotypeState[]
-    for (a, b) in with_replacement_combinations(1:K, 2)
+    for a in 1:K, b in a:K
         push!(table, GenotypeState(a, b))
     end
     return MarkovChainTable(K, table)
 end
 
+Base.enumerate(mc::MarkovChainTable) = enumerate(mc.index_to_pair)
 statespace(mc::MarkovChainTable) = ((mc.K + 1) * mc.K) >> 1
 function pair_to_index(mc::MarkovChainTable, a::Int, b::Int)
     statespace(mc) - ((mc.K-a+2)*(mc.K-a+1))>>1 + (b - a + 1)
