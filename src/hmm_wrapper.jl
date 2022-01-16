@@ -379,13 +379,27 @@ end
     forward_backward_sampling(x::SnpArray)
 
 Samples Z, the hidden states of a HMM, from observed sequence of unphased genotypes X.
-This is algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
+
+# Inputs
+`Z`: Length `p` vector of integers. This will store the sampled Markov states
+`xi`: Length `p` vector of genotypes (0, 1, or 2)
+`Q`: `K × K × p` array. `Q[:, :, j]` is a `K × K` matrix of transition
+    probabilities for `j`th state, i.e. Q[l, k, j] = P(X_{j} = k | X_{j - 1} = l).
+    The first transition matrix is not used. 
+`q`: Length `p` vector of initial probabilities
+`θ`: The θ parameter estimated from fastPHASE
+`table`: a `MarkovChainTable` that maps markov chain states to haplotype 
+    pairs (ka, kb). 
+
+# Reference
+Algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
 """
 function forward_backward_sampling!(
     Z::Vector{Int},
     xi::Vector,
     Q::Array{T, 3},
     q::Vector{T},
+    θ::AbstractMatrix,
     table::MarkovChainTable,
     ) where T
     statespace, p = size(Q, 2), size(Q, 3)
@@ -435,10 +449,11 @@ function forward_backward_sampling(
     xi::Vector,
     Q::Array{T, 3},
     q::Vector{T},
+    θ::AbstractMatrix,
     table::MarkovChainTable
     ) where T
     Z = zeros(Int, p)
-    forward_backward_sampling!(Z, xi, Q, q, table)
+    forward_backward_sampling!(Z, xi, Q, q, θ, table)
 end
 
 function hmm_knockoff(plinkname::AbstractString; T=10, datadir=pwd(), extension="ukb_chr10_n1000_")
@@ -462,7 +477,7 @@ function hmm_knockoff(plinkname::AbstractString; T=10, datadir=pwd(), extension=
         # sample hidden states
         Random.seed!(2022)
         xi = copyto!(xi, @view(x[i, :]))
-        forward_backward_sampling!(Z, xi, Q, q, table)
+        forward_backward_sampling!(Z, xi, Q, q, θ, table)
 
         # sample knockoff of markov chain
 
