@@ -381,14 +381,15 @@ end
 Samples Z, the hidden states of a HMM, from observed sequence of unphased genotypes X.
 This is algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
 """
-function forward_backward_sampling(
+function forward_backward_sampling!(
+    Z::Vector{Int},
     xi::Vector,
     Q::Array{T, 3},
     q::Vector{T},
-    table::MarkovChainTable
-    ) where T 
+    table::MarkovChainTable,
+    ) where T
     statespace, p = size(Q, 2), size(Q, 3)
-    length(xi) == p || error("forward_backward_sampling: length(xi) not equal to p")
+    length(xi) == p || error("length(xi) not equal to p")
 
     # (scaled) forward probabilities
     α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
@@ -408,30 +409,37 @@ function forward_backward_sampling(
     end
 
     # backwards sampling
-    Z = zeros(Int, 2, p)
     prob = zeros(statespace)
     denom = sum(@view(α̂[p, :]))
     for k in 1:statespace
         prob[k] = α̂[p, k] / denom
     end
     d = Categorical(prob)
-    z_latest = rand(d)
-    Z[1, p], Z[2, p] = index_to_pair(table, z_latest)
+    Z[end] = rand(d)
     for j in Iterators.reverse(1:p-1)
         denom = 0.0
         for k in 1:statespace
-            denom += Q[k, z_latest, j + 1] * α̂[j, k]
+            denom += Q[k, Z[j + 1], j + 1] * α̂[j, k]
         end
-        for k in 1:statespace
-            d.p[k] = Q[k, z_latest, j + 1] * α̂[j, k] / denom
+        for zj in 1:statespace
+            d.p[zj] = Q[zj, Z[j + 1], j + 1] * α̂[j, zj] / denom
         end
-        z_latest = rand(d)
-        Z[1, j], Z[2, j] = index_to_pair(table, z_latest)
+        Z[j] = rand(d)
     end
 
     return Z
 end
 # todo: how to test correctness?
+
+function forward_backward_sampling(
+    xi::Vector,
+    Q::Array{T, 3},
+    q::Vector{T},
+    table::MarkovChainTable
+    ) where T
+    Z = zeros(Int, p)
+    forward_backward_sampling!(Z, xi, Q, q, table)
+end
 
 function hmm_knockoff(plinkname::AbstractString; T=10, datadir=pwd(), extension="ukb_chr10_n1000_")
     xdata = SnpData(plinkname)
@@ -449,10 +457,12 @@ function hmm_knockoff(plinkname::AbstractString; T=10, datadir=pwd(), extension=
     q = get_initial_probabilities(α, table)
 
     xi = zeros(Float64, p)
+    Z = zeros(Int, p)
     for i in 1:n
         # sample hidden states
+        Random.seed!(2022)
         xi = copyto!(xi, @view(x[i, :]))
-        Z = forward_backward_sampling(xi, Q, q, table)
+        forward_backward_sampling!(Z, xi, Q, q, table)
 
         # sample knockoff of markov chain
 
@@ -467,11 +477,9 @@ end
 # using ProgressMeter
 # using HMMBase
 # using SnpArrays
+# using Random
 # # using Knockoffs
 # plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/subset/ukb.10k.chr10"
-# xdata = SnpData(plinkname)
-# x = xdata.snparray
-# n, p = size(x)
 # datadir = pwd()
 # T = 10
 # extension="ukb_chr10_n1000_"
