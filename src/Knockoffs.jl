@@ -7,6 +7,7 @@ using SCS
 using SnpArrays
 using DelimitedFiles
 using ProgressMeter
+using Distributions
 import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,

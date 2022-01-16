@@ -1,11 +1,12 @@
 name = "Knockoffs"
 uuid = "878bf26d-0c49-448a-9df5-b057c815d613"
 authors = ["Benjamin Chu <benchu99@hotmail.com> and contributors"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SCS = "c946c3f1-0d1f-5ce8-9dea-7daa1f7e2d13"
