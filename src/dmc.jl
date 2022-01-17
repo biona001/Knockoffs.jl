@@ -26,9 +26,19 @@ function markov_knockoffs(
     Z̃ = zeros(Int, p)
     N = zeros(p, statespace)
     d = Categorical([1 / statespace for _ in 1:statespace])
-    # start algorithm 1
+    return markov_knockoffs!(Z̃, Z, N, d, Q, q) # algorithm 1 in Sesia et al
+end
+
+function markov_knockoffs!(
+    Z̃::Vector{Int},
+    Z::Vector{Int},
+    N::AbstractMatrix,
+    d::Disitrbution,
+    Q::Array{T, 3},
+    q::Vector{T}
+    ) where T <: AbstractFloat
     for j in 1:p
-        update_normalizing_constants!(N, Z, Z̃, Q, q, j) # equation 5
+        update_normalizing_constants!(N, Z, Z̃, Q, q, j) # equation 5 in Sesia et al
         sample_dmc_knockoff!(Z̃, Z, d, N, Q, q, j)
     end
     return Z̃
