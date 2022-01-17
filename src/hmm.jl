@@ -214,31 +214,96 @@ function forward_backward_sampling(
     forward_backward_sampling!(Z, xi, Q, q, θ, table)
 end
 
-function hmm_knockoff(plinkname::AbstractString; T=10, datadir=pwd(), extension="ukb_chr10_n1000_")
-    xdata = SnpData(plinkname)
+"""
+    hmm_knockoff(plinkname, fastphase_outfile, T=10, datadir=pwd())
+
+Main entry point of generating HMM knockoffs from binary PLINK formatted files.
+
+# Input
++ `plinkname`: Binary PLINK file names without the `.bed/.bim/.fam` suffix. 
++ `fastphase_outfile`: The output file name from fastPHASE's alpha, theta, r files
+    (e.g. input "x_" if the files are called "x_thetahat.txt", "x_rhat.txt"...etc)
+
+# Optional arguments
++ `T`: Number of initial starts used in fastPHASE EM algorithm (default = 10)
++ `datadir`: Full path to the PLINK and fastPHASE files (default = current directory)
++ `outfile`: Output PLINK format name
+
+# Output
++ `outfile.bed`: `n × 2p` genotypes, including the original genotypes and the knockoffs
++ `outfile.bim`: SNP mapping file. Knockoff have SNP names ending in ".k"
++ `outfile.fam`: Sample mapping file, this is a copy of the original `plinkname.fam` file
+"""
+function hmm_knockoff(
+    plinkname::AbstractString,
+    fastphase_outfile::AbstractString;
+    T::Int = 10,
+    datadir::AbstractString = pwd(),
+    outfile::AbstractString = "knockoff"
+    )
+    xdata = SnpData(joinpath(datadir, plinkname))
     x = xdata.snparray
     n, p = size(x)
 
     # get r, α, θ estimated by fastPHASE
-    r, θ, α = process_fastphase_output(datadir, T, extension=extension)
-    K = size(θ, 2) # number of haplotype motifs
+    r, θ, α = process_fastphase_output(datadir, T, extension=fastphase_outfile)
+    K = size(θ, 2)
+    statespace = (K * (K + 1)) >> 1
     table = MarkovChainTable(K)
 
-    # form transition matrices, initial state and emission probabilities
+    # transition matrices, initial states (marginal distribution vector), and emission probabilities
     H = get_haplotype_transition_matrix(r, θ, α)
     Q = get_genotype_transition_matrix(H, table)
     q = get_initial_probabilities(α, table)
 
+    # preallocated arrays
     xi = zeros(Float64, p)
     Z = zeros(Int, p)
-    for i in 1:n
-        # sample hidden states
-        Random.seed!(2022)
+    Z̃ = zeros(Int, p)
+    X̃ = zeros(Int, p)
+    N = zeros(p, statespace)
+    d_K = Categorical([1 / statespace for _ in 1:statespace]) # for sampling markov chains (length statespace)
+    d_3 = Categorical([1 / statespace for _ in 1:statespace]) # for sampling genotypes (length 3)
+
+    @showprogress for i in 1:n
+        # sample hidden states (algorithm 3 in Sesia et al)
         xi = copyto!(xi, @view(x[i, :]))
         forward_backward_sampling!(Z, xi, Q, q, θ, table)
 
-        # sample knockoff of markov chain
+        # sample knockoff of markov chain (algorithm 2 in Sesia et al)
+        markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
 
-        # sample knockoffs of genotypes
+        # sample knockoffs of genotypes (eq 6 in Sesia et al)
+        genotype_knockoffs!(X̃, Z̃, table, θ, d_3)
     end
+end
+
+function genotype_knockoffs(
+    Z̃::AbstractVector,
+    table::MarkovChainTable,
+    θ::AbstractMatrix
+    )
+    p = length(Z̃)
+    X̃ = zeros(eltype(Z̃), p)
+    d = Categorical([1/3 for _ in 1:3])
+    return genotype_knockoffs!(X̃, Z̃, table, θ, d)
+end
+
+function genotype_knockoffs!(
+    X̃::AbstractVector,
+    Z̃::AbstractVector,
+    table::MarkovChainTable,
+    θ::AbstractMatrix,
+    d::Categorical # Categorical distribution from Distributions.jl
+    )
+    p = length(Z̃)
+    for j in 1:p
+        a, b = index_to_pair(table, Z̃[j])
+        d.p[1] = get_genotype_emission_probabilities(θ, 0, a, b, j)
+        d.p[2] = get_genotype_emission_probabilities(θ, 1, a, b, j)
+        d.p[3] = get_genotype_emission_probabilities(θ, 2, a, b, j)
+        X̃[j] = rand(d)
+    end
+    X̃ .-= 1 # sampling d returns states 1~3, but genotypes are 0~2
+    return X̃
 end

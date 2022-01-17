@@ -20,7 +20,8 @@ export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
     GenotypeState, MarkovChainTable, pair_to_index, index_to_pair,
     hmm_knockoff, forward_backward_sampling, forward_backward_sampling!,
     form_emission_prob_matrix, get_genotype_emission_probabilities,
-    get_haplotype_emission_probabilities, markov_knockoffs, markov_knockoffs!
+    get_haplotype_emission_probabilities, markov_knockoffs, markov_knockoffs!,
+    genotype_knockoffs
 
 include("struct.jl")
 include("fixed.jl")

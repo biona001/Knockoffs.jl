@@ -33,13 +33,13 @@ function markov_knockoffs!(
     Z̃::Vector{Int},
     Z::Vector{Int},
     N::AbstractMatrix,
-    d::Distribution,
+    d::Categorical, # Categorical distribution from Distributions.jl
     Q::Array{T, 3},
     q::Vector{T}
     ) where T <: AbstractFloat
     for j in 1:length(Z)
         update_normalizing_constants!(N, Z, Z̃, Q, q, j) # equation 5 in Sesia et al
-        sample_dmc_knockoff!(Z̃, Z, d, N, Q, q, j)
+        single_state_dmc_knockoff!(Z̃, Z, d, N, Q, q, j) # sample Z̃j
     end
     return Z̃
 end
@@ -82,10 +82,10 @@ function update_normalizing_constants!(
     return nothing
 end
 
-function sample_dmc_knockoff!(
+function single_state_dmc_knockoff!(
     Z̃::AbstractVector{Int},
     Z::AbstractVector{Int},
-    d::Distribution,
+    d::Categorical, # Categorical distribution from Distributions.jl
     N::AbstractMatrix{T},
     Q::Array{T, 3},
     q::AbstractVector{T},

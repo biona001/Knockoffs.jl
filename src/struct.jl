@@ -67,7 +67,7 @@ If there are K=5 haplotype motifs, then the 15 possible genotype states and thei
 """
 struct MarkovChainTable
     K::Int # number of states
-    index_to_pair::Vector{GenotypeState}
+    index_to_pair::Vector{GenotypeState} # index_to_pair[1] = (1, 1), index_to_pair[2] = (1, 2)...etc
 end
 function MarkovChainTable(K::Int)
     table = GenotypeState[]
