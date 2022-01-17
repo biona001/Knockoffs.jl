@@ -29,5 +29,6 @@ include("dmc.jl")
 include("feature_stats.jl")
 include("threshold.jl")
 include("hmm_wrapper.jl")
+include("hmm.jl")
 
 end

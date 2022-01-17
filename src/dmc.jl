@@ -33,11 +33,11 @@ function markov_knockoffs!(
     Z̃::Vector{Int},
     Z::Vector{Int},
     N::AbstractMatrix,
-    d::Disitrbution,
+    d::Distribution,
     Q::Array{T, 3},
     q::Vector{T}
     ) where T <: AbstractFloat
-    for j in 1:p
+    for j in 1:length(Z)
         update_normalizing_constants!(N, Z, Z̃, Q, q, j) # equation 5 in Sesia et al
         sample_dmc_knockoff!(Z̃, Z, d, N, Q, q, j)
     end
