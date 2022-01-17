@@ -9,6 +9,9 @@ This is 2 equations above eq8 in "Gene hunting with hidden Markov model knockoff
 `r`: Length `p` vector, the "recombination rates"
 `θ`: Size `p × K` matrix, `θ[j, k]` is probability that the allele is 1 for SNP `p` at `k`th haplotype motif
 `α`: Size `p × K` matrix, probabilities that haplotype motifs succeed each other. Rows should sum to 1. 
+
+# Output
+`H`: A `p`-dimensional vector of `K × K` matrices. `H[:, :, j]` is the `j`th transition matrix. 
 """
 function get_haplotype_transition_matrix(
     r::AbstractVecOrMat, # p × 1
@@ -31,20 +34,38 @@ function get_haplotype_transition_matrix(
 end
 
 """
-    get_genotype_transition_matrix(H::AbstractArray{T, 3})
+    get_genotype_transition_matrix(r, θ, α, table)
 
 Compute transition matrices for the hidden Markov chains in unphased genotypes. 
 This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
 
 # Inputs
-`H`: A `p`-dimensional vector of `K × K` matrices. `H[:, :, j]` is the `j`th transition matrix. 
+`r`: Length `p` vector, the "recombination rates"
+`θ`: Size `p × K` matrix, `θ[j, k]` is probability that the allele is 1 for SNP `p` at `k`th haplotype motif
+`α`: Size `p × K` matrix, probabilities that haplotype motifs succeed each other. Rows should sum to 1. 
+`q`: Length `K` vector of initial probabilities
+`table`: a `MarkovChainTable` that maps markov chain states to haplotype 
+    pairs (ka, kb). 
 """
-function get_genotype_transition_matrix(H::AbstractArray{T, 3}, table::MarkovChainTable) where T <: AbstractFloat
+function get_genotype_transition_matrix(
+    r::AbstractVecOrMat, # p × 1
+    θ::AbstractMatrix,   # p × K
+    α::AbstractMatrix,   # p × K
+    q::AbstractVector,   # p × 1
+    table::MarkovChainTable
+    )
+    # first compute haplotype transition matrix
+    H = get_haplotype_transition_matrix(r, θ, α)
     K = size(H, 2)
     p = size(H, 3)
     statespace = (K * (K + 1)) >> 1
+
+    # now compute genotype transition matrix
     Q = Array{Float64, 3}(undef, statespace, statespace, p)
-    for j in 1:p
+    for l in 1:statespace
+        Q[l, :, 1] .= q
+    end
+    for j in 2:p
         Qj, Hj = @view(Q[:, :, j]), @view(H[:, :, j])
         @inbounds for (row, geno) in enumerate(table)
             for (col, geno_new) in enumerate(table)
@@ -144,7 +165,7 @@ Samples Z, the hidden states of a HMM, from observed sequence of unphased genoty
 `Q`: `K × K × p` array. `Q[:, :, j]` is a `K × K` matrix of transition
     probabilities for `j`th state, i.e. Q[l, k, j] = P(X_{j} = k | X_{j - 1} = l).
     The first transition matrix is not used. 
-`q`: Length `p` vector of initial probabilities
+`q`: Length `K` vector of initial probabilities
 `θ`: The θ parameter estimated from fastPHASE
 `table`: a `MarkovChainTable` that maps markov chain states to haplotype 
     pairs (ka, kb). 
@@ -253,10 +274,9 @@ function hmm_knockoff(
     statespace = (K * (K + 1)) >> 1
     table = MarkovChainTable(K)
 
-    # transition matrices, initial states (marginal distribution vector), and emission probabilities
-    H = get_haplotype_transition_matrix(r, θ, α)
-    Q = get_genotype_transition_matrix(H, table)
+    # get initial states (marginal distribution vector) and Markov transition matrices
     q = get_initial_probabilities(α, table)
+    Q = get_genotype_transition_matrix(r, θ, α, q, table)
 
     # preallocated arrays
     # full_knockoff = SnpArray(outfile * ".bed", n, 2p)
