@@ -241,9 +241,9 @@ function hmm_knockoff(
     datadir::AbstractString = pwd(),
     outfile::AbstractString = "knockoff"
     )
-    xdata = SnpData(joinpath(datadir, plinkname))
-    x = xdata.snparray
-    n, p = size(x)
+    snpdata = SnpData(joinpath(datadir, plinkname))
+    Xfull = snpdata.snparray
+    n, p = size(Xfull)
 
     # get r, α, θ estimated by fastPHASE
     r, θ, α = process_fastphase_output(datadir, T, extension=fastphase_outfile)
@@ -257,7 +257,9 @@ function hmm_knockoff(
     q = get_initial_probabilities(α, table)
 
     # preallocated arrays
-    xi = zeros(Float64, p)
+    # full_knockoff = SnpArray(outfile * ".bed", n, 2p)
+    full_knockoff = zeros(Int, n, p)
+    X = zeros(Float64, p)
     Z = zeros(Int, p)
     Z̃ = zeros(Int, p)
     X̃ = zeros(Int, p)
@@ -267,15 +269,20 @@ function hmm_knockoff(
 
     @showprogress for i in 1:n
         # sample hidden states (algorithm 3 in Sesia et al)
-        xi = copyto!(xi, @view(x[i, :]))
-        forward_backward_sampling!(Z, xi, Q, q, θ, table)
+        copyto!(X, @view(Xfull[i, :]))
+        forward_backward_sampling!(Z, X, Q, q, θ, table)
 
         # sample knockoff of markov chain (algorithm 2 in Sesia et al)
         markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
 
         # sample knockoffs of genotypes (eq 6 in Sesia et al)
         genotype_knockoffs!(X̃, Z̃, table, θ, d_3)
+
+        # save knockoff
+        full_knockoff[i, :] .= X̃
     end
+
+    return full_knockoff
 end
 
 function genotype_knockoffs(
@@ -307,3 +314,18 @@ function genotype_knockoffs!(
     X̃ .-= 1 # sampling d returns states 1~3, but genotypes are 0~2
     return X̃
 end
+
+# function write_plink!(
+#     full_knockoff::SnpArray,
+#     X::AbstractVector,
+#     X̃::AbstractVector,
+#     j::Int
+#     )
+#     n = size(full_knockoff, 1)
+#     x1, x2 = rand() < 0.5 ? (X, X̃) : (X̃, X) # decide whether the original or the knockoff will come first
+#     col1, col2 = 2j - 1, 2j
+#     for i in 1:n
+#         if x1[i]
+#             full_knockoff[i, col1] = 
+#     end
+# end
