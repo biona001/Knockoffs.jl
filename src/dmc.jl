@@ -5,9 +5,10 @@ Generates knockoff of variables distributed as a discrete Markov Chain
 with `K` states.
 
 # Inputs
-+ `X`: `n × p` matrix, each row is a sample
-+ `Q`: `p - 1` vector of matrices. `Q[j]` is a `K × K` matrix of transition
-    probabilities where Q[j][l, k] = P(X_{j+1} = k | X_{j} = l)
++ `Z`: Length `p` vector of `GenotypeState` where Z[i] = (ka, kb) is the 2
+    haplotype motifs of state `i`
++ `Q`: `K × K × p - 1` array. `Q[:, :, j]` is a `K × K` matrix of transition
+    probabilities for `j`th state, i.e. Q[l, k, j] = P(X_{j} = k | X_{j - 1} = l)
 + `q`: `K × 1` vector of initial probabilities
 
 # Reference
@@ -15,27 +16,22 @@ Equations 4-5 of "Gene hunting with hidden Markov model knockoffs" by
 Sesia, Sabatti, and Candes
 """
 function markov_knockoffs(
-    X::AbstractMatrix{T},
-    Q::AbstractMatrix{T},
-    q::AbstractVector{T}
+    Z::Vector{Int},
+    Q::Array{T, 3},
+    q::Vector{T}
     ) where T <: AbstractFloat
-    n, p = size(X)
-    K = length(q)
-    # check problem dimensions
-    length(Q) == p - 1 || error("There should be $(p-1) transition matrices in Q, got $(length(Q) - 1)")
-    for j in 1:p-1
-        size(Q[j]) == (K, K) || error("size(Q[j]) = $(size(Q[j])) but there are $K states in q")
-    end
-    # allocate matrices
-    X̃ = Matrix{T}(undef, n, p)
-    N = Matrix{T}(undef, p, K)
+    p = length(Z)
+    statespace = size(Q, 1)
+    # preallocated arrays
+    Z̃ = zeros(Int, p)
+    N = zeros(p, statespace)
+    d = Categorical([1 / statespace for _ in 1:statespace])
     # start algorithm 1
     for j in 1:p
-        # equation 5
-        update_normalizing_constants!(N, @view(X[j-1, :]), @view(X̃[j-1, :]), Q, q)
-        # sample knockoffs
-        sample!(X̃, N)
+        update_normalizing_constants!(N, Z, Z̃, Q, q, j) # equation 5
+        sample_dmc_knockoff!(Z̃, Z, d, N, Q, q, j)
     end
+    return Z̃
 end
 
 """
@@ -44,39 +40,61 @@ end
 Computes normalizing constants recursively using equation (5).
 
 # Inputs
-+ `Q`: `p - 1` vector of matrix. `Q[j]` is a `K × K` matrix of transition
-    probabilities where Q[j][l, k] = P(X_{j+1} = k | X_{j} = l)
++ `Q`: `K × K × p` array. `Q[:, :, j]` is a `K × K` matrix of transition
+    probabilities for `j`th state, i.e. Q[l, k, j] = P(X_{j} = k | X_{j - 1} = l).
+    The first transition matrix is not used. 
 + `q`: `K × 1` vector of initial probabilities
 
 # todo: efficiency
 """
 function update_normalizing_constants!(
     N::AbstractMatrix{T},
-    x::AbstractVector{T},
-    x̃::AbstractVector{T},
-    Q::AbstractMatrix{T},
-    q::AbstractVector{T}
+    Z::AbstractVector{Int},
+    Z̃::AbstractVector{Int},
+    Q::Array{T, 3},
+    q::AbstractVector{T},
+    j::Int
     ) where T <: AbstractFloat
-    fill!(N, 0)
-    for j in 1:p
-        if j == 1
-            mul!(@view(N[1, :]), q', Q[1])
-        elseif j == p
-            Qp = Q[end]
-            for l in 1:K
-                N[j, l] += Qp[l, x[p-1]] * Qp[l, x̃[p-1]] / N[p - 1, l]
-            end
-        else
-            Qcurr, Qnext = Q[j], Q[j + 1]
-            N[j, :] .= @view(Qnext[:, k]) # 3rd term of numerator
-            for l in 1:K
-                N[j, l] *= Qcurr[l, x[j-1]] * Qcurr[l, x̃[j-1]] / N[j - 1, l]
-            end
+    statespace = size(Q, 1)
+    if j == 1
+        mul!(@view(N[1, :]), Transpose(@view(Q[:, :, 2])), q)
+    elseif j == p
+        val = 0.0
+        for l in 1:K
+            val += Q[Z[p-1], l, p] * Q[Z̃[p-1], l, p] / N[p-1, l]
+        end
+        N[j, :] .= val
+    else
+        for k in 1:statespace, l in 1:statespace
+            N[j, k] += Q[Z[j-1], l, j] * Q[Z̃[j-1], l, j] * Q[l, k, j + 1] / N[j - 1, l]
         end
     end
     return nothing
 end
 
-function sample!(X̃, N)
-    # todo
+function sample_dmc_knockoff!(
+    Z̃::AbstractVector{Int},
+    Z::AbstractVector{Int},
+    d::Distribution,
+    N::AbstractMatrix{T},
+    Q::Array{T, 3},
+    q::AbstractVector{T},
+    j::Int
+    ) where T
+    statespace = size(Q, 1)
+    if j == 1
+        for z̃ in 1:statespace
+            d.p[z̃] = q[z̃] * Q[z̃, Z[2], 2] / N[1, Z[2]]
+        end
+    elseif j == p
+        for z̃ in 1:statespace
+            d.p[z̃] = Q[Z[p-1], z̃, p] * Q[Z̃[p-1], z̃, p] / N[p-1, z̃] / N[p, 1]
+        end
+    else
+        for z̃ in 1:statespace
+            d.p[j] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
+        end
+    end
+    Z̃[j] = rand(d)
+    return nothing
 end
