@@ -65,12 +65,12 @@ function update_normalizing_constants!(
     q::AbstractVector{T},
     j::Int
     ) where T <: AbstractFloat
-    statespace = size(Q, 1)
+    statespace, p = size(Q, 1), size(Q, 3)
     if j == 1
         mul!(@view(N[1, :]), Transpose(@view(Q[:, :, 2])), q)
     elseif j == p
         val = 0.0
-        for l in 1:K
+        for l in 1:statespace
             val += Q[Z[p-1], l, p] * Q[Z̃[p-1], l, p] / N[p-1, l]
         end
         N[j, :] .= val
@@ -91,7 +91,7 @@ function sample_dmc_knockoff!(
     q::AbstractVector{T},
     j::Int
     ) where T
-    statespace = size(Q, 1)
+    statespace, p = size(Q, 1), size(Q, 3)
     if j == 1
         for z̃ in 1:statespace
             d.p[z̃] = q[z̃] * Q[z̃, Z[2], 2] / N[1, Z[2]]

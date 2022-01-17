@@ -10,3 +10,5 @@ Manifest.toml
 docs/src/man/rapid
 docs/src/man/sim*
 docs/src/man/*.txt
+
+fastphase
