@@ -37,6 +37,7 @@ function markov_knockoffs!(
     Q::Array{T, 3},
     q::Vector{T}
     ) where T <: AbstractFloat
+    fill!(N, 0)
     for j in 1:length(Z)
         update_normalizing_constants!(N, Z, Z̃, Q, q, j) # equation 5 in Sesia et al
         single_state_dmc_knockoff!(Z̃, Z, d, N, Q, q, j) # sample Z̃j
@@ -105,6 +106,7 @@ function single_state_dmc_knockoff!(
             d.p[z̃] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
         end
     end
+    @assert sum(d.p) ≈ 1 "single_state_dmc_knockoff!: probability should sum to 1 but was $(sum(d.p))"
     Z̃[j] = rand(d)
     return nothing
 end

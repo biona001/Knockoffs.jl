@@ -155,6 +155,7 @@ Algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
 function forward_backward_sampling!(
     Z::Vector{Int},
     xi::Vector,
+    d::Categorical,
     Q::Array{T, 3},
     q::Vector{T},
     θ::AbstractMatrix,
@@ -181,12 +182,10 @@ function forward_backward_sampling!(
     end
 
     # backwards sampling
-    prob = zeros(statespace)
     denom = sum(@view(α̂[p, :]))
     for k in 1:statespace
-        prob[k] = α̂[p, k] / denom
+        d.p[k] = α̂[p, k] / denom
     end
-    d = Categorical(prob)
     Z[end] = rand(d)
     for j in Iterators.reverse(1:p-1)
         denom = 0.0
@@ -196,6 +195,7 @@ function forward_backward_sampling!(
         for zj in 1:statespace
             d.p[zj] = Q[zj, Z[j + 1], j + 1] * α̂[j, zj] / denom
         end
+        @assert sum(d.p) ≈ 1 "forward_backward_sampling!: probability should sum to 1 but was $(sum(d.p))"
         Z[j] = rand(d)
     end
 
@@ -211,7 +211,9 @@ function forward_backward_sampling(
     table::MarkovChainTable
     ) where T
     Z = zeros(Int, p)
-    forward_backward_sampling!(Z, xi, Q, q, θ, table)
+    statespace = statespace(table)
+    d = Categorical([1 / statespace for _ in 1:statespace])
+    forward_backward_sampling!(Z, xi, d, Q, q, θ, table)
 end
 
 """
@@ -270,7 +272,7 @@ function hmm_knockoff(
     @showprogress for i in 1:n
         # sample hidden states (algorithm 3 in Sesia et al)
         copyto!(X, @view(Xfull[i, :]))
-        forward_backward_sampling!(Z, X, Q, q, θ, table)
+        forward_backward_sampling!(Z, X, d_K, Q, q, θ, table)
 
         # sample knockoff of markov chain (algorithm 2 in Sesia et al)
         markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
