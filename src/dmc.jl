@@ -91,8 +91,8 @@ function sample_dmc_knockoff!(
             d.p[z̃] = Q[Z[p-1], z̃, p] * Q[Z̃[p-1], z̃, p] / N[p-1, z̃] / N[p, 1]
         end
     else
-        for z̃ in 1:statespace
-            d.p[j] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
+        for z̃ in 1:statespace # todo: numerical error?
+            d.p[z̃] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
         end
     end
     Z̃[j] = rand(d)
