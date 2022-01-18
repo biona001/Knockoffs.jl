@@ -101,3 +101,142 @@ function snpknock2(
     @info "Output directory: $(pwd() * "/knockoffs")\n"
     run(cmd)
 end
+
+"""
+    decorrelate_knockoffs(plinkfile, original, knockoff)
+
+If a SNP and its knockoffs has correlation > `r2_threshold`, this function is randomly
+change some entries in the knockoff variable, i.e. decorrelate the knockoff. 
+"""
+function decorrelate_knockoffs(
+    plinkfile::AbstractString,
+    original::Vector{Int},
+    knockoff::Vector{Int};
+    outfile = "decorrelated_knockoffs",
+    outdir = pwd(),
+    r2_threshold = 0.95
+    )
+    x = SnpArray(plinkfile * ".bed")
+    n, p = size(x)
+    p >> 1 == length(original) == length(knockoff) || error("Number of SNPs should be the same")
+    xnew = SnpArray(joinpath(outdir, outfile * ".bed"), n, p)
+    swap_probability = 1 - r2_threshold
+    # calculate correlation of knockoffs with their original snps
+    r2, snp1, snp2 = sizehint!(Float64[], p >> 1), zeros(n), zeros(n)
+    for i in 1:p>>1
+        copyto!(snp1, @view(x[:, original[i]]), center=true, scale=true)
+        copyto!(snp2, @view(x[:, knockoff[i]]), center=true, scale=true)
+        push!(r2, abs(cor(snp1, snp2)))
+    end
+    # loop over snps
+    for j in 1:p>>1
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # copy knockoffs
+        jj = knockoff[j]
+        if r2[j] ≤ r2_threshold
+            copyto!(@view(xnew[:, jj]), @view(x[:, jj]))
+        else
+            # loop over each sample
+            for i in 1:n
+                # We change the an entry of knockoff with probability `swap_probability`
+                # if xij is 0 or 2, set it equal to 1. If xij is 1, let it equal 0 or 2 randomly
+                if rand() < swap_probability
+                    if x[i, jj] == 0x01 || x[i, jj] == 0x03
+                        xnew[i, jj] = 0x02
+                    else
+                        xnew[i, jj] = (rand() < 0.5 ? 0x02 : 0x03)
+                    end
+                else
+                    xnew[i, jj] = x[i, jj]
+                end
+            end
+        end
+    end
+    # copy bim and fam files
+    cp(plinkfile * ".bim", joinpath(outdir, outfile * ".bim"), force=true)
+    cp(plinkfile * ".fam", joinpath(outdir, outfile * ".fam"), force=true)
+    return xnew
+end
+
+function fastphase(
+    xdata::SnpData;
+    n::Int = size(xdata.snparray, 1), # number of samples used to fit HMM
+    T::Int = 10, # number of different initial conditions for EM
+    K::Int = 10, # number of clusters
+    C::Int = 25, # number of EM iterations
+    out::AbstractString = "out"
+    )
+    x = xdata.snparray
+    n ≤ size(x, 1) || error("n must be smaller than the number of samples!")
+    sampleid = xdata.person_info[!, :iid]
+    # create input format for fastPHASE software
+    p = size(x, 2)
+    open("fastphase.inp", "w") do io
+        println(io, n)
+        println(io, p)
+        for i in 1:n
+            println(io, "ID ", sampleid[i])
+            # print genotypes for each sample on 2 lines. The "1" for heterozygous
+            # genotypes will always go on the 1st line.
+            for j in 1:p
+                if x[i, j] == 0x00
+                    print(io, 0)
+                elseif x[i, j] == 0x02 || x[i, j] == 0x03
+                    print(io, 1)
+                else
+                    print(io, '?')
+                end
+            end
+            print(io, "\n")
+            for j in 1:p
+                if x[i, j] == 0x00 || x[i, j] == 0x02
+                    print(io, 0)
+                elseif x[i, j] == 0x03
+                    print(io, 1)
+                else
+                    print(io, '?')
+                end
+            end
+            print(io, "\n")
+        end
+    end
+    run(`./fastPHASE -T$T -K$K -C$C -o$(out) -Pp fastphase.inp`)
+    return nothing
+end
+
+"""
+    process_fastphase_output(datadir::AbstractString, T::Int)
+
+Reads fastPHASE results and performs averaging over `T` runs
+
+# Inputs
++ `datadir`: Directory that stores fastPHASE's results (`out_rhat.txt`, `out_thetahat.txt`, `out_alphahat.txt`)
++ `T`: the number of different initial conditions for EM used in fastPHASE
+"""
+function process_fastphase_output(datadir::AbstractString, T::Int; extension="out_")
+    # read full data 
+    rfile = joinpath(datadir, "$(extension)rhat.txt") # T*p × 1
+    θfile = joinpath(datadir, "$(extension)thetahat.txt") # T*p × K
+    αfile = joinpath(datadir, "$(extension)alphahat.txt") # T*p × K
+    isfile(rfile) && isfile(θfile) && isfile(αfile) || error("Files not found!")
+    r_full = readdlm(rfile, comments=true, comment_char = '>', header=false)
+    θ_full = readdlm(θfile, comments=true, comment_char = '>', header=false)
+    α_full = readdlm(θfile, comments=true, comment_char = '>', header=false)
+
+    # compute averages across T simulations as suggested by Scheet et al 2006
+    p = Int(size(r_full, 1) / T)
+    K = size(θ_full, 2)
+    r, θ, α = zeros(p), zeros(p, K), zeros(p, K)
+    for i in 1:T
+        rows = (i - 1) * p + 1:p*i
+        r .+= @view(r_full[rows])
+        θ .+= @view(θ_full[rows, :])
+        α .+= @view(α_full[rows, :])
+    end
+    r ./= T
+    θ ./= T
+    α ./= T
+    α ./= sum(α, dims = 2) # normalize rows to sum to 1
+    return r, θ, α
+end

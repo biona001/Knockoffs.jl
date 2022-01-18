@@ -12,14 +12,30 @@ using CSV
 using Printf
 BLAS.set_num_threads(1)
 
+# predict with estimated β̂ (R2 = 1 - RSS/TSS)
 function R2(X::AbstractMatrix, y::AbstractVector, β̂::AbstractVector)
     μ = y - X * β̂
     tss = y .- mean(y)
     return 1 - dot(μ, μ) / dot(tss, tss)
 end
+
+# predict with a low dimensional fit
+function R2(Xtrain::AbstractMatrix, Xtest::AbstractMatrix,
+    ytrain::AbstractVector, ytest::AbstractVector, β̂::AbstractVector)
+    # fit low dimensional model on original data
+    idx = findall(!iszero, β̂)
+    β_new = zeros(length(β̂))
+    β_new[idx] .= Xtrain[:, idx] \ ytrain
+    # predict with low diemensional model on new data
+    μ = ytest - Xtest * β_new
+    t = ytest .- mean(ytest)
+    return 1 - dot(μ, μ) / dot(t, t)
+end
+
 function TP(correct_groups, signif_groups)
     return length(signif_groups ∩ correct_groups) / length(correct_groups)
 end
+
 function FDR(correct_groups, signif_groups)
     FP = length(signif_groups) - length(signif_groups ∩ correct_groups) # number of false positives
     # FPR = FP / (FP + TN) # https://en.wikipedia.org/wiki/False_positive_rate#Definition
@@ -55,16 +71,98 @@ function get_signif_groups(β, groups)
     return correct_groups
 end
 
-function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, seed::Int)
+# todo: use_PCA and bolt
+function run_sims(
+    x::SnpArray,
+    original::Vector{Int},
+    knockoff::Vector{Int},
+    groups::Vector{Int},
+    seed::Int,
+    confounders::Int = 0
+    )
     #
     # import data (first 10000 samples of chr 10)
     #
     chr = 10
-    original = findall(knockoff_idx .== false)
-    knockoff = findall(knockoff_idx)
     xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
     xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
     cur_dir = pwd()
+
+    #
+    # Import PCs
+    # 
+    z = readdlm("/scratch/users/bbchu/ukb_SHAPEIT/subset_pca/ukb.10k.chr$chr.projections.txt")
+    standardize!(z)
+
+    #
+    # simulate phenotypes using UKB chr10 subset
+    #
+    n, p = size(xla)
+    # simulate β
+    Random.seed!(seed)
+    k = 100 # number of causal SNPs
+    h2 = 0.5 # heritability
+    d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
+    β = zeros(p)
+    β[1:k] .= rand(d, k)
+    shuffle!(β)
+    # simulate y
+    ϵ = Normal(0, 1 - h2)
+    y = xla * β + rand(ϵ, n)
+    #
+    # confounders are PCs and have effect size ±0.2
+    #
+    if confounders > 0
+        PCs = z[:, 1:confounders]
+        γ = [rand(-1:2:1) * 0.2 for i in 1:confounders]
+        y += PCs * γ
+    end
+
+    #
+    # Run standard IHT
+    #
+    Random.seed!(seed)
+    path = 10:10:200
+    mses = cv_iht(y, xla, path=path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    k_rough_guess = path[argmin(mses)]
+    dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
+    mses_new = cv_iht(y, xla, path=dense_path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    iht_result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
+    @show iht_result
+    GC.gc()
+
+    #
+    # Run standard lasso
+    #
+    Random.seed!(seed)
+    @time lasso_cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
+
+    #
+    # run knockoff IHT 
+    #
+    Random.seed!(seed)
+    path = 10:10:200
+    mses = cv_iht(y, xko_la, path=path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    k_rough_guess = path[argmin(mses)]
+    dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
+    mses_new = cv_iht(y, xko_la, path=dense_path, init_beta=true)
+    GC.gc()
+    Random.seed!(seed)
+    ko_iht_result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)],
+        init_beta=true, max_iter=500)
+    @show ko_iht_result
+
+    #
+    # Run knockoff lasso
+    #
+    Random.seed!(seed)
+    @time ko_lasso_cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
 
     for fdr in [0.05, 0.1, 0.25, 0.5]
         top_dir = cur_dir * "/fdr$fdr/"
@@ -72,66 +170,17 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         isdir(top_dir) || mkdir(top_dir)
         isdir(new_dir) || mkdir(new_dir)
         cd(new_dir)
-        #
-        # simulate phenotypes using UKB chr10 subset
-        #
-        n, p = size(xla)
-        # simulate β
-        Random.seed!(seed)
-        k = 100 # number of causal SNPs
-        h2 = 0.5 # heritability
-        d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
-        β = zeros(p)
-        β[1:k] .= rand(d, k)
-        shuffle!(β)
-        # simulate y
-        ϵ = Normal(0, 1 - h2)
-        y = xla * β + rand(ϵ, n)
         writedlm("y_true.txt", y)
+        # writedlm("y_true_confound.txt", y)
         writedlm("beta_true.txt", β)
 
         #
-        # Run standard IHT
+        # write results
         #
-        Random.seed!(seed)
-        path = 10:10:200
-        mses = cv_iht(y, xla, path=path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        k_rough_guess = path[argmin(mses)]
-        dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht(y, xla, path=dense_path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        result = fit_iht(y, xla, k=dense_path[argmin(mses_new)], init_beta=true, max_iter=500)
-        @show result
-        writedlm("iht.beta", result.beta)
-        GC.gc()
-
-        #
-        # Run standard lasso
-        #
-        Random.seed!(seed)
-        cv = glmnetcv(xla, y, nfolds=5, parallel=true) 
-        writedlm("lasso.beta", coef(cv))
-
-        #
-        # run knockoff IHT 
-        #
-        Random.seed!(seed)
-        path = 10:10:200
-        mses = cv_iht(y, xko_la, path=path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        k_rough_guess = path[argmin(mses)]
-        dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht(y, xko_la, path=dense_path, init_beta=true)
-        GC.gc()
-        Random.seed!(seed)
-        result = fit_iht(y, xko_la, k=dense_path[argmin(mses_new)],
-            init_beta=true, max_iter=500)
-        @show result
-        writedlm("iht.knockoff.beta", result.beta)
+        writedlm("iht.beta", iht_result.beta)
+        writedlm("lasso.beta", coef(lasso_cv))
+        writedlm("iht.knockoff.beta", ko_iht_result.beta)
+        writedlm("lasso.knockoff.beta", coef(ko_lasso_cv))
 
         #
         # run knockoff IHT with wrapped cross validation
@@ -155,13 +204,6 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
         writedlm("iht.knockoff.cv.beta", best_β)
 
         #
-        # Run knockoff lasso
-        #
-        Random.seed!(seed)
-        cv = glmnetcv(xko_la, y, nfolds=5, parallel=true)
-        writedlm("lasso.knockoff.beta", coef(cv))
-
-        #
         # compare R2 across populations, save result in a dataframe
         #
         β_iht = vec(readdlm("iht.beta"))
@@ -169,8 +211,9 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             original, knockoff)
         β_iht_knockoff_cv = extract_beta(vec(readdlm("iht.knockoff.cv.beta")),
             fdr, groups, original, knockoff)
-        β_lasso = vec(readdlm("lasso.beta"))
-        β_lasso_knockoff = extract_beta(vec(readdlm("lasso.knockoff.beta")),
+        # β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
+        β_lasso = coef(lasso_cv)
+        β_lasso_knockoff = extract_beta(coef(ko_lasso_cv),
             fdr, groups, original, knockoff)
 
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
@@ -180,24 +223,25 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             IHT_ko_cv_R2 = Float64[], LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
 
         for pop in populations
-            xpop = SnpArray("/scratch/users/bbchu/ukb/populations/chr10/ukb.chr$chr.$pop.bed")
-            Xpop = SnpLinAlg{Float64}(xpop, center=true, scale=true, impute=true)
+            xtest = SnpArray("/scratch/users/bbchu/ukb_SHAPEIT/populations/chr10/ukb.chr$chr.$pop.bed")
+            Xtest = SnpLinAlg{Float64}(xtest, center=true, scale=true, impute=true)
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
-            ytrue = Xpop * β + rand(ϵ, size(Xpop, 1))
+            ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
             # IHT
-            iht_r2 = R2(Xpop, ytrue, β_iht)
+            iht_r2 = R2(Xtest, ytest, β_iht)
             # knockoff IHT
-            iht_ko_r2 = R2(Xpop, ytrue, β_iht_knockoff)
+            iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
             # knockoff IHT cv
-            iht_ko_cv_r2 = R2(Xpop, ytrue, β_iht_knockoff_cv)
+            iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
             # lasso β
-            lasso_r2 = R2(Xpop, ytrue, β_lasso)
+            lasso_r2 = R2(Xtest, ytest, β_lasso)
             # knockoff lasso β
-            lasso_ko_r2 = R2(Xpop, ytrue, β_lasso_knockoff)
+            lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
             # save to dataframe
             push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
                 lasso_r2, lasso_ko_r2))
+            # push!(df, hcat(pop, 0, 0, 0, lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
@@ -206,7 +250,7 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
             count(!iszero, vec(readdlm("iht.knockoff.beta"))),
             count(!iszero, vec(readdlm("iht.knockoff.cv.beta"))),
             count(!iszero, β_lasso),
-            count(!iszero, vec(readdlm("lasso.knockoff.beta")))
+            count(!iszero, coef(ko_lasso_cv))
             ))
         # count non-zero entries after knockoff filter
         push!(df, hcat("beta_selected", count(!iszero, β_iht), 
@@ -237,18 +281,39 @@ function run_sims(x::SnpArray, knockoff_idx::BitVector, groups::Vector{Int}, see
 end
 
 #
-# import key and data
+# import key and data (fastphase knockoffs)
+#
+# seed = parse(Int, ARGS[1])
+# resolution = 5
+# confounders = 0 # 1 PC
+# keyfile = "/scratch/users/bbchu/ukb_fastPHASE/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.key"
+# df = CSV.read(keyfile, DataFrame)
+# groups = convert(Vector{Int}, df[!, :Group])
+# knockoff_idx = convert(BitVector, df[!, :Knockoff])
+# original = findall(knockoff_idx .== false)
+# knockoff = findall(knockoff_idx)
+# x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.bed")
+# x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/decorrelated/ukb_gen_chr10_decorrelated.bed") # decorrelated knockoffs
+
+#
+# import shapeit knockoffs
 #
 seed = parse(Int, ARGS[1])
-resolution = 20
-keyfile = "/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.key"
-df = CSV.read(keyfile, DataFrame)
-groups = convert(Vector{Int}, df[!, :Group])
-knockoff_idx = convert(BitVector, df[!, :Knockoff])
-x = SnpArray("/scratch/users/bbchu/ukb/groups/Radj$(resolution)_K50_s0/ukb_gen_chr10.bed")
+resolution = 5
+confounders = 0 # 1 PC
+df = CSV.read("ukb_gen_chr10_ibd1_res$(resolution)_grp.txt", DataFrame)
+groups = repeat(df[!, :Group], inner=2)
+plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/knockoffs/ukb_gen_chr10_ibd1_res$(resolution)"
+xdata = SnpData(plinkname)
+isknockoff = endswith.(xdata.snp_info[!, :snpid], ".k")
+original, knockoff = Int[], Int[]
+for i in 1:size(xdata)[2]
+    isknockoff[i] ? push!(knockoff, i) : push!(original, i)
+end
+x = xdata.snparray
 
 #
 # Run simulation (via `julia prs.jl n r`)
 # where n is a seed and r is resolution (20, 5, ...etc)
 #
-run_sims(x, knockoff_idx, groups, seed)
+run_sims(x, original, knockoff, groups, seed)

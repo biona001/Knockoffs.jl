@@ -48,3 +48,42 @@ function normalize_col!(X::AbstractMatrix)
     end
     return X
 end
+
+# 1 state of a markov chain
+struct GenotypeState
+    a::Int # int between 1 and K
+    b::Int # int between 1 and K
+end
+
+"""
+Genotype states are index pairs (ka, kb) where ka, kb is unordered haplotype 1 and 2. 
+If there are K=5 haplotype motifs, then the 15 possible genotype states and their index are
+
+(1, 1) = 1
+(1, 2) = 2     (2, 2) = 6
+(1, 3) = 3     (2, 3) = 7     (3, 3) = 10
+(1, 4) = 4     (2, 4) = 8     (3, 4) = 11     (4, 4) = 13
+(1, 5) = 5     (2, 5) = 9     (3, 5) = 12     (4, 5) = 14     (5, 5) = 15
+"""
+struct MarkovChainTable
+    K::Int # number of states
+    index_to_pair::Vector{GenotypeState} # index_to_pair[1] = (1, 1), index_to_pair[2] = (1, 2)...etc
+end
+function MarkovChainTable(K::Int)
+    table = GenotypeState[]
+    for a in 1:K, b in a:K
+        push!(table, GenotypeState(a, b))
+    end
+    return MarkovChainTable(K, table)
+end
+
+Base.enumerate(mc::MarkovChainTable) = enumerate(mc.index_to_pair)
+statespace(mc::MarkovChainTable) = ((mc.K + 1) * mc.K) >> 1
+function pair_to_index(mc::MarkovChainTable, a::Int, b::Int)
+    statespace(mc) - ((mc.K-a+2)*(mc.K-a+1))>>1 + (b - a + 1)
+end
+function index_to_pair(mc::MarkovChainTable, i::Int)
+    return mc.index_to_pair[i].a, mc.index_to_pair[i].b
+end
+# mc = MarkovChainTable(5)
+# index_to_pair(mc, 10)
