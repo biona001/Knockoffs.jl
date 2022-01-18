@@ -158,48 +158,55 @@ function form_emission_prob_matrix(a, θ, xi::AbstractVector, table::MarkovChain
 end
 
 """
-    forward_backward_sampling(x::SnpArray)
+    forward_backward_sampling!(Z, X, Q, q, θ, ...)
 
 Samples Z, the hidden states of a HMM, from observed sequence of unphased genotypes X.
 
 # Inputs
 `Z`: Length `p` vector of integers. This will store the sampled Markov states
-`xi`: Length `p` vector of genotypes (0, 1, or 2)
+`X`: Length `p` vector of genotypes (0, 1, or 2)
 `Q`: `K × K × p` array. `Q[:, :, j]` is a `K × K` matrix of transition
     probabilities for `j`th state, i.e. Q[l, k, j] = P(X_{j} = k | X_{j - 1} = l).
     The first transition matrix is not used. 
 `q`: Length `K` vector of initial probabilities
 `θ`: The θ parameter estimated from fastPHASE
+
+# Preallocated storage variables
 `table`: a `MarkovChainTable` that maps markov chain states to haplotype 
-    pairs (ka, kb). 
+    pairs (ka, kb)
+`d`: Sampling distribution, probabilities in d.p are mutated
+`α̂`: `p × K` scaled forward probability matrix, where 
+    `α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)`
+`c`: normalizing constants, `c[k] = p(x_k | x_1,...,x_{k-1})`
 
 # Reference
 Algorithm 3 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al
 """
 function forward_backward_sampling!(
     Z::Vector{Int},
-    xi::Vector,
-    d::Categorical,
+    X::Vector,
     Q::Array{T, 3},
     q::Vector{T},
     θ::AbstractMatrix,
     table::MarkovChainTable,
+    d::Categorical,
+    α̂::AbstractMatrix,
+    c::AbstractVector,
     ) where T
     statespace, p = size(Q, 2), size(Q, 3)
-    length(xi) == p || error("length(xi) not equal to p")
+    length(X) == p || error("length(X) not equal to p")
+    fill!(c, 0)
 
     # (scaled) forward probabilities
-    α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
-    c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
     @inbounds for (k, geno) in enumerate(table)
-        α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], geno.a, geno.b, 1)
+        α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, X[1], geno.a, geno.b, 1)
         c[1] += α̂[1, k]
     end
     α̂[1, :] ./= c[1]
     @inbounds for j in 2:p
         mul!(@view(α̂[j, :]), Transpose(@view(Q[:, :, j])), @view(α̂[j - 1, :])) # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
         for (k, geno) in enumerate(table)
-            α̂[j, k] *= get_genotype_emission_probabilities(θ, xi[j], geno.a, geno.b, j)
+            α̂[j, k] *= get_genotype_emission_probabilities(θ, X[j], geno.a, geno.b, j)
             c[j] += α̂[j, k]
         end
         α̂[j, :] ./= c[j]
@@ -228,16 +235,20 @@ end
 # todo: how to test correctness?
 
 function forward_backward_sampling(
-    xi::Vector,
+    X::Vector,
     Q::Array{T, 3},
     q::Vector{T},
-    θ::AbstractMatrix,
-    table::MarkovChainTable
+    θ::AbstractMatrix
     ) where T
+    p = length(X)
+    K = size(Q, 1)
     Z = zeros(Int, p)
+    table = MarkovChainTable(K)
     statespace = statespace(table)
     d = Categorical([1 / statespace for _ in 1:statespace])
-    forward_backward_sampling!(Z, xi, d, Q, q, θ, table)
+    α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
+    c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
+    forward_backward_sampling!(Z, X, Q, q, θ, table, d, α̂, c)
 end
 
 """
@@ -291,11 +302,13 @@ function hmm_knockoff(
     N = zeros(p, statespace)
     d_K = Categorical([1 / statespace for _ in 1:statespace]) # for sampling markov chains (length statespace)
     d_3 = Categorical([1 / statespace for _ in 1:statespace]) # for sampling genotypes (length 3)
+    α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
+    c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
 
     @showprogress for i in 1:n
         # sample hidden states (algorithm 3 in Sesia et al)
         copyto!(X, @view(Xfull[i, :]))
-        forward_backward_sampling!(Z, X, d_K, Q, q, θ, table)
+        forward_backward_sampling!(Z, X, Q, q, θ, table, d_K, α̂, c)
 
         # sample knockoff of markov chain (algorithm 2 in Sesia et al)
         markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
