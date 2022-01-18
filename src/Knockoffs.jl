@@ -8,6 +8,8 @@ using SnpArrays
 using DelimitedFiles
 using ProgressMeter
 using Distributions
+using CSV
+using DataFrames
 import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,

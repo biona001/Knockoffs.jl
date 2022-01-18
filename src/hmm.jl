@@ -65,6 +65,9 @@ function get_genotype_transition_matrix(
     for l in 1:statespace
         Q[l, :, 1] .= q
     end
+    # for l in 1:statespace
+    #     Q[:, :, 1] .= NaN # Q1 should never be used anywhere, so we fill it with NaN
+    # end
     for j in 2:p
         Qj, Hj = @view(Q[:, :, j]), @view(H[:, :, j])
         @inbounds for (row, geno) in enumerate(table)
@@ -253,7 +256,7 @@ Main entry point of generating HMM knockoffs from binary PLINK formatted files.
 + `outfile`: Output PLINK format name
 
 # Output
-+ `outfile.bed`: `n × 2p` genotypes, including the original genotypes and the knockoffs
++ `outfile.bed`: `n × p` knockoff genotypes
 + `outfile.bim`: SNP mapping file. Knockoff have SNP names ending in ".k"
 + `outfile.fam`: Sample mapping file, this is a copy of the original `plinkname.fam` file
 """
@@ -262,7 +265,8 @@ function hmm_knockoff(
     fastphase_outfile::AbstractString;
     T::Int = 10,
     datadir::AbstractString = pwd(),
-    outfile::AbstractString = "knockoff"
+    outfile::AbstractString = "knockoff",
+    outdir::AbstractString = datadir
     )
     snpdata = SnpData(joinpath(datadir, plinkname))
     Xfull = snpdata.snparray
@@ -279,8 +283,7 @@ function hmm_knockoff(
     Q = get_genotype_transition_matrix(r, θ, α, q, table)
 
     # preallocated arrays
-    # full_knockoff = SnpArray(outfile * ".bed", n, 2p)
-    full_knockoff = zeros(Int, n, p)
+    X̃full = SnpArray(joinpath(outdir, outfile * ".bed"), n, p)
     X = zeros(Float64, p)
     Z = zeros(Int, p)
     Z̃ = zeros(Int, p)
@@ -301,10 +304,18 @@ function hmm_knockoff(
         genotype_knockoffs!(X̃, Z̃, table, θ, d_3)
 
         # save knockoff
-        full_knockoff[i, :] .= X̃
+        write_plink!(X̃full, X̃, i)
     end
 
-    return full_knockoff
+    # copy .bim and .fam files
+    new_bim = copy(snpdata.snp_info)
+    for i in 1:p
+        new_bim[i, :snpid] = new_bim[i, :snpid] * ".k"
+    end
+    CSV.write(joinpath(outdir, outfile * ".bim"), new_bim, delim='\t', header=false)
+    cp(plinkname * ".fam", joinpath(outdir, outfile * ".fam"), force=true)
+
+    return X̃full
 end
 
 function genotype_knockoffs(
@@ -337,17 +348,22 @@ function genotype_knockoffs!(
     return X̃
 end
 
-# function write_plink!(
-#     full_knockoff::SnpArray,
-#     X::AbstractVector,
-#     X̃::AbstractVector,
-#     j::Int
-#     )
-#     n = size(full_knockoff, 1)
-#     x1, x2 = rand() < 0.5 ? (X, X̃) : (X̃, X) # decide whether the original or the knockoff will come first
-#     col1, col2 = 2j - 1, 2j
-#     for i in 1:n
-#         if x1[i]
-#             full_knockoff[i, col1] = 
-#     end
-# end
+function write_plink!(
+    X̃full::SnpArray,
+    X̃::AbstractVector,
+    i::Int # sample index
+    )
+    p = length(X̃)
+    for j in 1:p
+        if X̃[j] == 0
+            X̃full[i, j] = 0x00
+        elseif X̃[j] == 1
+            X̃full[i, j] = 0x02
+        elseif X̃[j] == 2
+            X̃full[i, j] = 0x03
+        else
+            error("Genotypes should only be 0, 1, or 2 but got $(X̃[j])")
+        end
+    end
+    return X̃full
+end
