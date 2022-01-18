@@ -68,16 +68,16 @@ function update_normalizing_constants!(
     ) where T <: AbstractFloat
     statespace, p = size(Q, 1), size(Q, 3)
     if j == 1
-        mul!(@view(N[1, :]), Transpose(@view(Q[:, :, 2])), q)
+        @inbounds mul!(@view(N[1, :]), Transpose(@view(Q[:, :, 2])), q)
     elseif j == p
         val = 0.0
         for l in 1:statespace
-            val += Q[Z[p-1], l, p] * Q[Z̃[p-1], l, p] / N[p-1, l]
+            @inbounds val += Q[Z[p-1], l, p] * Q[Z̃[p-1], l, p] / N[p-1, l]
         end
         N[j, :] .= val
     else
         for k in 1:statespace, l in 1:statespace
-            N[j, k] += Q[Z[j-1], l, j] * Q[Z̃[j-1], l, j] * Q[l, k, j + 1] / N[j - 1, l]
+            @inbounds N[j, k] += Q[Z[j-1], l, j] * Q[Z̃[j-1], l, j] * Q[l, k, j + 1] / N[j - 1, l]
         end
     end
     return nothing
@@ -95,15 +95,15 @@ function single_state_dmc_knockoff!(
     statespace, p = size(Q, 1), size(Q, 3)
     if j == 1
         for z̃ in 1:statespace
-            d.p[z̃] = q[z̃] * Q[z̃, Z[2], 2] / N[1, Z[2]]
+            @inbounds d.p[z̃] = q[z̃] * Q[z̃, Z[2], 2] / N[1, Z[2]]
         end
     elseif j == p
         for z̃ in 1:statespace
-            d.p[z̃] = Q[Z[p-1], z̃, p] * Q[Z̃[p-1], z̃, p] / N[p-1, z̃] / N[p, 1]
+            @inbounds d.p[z̃] = Q[Z[p-1], z̃, p] * Q[Z̃[p-1], z̃, p] / N[p-1, z̃] / N[p, 1]
         end
     else
         for z̃ in 1:statespace # todo: numerical error?
-            d.p[z̃] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
+            @inbounds d.p[z̃] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
         end
     end
     @assert sum(d.p) ≈ 1 "single_state_dmc_knockoff!: probability should sum to 1 but was $(sum(d.p))"

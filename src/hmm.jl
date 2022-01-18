@@ -62,15 +62,15 @@ function get_genotype_transition_matrix(
 
     # now compute genotype transition matrix
     Q = Array{Float64, 3}(undef, statespace, statespace, p)
-    for l in 1:statespace
+    @inbounds for l in 1:statespace
         Q[l, :, 1] .= q
     end
     # for l in 1:statespace
     #     Q[:, :, 1] .= NaN # Q1 should never be used anywhere, so we fill it with NaN
     # end
-    for j in 2:p
+    @inbounds for j in 2:p
         Qj, Hj = @view(Q[:, :, j]), @view(H[:, :, j])
-        @inbounds for (row, geno) in enumerate(table)
+        for (row, geno) in enumerate(table)
             for (col, geno_new) in enumerate(table)
                 Qj[row, col] = Hj[geno.a, geno_new.a] * Hj[geno.b, geno_new.b] # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
                 if geno_new.a != geno_new.b
@@ -151,7 +151,7 @@ function form_emission_prob_matrix(a, θ, xi::AbstractVector, table::MarkovChain
     p, K = size(a)
     statespace = (K * (K + 1)) >> 1
     f = zeros(p, statespace)
-    for j in 1:p, (k, geno) in enumerate(table)
+    @inbounds for j in 1:p, (k, geno) in enumerate(table)
         f[j, k] = get_genotype_emission_probabilities(θ, xi[j], geno.a, geno.b, j)
     end
     return f
@@ -191,12 +191,12 @@ function forward_backward_sampling!(
     # (scaled) forward probabilities
     α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
     c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
-    for (k, geno) in enumerate(table)
+    @inbounds for (k, geno) in enumerate(table)
         α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, xi[1], geno.a, geno.b, 1)
         c[1] += α̂[1, k]
     end
     α̂[1, :] ./= c[1]
-    for j in 2:p
+    @inbounds for j in 2:p
         mul!(@view(α̂[j, :]), Transpose(@view(Q[:, :, j])), @view(α̂[j - 1, :])) # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
         for (k, geno) in enumerate(table)
             α̂[j, k] *= get_genotype_emission_probabilities(θ, xi[j], geno.a, geno.b, j)
@@ -207,11 +207,11 @@ function forward_backward_sampling!(
 
     # backwards sampling
     denom = sum(@view(α̂[p, :]))
-    for k in 1:statespace
+    @inbounds for k in 1:statespace
         d.p[k] = α̂[p, k] / denom
     end
     Z[end] = rand(d)
-    for j in Iterators.reverse(1:p-1)
+    @inbounds for j in Iterators.reverse(1:p-1)
         denom = 0.0
         for k in 1:statespace
             denom += Q[k, Z[j + 1], j + 1] * α̂[j, k]
@@ -337,7 +337,7 @@ function genotype_knockoffs!(
     d::Categorical # Categorical distribution from Distributions.jl
     )
     p = length(Z̃)
-    for j in 1:p
+    @inbounds for j in 1:p
         a, b = index_to_pair(table, Z̃[j])
         d.p[1] = get_genotype_emission_probabilities(θ, 0, a, b, j)
         d.p[2] = get_genotype_emission_probabilities(θ, 1, a, b, j)
@@ -354,7 +354,7 @@ function write_plink!(
     i::Int # sample index
     )
     p = length(X̃)
-    for j in 1:p
+    @inbounds for j in 1:p
         if X̃[j] == 0
             X̃full[i, j] = 0x00
         elseif X̃[j] == 1
