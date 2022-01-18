@@ -8,8 +8,12 @@ using CSV
 using Printf
 
 # view one result
-f = "sim1/summary.txt"
-df = CSV.read(f, DataFrame)
+sim = 1
+df = CSV.read("sim$sim/summary.txt", DataFrame)
+# for sim in 1:20
+#     df = CSV.read("sim$sim/summary.txt", DataFrame)
+#     @show df
+# end
 
 # check cross validation result is the same for every run
 # for fdr in [0.05, 0.1, 0.25, 0.5], sim in 1:100

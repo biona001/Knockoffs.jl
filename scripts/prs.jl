@@ -113,6 +113,7 @@ function run_sims(seed::Int;
     #
     chr = 10
     plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/knockoffs/ukb_gen_chr$(chr)_ibd1_res0" #shapeit knockoffs
+    # plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/decorrelated_knockoffs/ukb_gen_chr$(chr)_ibd1_res0_decorrelated" #shapeit knockoffs (decorrelated)
     xdata = SnpData(plinkname)
     isknockoff = endswith.(xdata.snp_info[!, :snpid], ".k")
     original, knockoff = Int[], Int[]
@@ -137,7 +138,7 @@ function run_sims(seed::Int;
     #
     # simulate phenotypes using UKB chr10 subset
     #
-    n, p = size(x)
+    n, p = size(xla)
     # simulate β
     Random.seed!(seed)
     h2 = 0.5 # heritability
