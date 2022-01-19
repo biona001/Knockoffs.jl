@@ -1,6 +1,6 @@
 
 """
-get_haplotype_transition_matrix(r, θ, α)
+    get_haplotype_transition_matrix(r, θ, α)
 
 Compute transition matrices for the hidden Markov chains in haplotypes. 
 This is 2 equations above eq8 in "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
@@ -11,7 +11,7 @@ This is 2 equations above eq8 in "Gene hunting with hidden Markov model knockoff
 `α`: Size `p × K` matrix, probabilities that haplotype motifs succeed each other. Rows should sum to 1. 
 
 # Output
-`H`: A `p`-dimensional vector of `K × K` matrices. `H[:, :, j]` is the `j`th transition matrix. 
+`Q`: A `p`-dimensional vector of `K × K` matrices. `Q[:, :, j]` is the `j`th transition matrix. 
 """
 function get_haplotype_transition_matrix(
     r::AbstractVecOrMat, # p × 1
@@ -34,7 +34,7 @@ function get_haplotype_transition_matrix(
 end
 
 """
-    get_genotype_transition_matrix(r, θ, α, table)
+    get_genotype_transition_matrix(r, θ, α, q, table)
 
 Compute transition matrices for the hidden Markov chains in unphased genotypes. 
 This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia et al.
@@ -314,7 +314,7 @@ function hmm_knockoff(
         markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
 
         # sample knockoffs of genotypes (eq 6 in Sesia et al)
-        genotype_knockoffs!(X̃, Z̃, table, θ, d_3)
+        sample_markov_chain!(X̃, Z̃, table, θ, d_3)
 
         # save knockoff
         write_plink!(X̃full, X̃, i)
@@ -339,10 +339,10 @@ function genotype_knockoffs(
     p = length(Z̃)
     X̃ = zeros(eltype(Z̃), p)
     d = Categorical([1/3 for _ in 1:3])
-    return genotype_knockoffs!(X̃, Z̃, table, θ, d)
+    return sample_markov_chain!(X̃, Z̃, table, θ, d)
 end
 
-function genotype_knockoffs!(
+function sample_markov_chain!(
     X̃::AbstractVector,
     Z̃::AbstractVector,
     table::MarkovChainTable,
