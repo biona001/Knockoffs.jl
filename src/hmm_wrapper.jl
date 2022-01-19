@@ -159,7 +159,6 @@ function decorrelate_knockoffs(
     return xnew
 end
 
-
 function fastphase(
     xdata::SnpData;
     n::Int = size(xdata.snparray, 1), # number of samples used to fit HMM
@@ -216,7 +215,7 @@ function fastphase(
     # aggregate results into final output
     r, θ, α = zeros(p), zeros(p, K), zeros(p, K)
     for i in 1:T
-        rtmp, θtmp, αtmp = process_fastphase_output(outdir, 1; extension="tmp$(i)")
+        rtmp, θtmp, αtmp = process_fastphase_output(outdir; T=1, extension="tmp$(i)")
         r .+= rtmp
         θ .+= θtmp
         α .+= αtmp
