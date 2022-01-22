@@ -10,6 +10,8 @@ using ProgressMeter
 using Distributions
 using CSV
 using DataFrames
+using fastPHASE
+
 import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,

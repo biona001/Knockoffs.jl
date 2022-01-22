@@ -44,8 +44,8 @@ This is equation 9 of "Gene hunting with hidden Markov model knockoffs" by Sesia
 `θ`: Size `p × K` matrix, `θ[j, k]` is probability that the allele is 1 for SNP `p` at `k`th haplotype motif
 `α`: Size `p × K` matrix, probabilities that haplotype motifs succeed each other. Rows should sum to 1. 
 `q`: Length `K` vector of initial probabilities
-`table`: a `MarkovChainTable` that maps markov chain states to haplotype 
-    pairs (ka, kb). 
+`table`: a `MarkovChainTable` that maps markov chain states k = 1, ..., K+(K+1)/2
+    to haplotype pairs (ka, kb). 
 """
 function get_genotype_transition_matrix(
     r::AbstractVecOrMat, # p × 1
@@ -254,37 +254,58 @@ end
 """
     hmm_knockoff(plinkname, fastphase_outfile, T=10, datadir=pwd())
 
-Main entry point of generating HMM knockoffs from binary PLINK formatted files.
+Generates HMM knockoffs from binary PLINK formatted files. This is done by
+first running fastPHASE, then running Algorithm 2 of "Gene hunting with hidden
+Markov model knockoffs" by Sesia, Sabatti, and Candes
 
 # Input
 + `plinkname`: Binary PLINK file names without the `.bed/.bim/.fam` suffix. 
-+ `fastphase_outfile`: The output file name from fastPHASE's alpha, theta, r files
-    (e.g. input "x_" if the files are called "x_thetahat.txt", "x_rhat.txt"...etc)
 
 # Optional arguments
-+ `T`: Number of initial starts used in fastPHASE EM algorithm (default = 10)
++ `T`: Number of initial starts used in fastPHASE EM algorithm (default = number
+    of parallel julia threads available as measured by Threads.nthreads())
 + `datadir`: Full path to the PLINK and fastPHASE files (default = current directory)
-+ `outfile`: Output PLINK format name
++ `plink_outfile`: Output PLINK format name
++ `fastphase_outfile`: The output file name from fastPHASE's alpha, theta, r files
++ `args...`: Any parameter specified in `fastphase`
 
 # Output
-+ `outfile.bed`: `n × p` knockoff genotypes
-+ `outfile.bim`: SNP mapping file. Knockoff have SNP names ending in ".k"
-+ `outfile.fam`: Sample mapping file, this is a copy of the original `plinkname.fam` file
++ `plink_outfile.bed`: `n × p` knockoff genotypes
++ `plink_outfile.bim`: SNP mapping file. Knockoff have SNP names ending in ".k"
++ `plink_outfile.fam`: Sample mapping file, this is a copy of the original `plinkname.fam` file
++ `fastphase_outfile_rhat.txt`: averaged r hat file from fastPHASE
++ `fastphase_outfile_alphahat.txt`: averaged alpha hat file from fastPHASE
++ `fastphase_outfile_thetahat.txt`: averaged theta hat file from fastPHASE
 """
 function hmm_knockoff(
-    plinkname::AbstractString,
-    fastphase_outfile::AbstractString;
-    T::Int = 10,
+    plinkname::AbstractString;
+    T::Int = Threads.nthreads(),
     datadir::AbstractString = pwd(),
-    outfile::AbstractString = "knockoff",
-    outdir::AbstractString = datadir
+    plink_outfile::AbstractString = "knockoff",
+    fastphase_outfile::AbstractString = "fastphase_out",
+    outdir::AbstractString = datadir,
+    args...
     )
     snpdata = SnpData(joinpath(datadir, plinkname))
+    r, θ, α = fastphase_estim_param(snpdata; out=fastphase_outfile, args...)
+    return hmm_knockoff(snpdata, r, θ, α, outdir=outdir, plink_outfile=plink_outfile)
+end
+
+"""
+    hmm_knockoff(snpdata, r, θ, α)
+
+Generates knockoff of `snpdata` with loaded r, θ, α
+"""
+function hmm_knockoff(
+    snpdata::SnpData,
+    r::AbstractVecOrMat,
+    θ::AbstractMatrix,
+    α::AbstractMatrix;
+    outdir = pwd(),
+    plink_outfile::AbstractString = "knockoff",
+    )
     Xfull = snpdata.snparray
     n, p = size(Xfull)
-
-    # get r, α, θ estimated by fastPHASE
-    r, θ, α = process_fastphase_output(datadir, T, extension=fastphase_outfile)
     K = size(θ, 2)
     statespace = (K * (K + 1)) >> 1
     table = MarkovChainTable(K)
@@ -294,7 +315,7 @@ function hmm_knockoff(
     Q = get_genotype_transition_matrix(r, θ, α, q, table)
 
     # preallocated arrays
-    X̃full = SnpArray(joinpath(outdir, outfile * ".bed"), n, p)
+    X̃full = SnpArray(joinpath(outdir, plink_outfile * ".bed"), n, p)
     X = zeros(Float64, p)
     Z = zeros(Int, p)
     Z̃ = zeros(Int, p)
@@ -325,11 +346,70 @@ function hmm_knockoff(
     for i in 1:p
         new_bim[i, :snpid] = new_bim[i, :snpid] * ".k"
     end
-    CSV.write(joinpath(outdir, outfile * ".bim"), new_bim, delim='\t', header=false)
-    cp(joinpath(datadir, plinkname * ".fam"), joinpath(outdir, outfile * ".fam"), force=true)
+    CSV.write(joinpath(outdir, plink_outfile * ".bim"), new_bim, delim='\t', header=false)
+    cp(joinpath(datadir, plinkname * ".fam"), joinpath(outdir, plink_outfile * ".fam"), force=true)
 
     return X̃full
 end
+# function hmm_knockoff(
+#     plinkname::AbstractString,
+#     fastphase_outfile::AbstractString;
+#     T::Int = Threads.nthreads(),
+#     datadir::AbstractString = pwd(),
+#     outfile::AbstractString = "knockoff",
+#     outdir::AbstractString = datadir
+#     )
+#     snpdata = SnpData(joinpath(datadir, plinkname))
+#     Xfull = snpdata.snparray
+#     n, p = size(Xfull)
+
+#     # get r, α, θ estimated by fastPHASE
+#     r, θ, α = process_fastphase_output(datadir, T, extension=fastphase_outfile)
+#     K = size(θ, 2)
+#     statespace = (K * (K + 1)) >> 1
+#     table = MarkovChainTable(K)
+
+#     # get initial states (marginal distribution vector) and Markov transition matrices
+#     q = get_initial_probabilities(α, table)
+#     Q = get_genotype_transition_matrix(r, θ, α, q, table)
+
+#     # preallocated arrays
+#     X̃full = SnpArray(joinpath(outdir, outfile * ".bed"), n, p)
+#     X = zeros(Float64, p)
+#     Z = zeros(Int, p)
+#     Z̃ = zeros(Int, p)
+#     X̃ = zeros(Int, p)
+#     N = zeros(p, statespace)
+#     d_K = Categorical([1 / statespace for _ in 1:statespace]) # for sampling markov chains (length statespace)
+#     d_3 = Categorical([1 / statespace for _ in 1:statespace]) # for sampling genotypes (length 3)
+#     α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
+#     c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
+
+#     @showprogress for i in 1:n
+#         # sample hidden states (algorithm 3 in Sesia et al)
+#         copyto!(X, @view(Xfull[i, :]))
+#         forward_backward_sampling!(Z, X, Q, q, θ, table, d_K, α̂, c)
+
+#         # sample knockoff of markov chain (algorithm 2 in Sesia et al)
+#         markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
+
+#         # sample knockoffs of genotypes (eq 6 in Sesia et al)
+#         sample_markov_chain!(X̃, Z̃, table, θ, d_3)
+
+#         # save knockoff
+#         write_plink!(X̃full, X̃, i)
+#     end
+
+#     # copy .bim and .fam files
+#     new_bim = copy(snpdata.snp_info)
+#     for i in 1:p
+#         new_bim[i, :snpid] = new_bim[i, :snpid] * ".k"
+#     end
+#     CSV.write(joinpath(outdir, outfile * ".bim"), new_bim, delim='\t', header=false)
+#     cp(joinpath(datadir, plinkname * ".fam"), joinpath(outdir, outfile * ".fam"), force=true)
+
+#     return X̃full
+# end
 
 function genotype_knockoffs(
     Z̃::AbstractVector,
