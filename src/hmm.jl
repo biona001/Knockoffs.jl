@@ -347,7 +347,7 @@ function hmm_knockoff(
         new_bim[i, :snpid] = new_bim[i, :snpid] * ".k"
     end
     CSV.write(joinpath(outdir, plink_outfile * ".bim"), new_bim, delim='\t', header=false)
-    cp(joinpath(datadir, plinkname * ".fam"), joinpath(outdir, plink_outfile * ".fam"), force=true)
+    cp(snpdata.srcfam, joinpath(outdir, plink_outfile * ".fam"), force=true)
 
     return X̃full
 end
