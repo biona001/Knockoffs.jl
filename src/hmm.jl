@@ -287,8 +287,21 @@ function hmm_knockoff(
     args...
     )
     snpdata = SnpData(joinpath(datadir, plinkname))
-    r, θ, α = fastphase_estim_param(snpdata; out=fastphase_outfile, args...)
+    r, θ, α = fastphase_estim_param(snpdata; T=T, out=fastphase_outfile, args...)
     return hmm_knockoff(snpdata, r, θ, α, outdir=outdir, plink_outfile=plink_outfile)
+end
+
+function hmm_knockoff(
+    plinkname::AbstractString,
+    fastphase_outfile::AbstractString;
+    T::Int = 1,
+    datadir::AbstractString = pwd(),
+    plink_outfile::AbstractString = "knockoff",
+    outdir::AbstractString = datadir
+    )
+    snpdata = SnpData(joinpath(datadir, plinkname))
+    r, θ, α = process_fastphase_output(datadir, T=T, extension=fastphase_outfile)
+    return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, outdir=outdir)
 end
 
 """
@@ -350,21 +363,6 @@ function hmm_knockoff(
     cp(snpdata.srcfam, joinpath(outdir, plink_outfile * ".fam"), force=true)
 
     return X̃full
-end
-
-function hmm_knockoff(
-    plinkname::AbstractString,
-    fastphase_outfile::AbstractString;
-    T::Int = 1,
-    datadir::AbstractString = pwd(),
-    plink_outfile::AbstractString = "knockoff",
-    outdir::AbstractString = datadir
-    )
-    snpdata = SnpData(joinpath(datadir, plinkname))
-    Xfull = snpdata.snparray
-    n, p = size(Xfull)
-    r, θ, α = process_fastphase_output(datadir, T=T, extension=fastphase_outfile)
-    return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, outdir=outdir)
 end
 
 function genotype_knockoffs(
