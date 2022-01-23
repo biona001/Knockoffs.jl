@@ -355,61 +355,16 @@ end
 function hmm_knockoff(
     plinkname::AbstractString,
     fastphase_outfile::AbstractString;
-    T::Int = Threads.nthreads(),
+    T::Int = 1,
     datadir::AbstractString = pwd(),
-    outfile::AbstractString = "knockoff",
+    plink_outfile::AbstractString = "knockoff",
     outdir::AbstractString = datadir
     )
     snpdata = SnpData(joinpath(datadir, plinkname))
     Xfull = snpdata.snparray
     n, p = size(Xfull)
-
-    # get r, α, θ estimated by fastPHASE
     r, θ, α = process_fastphase_output(datadir, T=T, extension=fastphase_outfile)
-    K = size(θ, 2)
-    statespace = (K * (K + 1)) >> 1
-    table = MarkovChainTable(K)
-
-    # get initial states (marginal distribution vector) and Markov transition matrices
-    q = get_initial_probabilities(α, table)
-    Q = get_genotype_transition_matrix(r, θ, α, q, table)
-
-    # preallocated arrays
-    X̃full = SnpArray(joinpath(outdir, outfile * ".bed"), n, p)
-    X = zeros(Float64, p)
-    Z = zeros(Int, p)
-    Z̃ = zeros(Int, p)
-    X̃ = zeros(Int, p)
-    N = zeros(p, statespace)
-    d_K = Categorical([1 / statespace for _ in 1:statespace]) # for sampling markov chains (length statespace)
-    d_3 = Categorical([1 / statespace for _ in 1:statespace]) # for sampling genotypes (length 3)
-    α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
-    c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
-
-    @showprogress for i in 1:n
-        # sample hidden states (algorithm 3 in Sesia et al)
-        copyto!(X, @view(Xfull[i, :]))
-        forward_backward_sampling!(Z, X, Q, q, θ, table, d_K, α̂, c)
-
-        # sample knockoff of markov chain (algorithm 2 in Sesia et al)
-        markov_knockoffs!(Z̃, Z, N, d_K, Q, q)
-
-        # sample knockoffs of genotypes (eq 6 in Sesia et al)
-        sample_markov_chain!(X̃, Z̃, table, θ, d_3)
-
-        # save knockoff
-        write_plink!(X̃full, X̃, i)
-    end
-
-    # copy .bim and .fam files
-    new_bim = copy(snpdata.snp_info)
-    for i in 1:p
-        new_bim[i, :snpid] = new_bim[i, :snpid] * ".k"
-    end
-    CSV.write(joinpath(outdir, outfile * ".bim"), new_bim, delim='\t', header=false)
-    cp(joinpath(datadir, plinkname * ".fam"), joinpath(outdir, outfile * ".fam"), force=true)
-
-    return X̃full
+    return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, outdir=outdir)
 end
 
 function genotype_knockoffs(

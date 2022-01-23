@@ -83,6 +83,9 @@ function update_normalizing_constants!(
     return nothing
 end
 
+"""
+Samples `Zj`, the `j` state of the hidden Markov chain. 
+"""
 function single_state_dmc_knockoff!(
     Z̃::AbstractVector{Int},
     Z::AbstractVector{Int},
@@ -105,9 +108,6 @@ function single_state_dmc_knockoff!(
         for z̃ in 1:statespace # todo: numerical error?
             @inbounds d.p[z̃] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
         end
-        # if j > 7158
-        #     println(d.p)
-        # end
     end
     @assert sum(d.p) ≈ 1 "single_state_dmc_knockoff!: probability should sum to 1 but was $(d.p) and j = $j"
     Z̃[j] = rand(d)
