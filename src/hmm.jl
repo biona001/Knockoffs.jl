@@ -63,7 +63,7 @@ function get_genotype_transition_matrix(
     # now compute genotype transition matrix
     Q = Array{Float64, 3}(undef, statespace, statespace, p)
     @inbounds for l in 1:statespace
-        Q[l, :, 1] .= q
+        @view(Q[l, :, 1]) .= q
     end
     # for l in 1:statespace
     #     Q[:, :, 1] .= NaN # Q1 should never be used anywhere, so we fill it with NaN
@@ -202,14 +202,14 @@ function forward_backward_sampling!(
         α̂[1, k] = q[k] * get_genotype_emission_probabilities(θ, X[1], geno.a, geno.b, 1)
         c[1] += α̂[1, k]
     end
-    α̂[1, :] ./= c[1]
+    @view(α̂[1, :]) ./= c[1]
     @inbounds for j in 2:p
         mul!(@view(α̂[j, :]), Transpose(@view(Q[:, :, j])), @view(α̂[j - 1, :])) # note: Pr(j|i) = Q_{i,j} (i.e. rows of Q must sum to 1)
         for (k, geno) in enumerate(table)
             α̂[j, k] *= get_genotype_emission_probabilities(θ, X[j], geno.a, geno.b, j)
             c[j] += α̂[j, k]
         end
-        α̂[j, :] ./= c[j]
+        @view(α̂[j, :]) ./= c[j]
     end
 
     # backwards sampling
