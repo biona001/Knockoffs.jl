@@ -20,7 +20,7 @@ export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
     process_fastphase_output, fastphase, 
     # functions for hmm
     get_haplotype_transition_matrix, get_genotype_transition_matrix, 
-    get_initial_probabilities,
+    get_initial_probabilities, genotype_knockoffs,
     GenotypeState, MarkovChainTable, pair_to_index, index_to_pair,
     hmm_knockoff, forward_backward_sampling, forward_backward_sampling!,
     form_emission_prob_matrix, get_genotype_emission_probabilities,
