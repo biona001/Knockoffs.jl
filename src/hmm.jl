@@ -283,24 +283,26 @@ function hmm_knockoff(
     datadir::AbstractString = pwd(),
     plink_outfile::AbstractString = "knockoff",
     fastphase_outfile::AbstractString = "fastphase_out",
-    outdir::AbstractString = datadir,
+    outdir::AbstractString = "knockoffs",
     args...
     )
+    isdir(outdir) || mkdir(outdir)
     snpdata = SnpData(joinpath(datadir, plinkname))
-    r, θ, α = fastphase_estim_param(snpdata; T=T, out=fastphase_outfile, args...)
+    r, θ, α = fastphase_estim_param(snpdata; T=T, outfile=fastphase_outfile, outdir=outdir, args...)
     return hmm_knockoff(snpdata, r, θ, α, outdir=outdir, plink_outfile=plink_outfile)
 end
 
 function hmm_knockoff(
     plinkname::AbstractString,
     fastphase_outfile::AbstractString;
-    T::Int = 1,
+    T::Int = Threads.nthreads(),
     datadir::AbstractString = pwd(),
     plink_outfile::AbstractString = "knockoff",
-    outdir::AbstractString = datadir
+    outdir::AbstractString = "knockoffs",
     )
+    isdir(outdir) || mkdir(outdir)
     snpdata = SnpData(joinpath(datadir, plinkname))
-    r, θ, α = process_fastphase_output(datadir, T=T, extension=fastphase_outfile)
+    r, θ, α = process_fastphase_output(fastphase_outfile, T=T)
     return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, outdir=outdir)
 end
 
@@ -314,9 +316,10 @@ function hmm_knockoff(
     r::AbstractVecOrMat,
     θ::AbstractMatrix,
     α::AbstractMatrix;
-    outdir = pwd(),
+    outdir = "knockoffs",
     plink_outfile::AbstractString = "knockoff",
     )
+    isdir(outdir) || mkdir(outdir)
     Xfull = snpdata.snparray
     n, p = size(Xfull)
     K = size(θ, 2)

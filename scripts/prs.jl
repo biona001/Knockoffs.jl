@@ -111,18 +111,37 @@ function run_sims(seed::Int;
     #
     # import shapeit knockoffs
     #
+    # chr = 10
+    # plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/knockoffs/ukb_gen_chr$(chr)_ibd1_res0" #shapeit knockoffs
+    # # plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/decorrelated_knockoffs/ukb_gen_chr$(chr)_ibd1_res0_decorrelated" #shapeit knockoffs (decorrelated)
+    # xdata = SnpData(plinkname)
+    # isknockoff = endswith.(xdata.snp_info[!, :snpid], ".k")
+    # original, knockoff = Int[], Int[]
+    # for i in 1:size(xdata)[2]
+    #     isknockoff[i] ? push!(knockoff, i) : push!(original, i)
+    # end
+    # x = xdata.snparray
+    # xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
+    # xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
+    # cur_dir = pwd()
+
+    #
+    # import Julia fastphase knockoffs
+    #
     chr = 10
-    plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/knockoffs/ukb_gen_chr$(chr)_ibd1_res0" #shapeit knockoffs
-    # plinkname = "/scratch/users/bbchu/ukb_SHAPEIT/decorrelated_knockoffs/ukb_gen_chr$(chr)_ibd1_res0_decorrelated" #shapeit knockoffs (decorrelated)
-    xdata = SnpData(plinkname)
-    isknockoff = endswith.(xdata.snp_info[!, :snpid], ".k")
-    original, knockoff = Int[], Int[]
-    for i in 1:size(xdata)[2]
-        isknockoff[i] ? push!(knockoff, i) : push!(original, i)
-    end
-    x = xdata.snparray
-    xla = convert(Matrix{Float64}, @view(x[1:10000, original]), center=true, scale=true, impute=true)
-    xko_la = convert(Matrix{Float64}, @view(x[1:10000, :]), center=true, scale=true, impute=true)
+    # plinkname = "/scratch/users/bbchu/fastphase/1k/ukb.10k.chr10.bed"
+    # knockoffname = "/scratch/users/bbchu/fastphase/1k/ukb.10k.chr10.merged.bed"
+    # original = collect(29482:58962)
+    # knockoff = collect(1:29481)
+    plinkname = "/scratch/users/bbchu/fastphase/1k/ukb.10k.chr10.bed"
+    knockoffname = "/scratch/users/bbchu/fastphase/1k/knockoff.bed"
+    bimfile = CSV.read("/scratch/users/bbchu/fastphase/1k/knockoff.bim", DataFrame, header=false)
+    original = findall(!endswith(".k"), bimfile[!, 2])
+    knockoff = findall(endswith(".k"), bimfile[!, 2])
+    x = SnpArray(plinkname)
+    xko = SnpArray(knockoffname)
+    xla = convert(Matrix{Float64}, x, center=true, scale=true, impute=true)
+    xko_la = convert(Matrix{Float64}, xko, center=true, scale=true, impute=true)
     cur_dir = pwd()
 
     #
@@ -260,49 +279,46 @@ function run_sims(seed::Int;
         #
         # run knockoff IHT with wrapped cross validation
         #
-        Random.seed!(seed)
-        chr = 10
-        path = 10:10:200
-        mses = cv_iht_knockoff(y, xko_la, covar, original, knockoff, fdr, path=path,
-            init_beta=true, combine_beta = combine_beta)
-        Random.seed!(seed)
-        GC.gc()
-        k_rough_guess = path[argmin(mses)]
-        dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
-        mses_new = cv_iht_knockoff(y, xko_la, covar, original, knockoff, fdr,
-            path=dense_path, init_beta=true, combine_beta = combine_beta)
-        GC.gc()
-        # adjust sparsity level so it best matches sparsity chosen by ko filter
-        Random.seed!(seed)
-        best_k = dense_path[argmin(mses_new)]
-        best_result = tune_k(y, xko_la, covar, original, knockoff, fdr, best_k)
-        writedlm("iht.knockoff.cv.beta", best_result.beta)
-        writedlm("iht.knockoff.cv.covariates", best_result.c)
+        # Random.seed!(seed)
+        # chr = 10
+        # path = 10:10:200
+        # mses = cv_iht_knockoff(y, xko_la, covar, original, knockoff, fdr, path=path,
+        #     init_beta=true, combine_beta = combine_beta)
+        # Random.seed!(seed)
+        # GC.gc()
+        # k_rough_guess = path[argmin(mses)]
+        # dense_path = (k_rough_guess - 9):(k_rough_guess + 9)
+        # mses_new = cv_iht_knockoff(y, xko_la, covar, original, knockoff, fdr,
+        #     path=dense_path, init_beta=true, combine_beta = combine_beta)
+        # GC.gc()
+        # # adjust sparsity level so it best matches sparsity chosen by ko filter
+        # Random.seed!(seed)
+        # best_k = dense_path[argmin(mses_new)]
+        # best_result = tune_k(y, xko_la, covar, original, knockoff, fdr, best_k)
+        # writedlm("iht.knockoff.cv.beta", best_result.beta)
+        # writedlm("iht.knockoff.cv.covariates", best_result.c)
 
         #
         # compare R2 across populations, save result in a dataframe
         #
         # combine_beta = false
         p = length(β)
-        # β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
-        β_iht = iht_result.beta
+        β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
+        # β_iht = iht_result.beta
         β_lasso = coef(lasso_cv)[1:p]
-        β_iht_knockoff = extract_beta(iht_ko_result.beta, fdr,
-            original, knockoff, :knockoff, combine_beta)
-        β_iht_knockoff_cv = extract_beta(best_result.beta,
-            fdr, original, knockoff, :knockoff, combine_beta)
+        # β_iht_knockoff = extract_beta(iht_ko_result.beta, fdr,
+        #     original, knockoff, :knockoff, combine_beta)
         β_lasso_knockoff = extract_beta(coef(lasso_ko_cv), fdr,
             original, knockoff, :knockoff, combine_beta)[1:p]
 
         writedlm("iht.knockoff.beta.postfilter", β_iht_knockoff)
-        writedlm("iht.knockoff.cv.beta.postfilter", β_iht_knockoff_cv)
         writedlm("lasso.knockoff.beta.postfilter", β_lasso_knockoff)
 
         populations = ["african", "asian", "bangladeshi", "british", "caribbean", "chinese",
             "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
 
         df = DataFrame(pop = String[], IHT_R2 = Float64[], IHT_ko_R2 = Float64[],
-            IHT_ko_cv_R2 = Float64[], LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
+            LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
 
         for pop in populations
             xtest = SnpArray("/scratch/users/bbchu/ukb_SHAPEIT/populations/chr10/ukb.chr$chr.$pop.bed") # 10k samples with all snps
@@ -310,49 +326,47 @@ function run_sims(seed::Int;
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
             ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
-            # IHT
-            iht_r2 = R2(Xtest, ytest, β_iht)
-            # IHT knockoff (low dimensional fit)
-            iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
-            # knockoff IHT cv (low dimensional)
-            iht_ko_cv_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff_cv)
+            # # IHT
+            # iht_r2 = R2(Xtest, ytest, β_iht)
+            # # IHT knockoff (low dimensional fit)
+            # iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
             # lasso β
             lasso_r2 = R2(Xtest, ytest, β_lasso)
             # knockoff lasso β (low dimensional)
             lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
             # save to dataframe
-            push!(df, hcat(pop, iht_r2, iht_ko_r2, iht_ko_cv_r2,
-                lasso_r2, lasso_ko_r2))
-            # push!(df, hcat(pop, 0, 0, 0, lasso_r2, lasso_ko_r2))
+            # push!(df, hcat(pop, iht_r2, iht_ko_r2, lasso_r2, lasso_ko_r2))
+            push!(df, hcat(pop, 0, 0, lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
         # count non-zero entries of β returned from cross validation
-        push!(df, hcat("beta_non_zero_count", count(!iszero, β_iht), 
-            count(!iszero, iht_ko_result.beta),
-            count(!iszero, best_result.beta),
-            # 0, 0,
+        push!(df, hcat("beta_non_zero_count",
+            # count(!iszero, β_iht), 
+            # count(!iszero, iht_ko_result.beta),
+            0, 0,
             count(!iszero, β_lasso),
             count(!iszero, coef(lasso_ko_cv))
             ))
         # count non-zero entries after knockoff filter
-        push!(df, hcat("beta_selected", count(!iszero, β_iht), 
+        push!(df, hcat("beta_selected", 
+            count(!iszero, β_iht), 
             count(!iszero, β_iht_knockoff),
-            count(!iszero, β_iht_knockoff_cv), count(!iszero, β_lasso),
+            count(!iszero, β_lasso),
             count(!iszero, β_lasso_knockoff)
             ))
         # count TP proportion
         correct_snps = findall(!iszero, β)
-        push!(df, hcat("TPP", TP(correct_snps, findall(!iszero, β_iht)),
+        push!(df, hcat("TPP", 
+            TP(correct_snps,findall(!iszero, β_iht)),
             TP(correct_snps, findall(!iszero, β_iht_knockoff)),
-            TP(correct_snps, findall(!iszero, β_iht_knockoff_cv)),
             TP(correct_snps, findall(!iszero, β_lasso)),
             TP(correct_snps, findall(!iszero, β_lasso_knockoff))
             ))
         # count FDR
-        push!(df, hcat("FDR", FDR(correct_snps, findall(!iszero, β_iht)),
+        push!(df, hcat("FDR", 
+            FDR(correct_snps, findall(!iszero, β_iht)),
             FDR(correct_snps, findall(!iszero, β_iht_knockoff)),
-            FDR(correct_snps, findall(!iszero, β_iht_knockoff_cv)),
             FDR(correct_snps, findall(!iszero, β_lasso)),
             FDR(correct_snps, findall(!iszero, β_lasso_knockoff))
             ))
@@ -366,9 +380,9 @@ end
 # Run simulation (via `julia prs.jl n`)
 # where n is a seed
 #
-seed = parse(Int, ARGS[1])
-# causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
-# causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
-k = 100
-confounders = 0 # 1 PC
-run_sims(seed, k=k, use_PCA=false, confounders=confounders)
+# seed = parse(Int, ARGS[1])
+# # causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
+# # causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
+# k = 100
+# confounders = 0 # 1 PC
+# run_sims(seed, k=k, use_PCA=false, confounders=confounders)
