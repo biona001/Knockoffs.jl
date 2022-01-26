@@ -217,6 +217,7 @@ function forward_backward_sampling!(
     @inbounds for k in 1:statespace
         d.p[k] = α̂[p, k] / denom
     end
+    @assert sum(d.p) ≈ 1 "forward_backward_sampling!: probability should sum to 1 but was $(sum(d.p))"
     Z[end] = rand(d)
     @inbounds for j in Iterators.reverse(1:p-1)
         denom = 0.0
