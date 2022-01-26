@@ -82,7 +82,7 @@ function update_normalizing_constants!(
         end
     end
     # replace 0s with Nmin, todo: is this necessary?
-    for k in 1:statespace
+    @inbounds for k in 1:statespace
         if N[j, k] ≈ 0
             N[j, k] = Nmin
         end
