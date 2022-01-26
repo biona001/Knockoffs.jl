@@ -4,6 +4,7 @@ using LinearAlgebra
 using Random
 using StatsBase
 using Statistics
+using Distributions
 
 @testset "fixed equi knockoffs" begin
     Random.seed!(2021)
@@ -216,4 +217,66 @@ end
     @test length(w) == 2
     @test w[1] ≈ 1.8 - 0.5
     @test w[2] ≈ 1.0 - 0.2
+end
+
+function sample_DMC(q, Q; n=1)
+    p = size(Q, 3)
+    d = Categorical(q)
+    X = zeros(Int, n, p)
+    for i in 1:n
+        X[i, 1] = rand(d)
+        for j in 2:p
+            d.p .= @view(Q[X[i, j-1], :, j])
+            X[i, j] = rand(d)
+        end
+    end
+    return X
+end
+
+# from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
+@testset "Markov chain knockoffs have the right correlation structure" begin
+    p = 20 # Number of states in markov chain
+    K = 3  # Number of possible states for each variable
+    q = 1/K .* ones(K) # Marginal distribution for the first variable
+    samples = 1000000 # number of samples in this example
+
+    # form random transition matrices
+    Q = rand(K, K, p)
+    for j in 1:p
+        Qj = @view(Q[:, :, j])
+        Qj ./= sum(Qj, dims=2)
+    end
+    fill!(@view(Q[:, :, 1]), NaN)
+
+    # sample a bunch of markov chains
+    X = sample_DMC(q, Q, n=samples)
+
+    # sample knockoff of the markov chains
+    X̃ = zeros(Int, samples, p)
+    N = zeros(p, K)
+    d = Categorical([1 / K for _ in 1:K])
+    for i in 1:samples
+        markov_knockoffs!(@view(X̃[i, :]), @view(X[i, :]), N, d, Q, q) 
+    end
+
+    # Check column means match
+    Xmean = mean(X, dims=1)
+    X̃mean = mean(X̃, dims=1)
+    for i in 2:length(Xmean) # 1st entry might not match to 2 digits for some reason, this is the same in SNPknock
+        @test isapprox(Xmean[i], X̃mean[i], atol=1e-2)
+    end
+
+    # Check that internal column correlations match
+    for i in 2:p-1
+        r1 = cor(@view(X[:, i]), @view(X[:, i+1]))
+        r2 = cor(@view(X̃[:, i]), @view(X̃[:, i+1]))
+        @test isapprox(r1, r2, atol=1e-2)
+    end
+
+    # Check that cross column correlations match
+    for i in 2:p-1
+        r1 = cor(@view(X[:, i]), @view(X[:, i+1]))
+        r2 = cor(@view(X[:, i]), @view(X̃[:, i+1]))
+        @test isapprox(r1, r2, atol=1e-2)
+    end
 end
