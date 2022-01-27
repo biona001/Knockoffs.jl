@@ -95,7 +95,7 @@ function get_initial_probabilities(α::AbstractMatrix, table::MarkovChainTable)
         ka, kb = geno.a, geno.b
         q[i] = (ka == kb ? abs2(α1[ka]) : 2 * α1[ka] * α1[kb])
     end
-    @assert sum(q) ≈ 1 "initial probability should sum to 1!"
+    @assert sum(q) ≈ 1 "initial probability should sum to 1 but was $(sum(q))"
     return q
 end
 
@@ -285,12 +285,14 @@ function hmm_knockoff(
     plink_outfile::AbstractString = "knockoff",
     fastphase_outfile::AbstractString = "fastphase_out",
     outdir::AbstractString = "knockoffs",
+    verbose::Bool = false,
     args...
     )
     isdir(outdir) || mkdir(outdir)
     snpdata = SnpData(joinpath(datadir, plinkname))
     r, θ, α = fastphase_estim_param(snpdata; T=T, outfile=fastphase_outfile, outdir=outdir, args...)
-    return hmm_knockoff(snpdata, r, θ, α, outdir=outdir, plink_outfile=plink_outfile)
+    return hmm_knockoff(snpdata, r, θ, α, outdir=outdir, 
+        plink_outfile=plink_outfile, verbose=verbose)
 end
 
 function hmm_knockoff(
@@ -300,11 +302,13 @@ function hmm_knockoff(
     datadir::AbstractString = pwd(),
     plink_outfile::AbstractString = "knockoff",
     outdir::AbstractString = "knockoffs",
+    verbose::Bool = false
     )
     isdir(outdir) || mkdir(outdir)
     snpdata = SnpData(joinpath(datadir, plinkname))
     r, θ, α = process_fastphase_output(fastphase_outfile, T=T)
-    return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, outdir=outdir)
+    return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, 
+        outdir=outdir, verbose=verbose)
 end
 
 """
@@ -319,6 +323,7 @@ function hmm_knockoff(
     α::AbstractMatrix;
     outdir = "knockoffs",
     plink_outfile::AbstractString = "knockoff",
+    verbose::Bool = false
     )
     isdir(outdir) || mkdir(outdir)
     Xfull = snpdata.snparray
@@ -353,6 +358,8 @@ function hmm_knockoff(
 
         # sample knockoffs of genotypes (eq 6 in Sesia et al)
         sample_markov_chain!(X̃, Z̃, table, θ, d_3)
+
+        verbose && println("cor of SNP $i = ", cor(X, X̃))
 
         # save knockoff
         write_plink!(X̃full, X̃, i)
