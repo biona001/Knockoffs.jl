@@ -26,7 +26,7 @@ function full_knockoffscreen(x::SnpArray, windowsize::Int=100)
     β̂ = zeros(windowsize)
     y = zeros(n)
     residual = zeros(n)
-    pmeter = Progress(windows, 1, "Making KnockoffScreen knockoffs", 1)
+    pmeter = Progress(windows, 1, "Generating knockoffs", 1)
     # loop over each window independently
     for window in 1:windows-1
         snps = (window - 1)*windowsize + 1:window * windowsize
