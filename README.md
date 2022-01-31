@@ -51,3 +51,4 @@ Asdp  = modelX_gaussian_knockoffs(X, :sdp, μtrue)
 + SHAPEIT HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (in progress)
 + MRC minimizing knockoffs ([ref](https://arxiv.org/abs/2011.14625))
 + Parallelized ASDP knockoffs
++ [KnockoffScreen](https://www.nature.com/articles/s41467-021-22889-4) knockoffs (in progress)

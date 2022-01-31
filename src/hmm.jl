@@ -359,7 +359,7 @@ function hmm_knockoff(
         # sample knockoffs of genotypes (eq 6 in Sesia et al)
         sample_markov_chain!(X̃, Z̃, table, θ, d_3)
 
-        verbose && println("cor of SNP $i = ", cor(X, X̃))
+        verbose && println("cor of sample $i = ", cor(X, X̃))
 
         # save knockoff
         write_plink!(X̃full, X̃, i)
