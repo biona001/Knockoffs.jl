@@ -45,4 +45,7 @@ include("hmm.jl")
 include("utilities.jl")
 include("knockoffscreen.jl")
 
+# test data directory
+datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    
+
 end
