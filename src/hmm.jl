@@ -253,7 +253,7 @@ function forward_backward_sampling(
 end
 
 """
-    hmm_knockoff(plinkname, fastphase_outfile, T=10, datadir=pwd())
+    hmm_knockoff(plinkname, fastphase_outfile, datadir=pwd())
 
 Generates HMM knockoffs from binary PLINK formatted files. This is done by
 first running fastPHASE, then running Algorithm 2 of "Gene hunting with hidden
@@ -263,8 +263,6 @@ Markov model knockoffs" by Sesia, Sabatti, and Candes
 + `plinkname`: Binary PLINK file names without the `.bed/.bim/.fam` suffix. 
 
 # Optional arguments
-+ `T`: Number of initial starts used in fastPHASE EM algorithm (default = number
-    of parallel julia threads available as measured by Threads.nthreads())
 + `datadir`: Full path to the PLINK and fastPHASE files (default = current directory)
 + `plink_outfile`: Output PLINK format name
 + `fastphase_outfile`: The output file name from fastPHASE's alpha, theta, r files
@@ -280,7 +278,6 @@ Markov model knockoffs" by Sesia, Sabatti, and Candes
 """
 function hmm_knockoff(
     plinkname::AbstractString;
-    T::Int = Threads.nthreads(),
     datadir::AbstractString = pwd(),
     plink_outfile::AbstractString = "knockoff",
     fastphase_outfile::AbstractString = "fastphase_out",
@@ -290,7 +287,7 @@ function hmm_knockoff(
     )
     isdir(outdir) || mkdir(outdir)
     snpdata = SnpData(joinpath(datadir, plinkname))
-    r, θ, α = fastphase_estim_param(snpdata; T=T, outfile=fastphase_outfile, outdir=outdir, args...)
+    r, θ, α = fastphase_estim_param(snpdata; T=1, outfile=fastphase_outfile, outdir=outdir, args...)
     return hmm_knockoff(snpdata, r, θ, α, outdir=outdir, 
         plink_outfile=plink_outfile, verbose=verbose)
 end
@@ -298,7 +295,6 @@ end
 function hmm_knockoff(
     plinkname::AbstractString,
     fastphase_outfile::AbstractString;
-    T::Int = Threads.nthreads(),
     datadir::AbstractString = pwd(),
     plink_outfile::AbstractString = "knockoff",
     outdir::AbstractString = "knockoffs",
@@ -306,7 +302,7 @@ function hmm_knockoff(
     )
     isdir(outdir) || mkdir(outdir)
     snpdata = SnpData(joinpath(datadir, plinkname))
-    r, θ, α = process_fastphase_output(fastphase_outfile, T=T)
+    r, θ, α = process_fastphase_output(fastphase_outfile, T=1)
     return hmm_knockoff(snpdata, r, θ, α, plink_outfile=plink_outfile, 
         outdir=outdir, verbose=verbose)
 end
