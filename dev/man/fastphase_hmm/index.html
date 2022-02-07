@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>fastPHASE HMM Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.039/juliamono-regular.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.11/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><script src="../../../copy.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li class="is-active"><a class="tocitem" href>fastPHASE HMM Knockoffs</a><ul class="internal"><li><a class="tocitem" href="#Installation"><span>Installation</span></a></li><li><a class="tocitem" href="#Step-0:-Prepare-example-data"><span>Step 0: Prepare example data</span></a></li><li><a class="tocitem" href="#Step-1:-Generate-Knockoffs"><span>Step 1: Generate Knockoffs</span></a></li><li><a class="tocitem" href="#Step-3:-Examine-knockoff-statistics"><span>Step 3: Examine knockoff statistics</span></a></li></ul></li><li><a class="tocitem" href="../shapeit_hmm/">SHAPEIT HMM Knockoffs</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>fastPHASE HMM Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>fastPHASE HMM Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/fastphase_hmm.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="fastPHASE-HMM-knockoffs"><a class="docs-heading-anchor" href="#fastPHASE-HMM-knockoffs">fastPHASE HMM knockoffs</a><a id="fastPHASE-HMM-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#fastPHASE-HMM-knockoffs" title="Permalink"></a></h1><pre><code class="language-julia hljs"># load packages needed for this tutorial
+using Revise
+using SnpArrays
+using Knockoffs
+using Plots
+using Statistics
+gr(fmt=:png);</code></pre><p>This is a tutorial for generating (fastPHASE) HMM knockoffs for <a href="https://en.wikipedia.org/wiki/Genome-wide_association_study">genome-wide association studies</a>. This kind of knockoffs is suitable for data <em>without</em> population admixture or cryptic relatedness. The methodology is described in the following paper:</p><blockquote><p>Sesia, Matteo, Chiara Sabatti, and Emmanuel J. Candès. &quot;Gene hunting with hidden Markov model knockoffs.&quot; Biometrika 106.1 (2019): 1-18.</p></blockquote><p>If your samples have diverse ancestries and/or extensive relatedness, we recommend those samples to be filtered out, or use SHAPEIT-HMM knockoffs.</p><h2 id="Installation"><a class="docs-heading-anchor" href="#Installation">Installation</a><a id="Installation-1"></a><a class="docs-heading-anchor-permalink" href="#Installation" title="Permalink"></a></h2><p>A Julia wrapper for the <a href="http://scheet.org/software.html">original fastPHASE software</a> can be installed as <a href="https://github.com/biona001/fastPHASE.jl">fastPHASE.jl</a>, which adds bindings for reading PLINK files. It should be automatically installed with Knockoffs.jl, but you can manually install it by</p><pre><code class="language-julia hljs">using Pkg
+pkg&quot;https://github.com/biona001/fastPHASE.jl&quot;</code></pre><h2 id="Step-0:-Prepare-example-data"><a class="docs-heading-anchor" href="#Step-0:-Prepare-example-data">Step 0: Prepare example data</a><a id="Step-0:-Prepare-example-data-1"></a><a class="docs-heading-anchor-permalink" href="#Step-0:-Prepare-example-data" title="Permalink"></a></h2><p>To illustrate we need example PLINK data, which are available in <code>Knockoffs.jl/data/</code></p><ul><li><code>mouse.(bed/bim/fam)</code> are mouse genotypes with missing data</li><li><code>mouse.imputed.(bed/bim/fam)</code> are genotypes without missing</li></ul><pre><code class="language-julia hljs">readdir(Knockoffs.datadir())</code></pre><pre><code class="nohighlight hljs">8-element Vector{String}:
+ &quot;.ipynb_checkpoints&quot;
+ &quot;mouse.bed&quot;
+ &quot;mouse.bim&quot;
+ &quot;mouse.fam&quot;
+ &quot;mouse.imputed.bed&quot;
+ &quot;mouse.imputed.bim&quot;
+ &quot;mouse.imputed.fam&quot;
+ &quot;subset.ipynb&quot;</code></pre><h2 id="Step-1:-Generate-Knockoffs"><a class="docs-heading-anchor" href="#Step-1:-Generate-Knockoffs">Step 1: Generate Knockoffs</a><a id="Step-1:-Generate-Knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Step-1:-Generate-Knockoffs" title="Permalink"></a></h2><p>Knockoffs are made using the wrapper function <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hmm_knockoff">hmm_knockoff</a>. This function does 3 steps sequentially:</p><ol><li>Run fastPHASE on <span>$\mathbf{X}_{n\times p}$</span> to estimate <span>$\alpha, \theta, r$</span></li><li>Fit and generate knockoff copies of the HMM </li><li>Store knockoffs <span>$\tilde{\mathbf{X}}_{n\times p}$</span> in binary PLINK format (by default under a new directory called <code>knockoffs</code>) and return it as a <code>SnpArray</code></li></ol><pre><code class="language-julia hljs"># Path to PLINK data (without bed/bim/fam suffix)
+mouse = joinpath(normpath(Knockoffs.datadir()), &quot;mouse.imputed&quot;)</code></pre><pre><code class="nohighlight hljs">&quot;/Users/biona001/.julia/dev/Knockoffs/data/mouse.imputed&quot;</code></pre><p>Generate knockoffs</p><pre><code class="language-julia hljs">@time X̃ = hmm_knockoff(mouse, plink_outfile=&quot;mouse.imputed.knockoffs&quot;)</code></pre><pre><code class="nohighlight hljs">seed = 1644263945
+
+This is fastPHASE 1.4.8
+
+Copyright 2005-2006.  University of Washington. All rights reserved.
+Written by Paul Scheet, with algorithm developed by Paul Scheet and
+Matthew Stephens in the Department of Statistics at the University of
+Washington.  Please contact pscheet@alum.wustl.edu for questions, or to
+obtain the software visit
+http://stephenslab.uchicago.edu/software.html
+
+Total proportion of missing genotypes: 0.000000
+300 diploids below missingness threshold, 0 haplotypes
+ data read successfully
+300 diploid individuals, 10150 loci
+
+K selected (by user): 		 12
+seed: 			 1
+no. EM starts: 		 1
+EM iterations: 		 10
+no. haps from posterior: 0
+NOT using subpopulation labels
+
+
+ this is random start no. 1 of 1 for the EM...
+
+seed for this start: 1
+-4090352.70909944
+-1811045.63155592
+-1141902.60403259
+-771959.55933310
+-610708.68729954
+-544178.20323916
+-512993.63183391
+-495563.69134190
+-484778.11388268
+-477418.34350641
+final loglikelihood: -472148.628952
+iterations: 10
+
+writing parameter estimates to disk
+
+  simulating 0 haplotype configurations for each individual... done.
+
+[32mProgress: 100%|█████████████████████████████████████████| Time: 0:00:47[39m
+
+
+
+
+simulating 0 haplotypes from model: knockoffs/tmp1_hapsfrommodel.out
+172.283679 seconds (70.89 M allocations: 3.871 GiB, 0.61% gc time, 9.13% compilation time)
+
+
+
+
+
+300×10150 SnpArrays.SnpArray:
+ 0x02  0x02  0x02  0x02  0x03  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x03  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
+ 0x02  0x02  0x02  0x02  0x03  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x03  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
+ 0x03  0x03  0x03  0x03  0x03  0x03  …  0x00  0x00  0x00  0x00  0x00  0x00
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x00  0x00  0x00  0x00  0x00  0x00
+    ⋮                             ⋮  ⋱           ⋮                    
+ 0x00  0x00  0x00  0x00  0x03  0x00     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x02  0x02  0x02  0x02  0x03  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x02  0x02  0x02  0x02  0x02  0x02
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03  …  0x02  0x02  0x02  0x02  0x02  0x02
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03</code></pre><h3 id="Optional-parameters"><a class="docs-heading-anchor" href="#Optional-parameters">Optional parameters</a><a id="Optional-parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Optional-parameters" title="Permalink"></a></h3><p>Here are some optional parameters one can tune when fitting the HMM procedure. </p><ul><li><code>K</code>: Number of haplotype clusters. Defaults to 12</li><li><code>C</code>: Number of EM iterations before convergence. Defaults to 10.</li><li><code>n</code>: Number of samples used to fit HMM in fastPHASE. Defaults to using all samples</li></ul><p>They can be specified via:</p><pre><code class="language-julia hljs">@time X̃ = hmm_knockoff(mouse_imputed_file,
+    plink_outfile=&quot;mouse.imputed.knockoffs&quot;,
+    K = 12,
+    C = 10,
+    n = 100)</code></pre><h2 id="Step-3:-Examine-knockoff-statistics"><a class="docs-heading-anchor" href="#Step-3:-Examine-knockoff-statistics">Step 3: Examine knockoff statistics</a><a id="Step-3:-Examine-knockoff-statistics-1"></a><a class="docs-heading-anchor-permalink" href="#Step-3:-Examine-knockoff-statistics" title="Permalink"></a></h2><p>Lets check if the knockoffs &quot;make sense&quot;. We will use <a href="https://github.com/OpenMendel/SnpArrays.jl">SnpArrays.jl</a> to import the original and knockoff genotypes, and compare summary statistics using built-in functions <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.compare_pairwise_correlation">compare<em>pairwise</em>correlation</a> and <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.compare_correlation">compare_correlation</a></p><pre><code class="language-julia hljs"># import original and knockoff genotypes
+X = SnpArray(joinpath(normpath(Knockoffs.datadir()), &quot;mouse.imputed.bed&quot;))
+X̃ = SnpArray(&quot;knockoffs/mouse.imputed.knockoffs.bed&quot;)
+n, p = size(X̃)</code></pre><pre><code class="nohighlight hljs">(300, 10150)</code></pre><p>Compare <span>$cor(X_i, X_j)$</span> and <span>$cor(X_i, \tilde{X}_j)$</span>. If knockoffs satisfy exchangability, their correlation should be very similar and form a diagonal line. </p><pre><code class="language-julia hljs"># look at only pairwise correlation between first 200 snps
+r1, r2 = compare_pairwise_correlation(X, X̃, snps=200)
+
+# make plot
+scatter(r1, r2, xlabel = &quot;cor(Xi, Xj)&quot;, ylabel=&quot;cor(Xi, X̃j)&quot;, legend=false)
+Plots.abline!(1, 0, line=:dash)</code></pre><p><img src="../output_14_0.png" alt="png"/></p><p>Plots distribution of <span>$cor(X_j, \tilde{X}_j)$</span> for all <span>$j$</span>. Ideally, we want <span>$cor(X_j, \tilde{X}_j)$</span> to be small in magnitude (i.e. <span>$X$</span> and <span>$\tilde{X}$</span> is very different).</p><pre><code class="language-julia hljs">r2 = compare_correlation(X, X̃)
+histogram(r2, legend=false, xlabel=&quot;cor(Xi, X̃i)&quot;, ylabel=&quot;count&quot;)</code></pre><p><img src="../output_16_0.png" alt="png"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« Home</a><a class="docs-footer-nextpage" href="../shapeit_hmm/">SHAPEIT HMM Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.12 on <span class="colophon-date" title="Monday 7 February 2022 22:59">Monday 7 February 2022</span>. Using Julia version 1.6.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
