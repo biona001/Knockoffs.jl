@@ -308,7 +308,7 @@ function hmm_knockoff(
 end
 
 """
-    hmm_knockoff(snpdata, r, θ, α)
+    hmm_knockoff(snpdata::SnpData, r::AbstractVecOrMat, θ::AbstractMatrix, α::AbstractMatrix)
 
 Generates knockoff of `snpdata` with loaded r, θ, α
 """

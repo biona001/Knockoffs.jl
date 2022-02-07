@@ -17,7 +17,9 @@ This package supports Julia `v1.6`+.
 
 ```@contents
 Pages = [
-    "man/hmm.md",
+    "man/fastphase_hmm.md",
+    "man/fastphase_hmm.md",
+    "man/shapeit_hmm.md",
     "man/api.md"
 ]
 Depth = 2

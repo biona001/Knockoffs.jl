@@ -3,28 +3,34 @@
 
 Here is a list of available function calls. A detailed description can be found below. 
 
-### Index
+## Index
 
 ```@index
 Pages = ["api.md"]
 ```
 
-### Regular functions
+## Generating knockoffs
 
 ```@docs
   fixed_knockoffs
   modelX_gaussian_knockoffs
-  normalize_col!
+  hmm_knockoff
+```
+
+## Regular functions
+
+```@docs
   coefficient_diff
   threshold
   extract_beta
-  extract_combine_beta
+  compare_correlation
+  compare_pairwise_correlation
 ```
 
-### Wrapper functions for HMM knockoffs
+## Wrapper functions for SHAPEIT HMM knockoffs
+
+There functions will eventually be replaced by Julia wrappers that no longer require user inputs. 
 
 ```@docs
-  partition
   rapid
-  snpknock2
 ```

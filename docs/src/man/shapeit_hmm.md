@@ -1,7 +1,11 @@
 
-# Generate HMM knockoffs
+# SHAPEIT HMM knockoffs
 
-This tutorial closely follows the [knockoffgwas tutorial](https://msesia.github.io/knockoffgwas/tutorial.html). We go over how to generate (SHAPEIT) HMM knockoffs given (simulated) genotypes. 
+This page is a tutorial for generating (SHAPEIT) HMM knockoffs, which is good for controlling FDR in the presence of cryptic relatedness and diverse ancestries. The methodology is described in the following paper:
+
+> Sesia, Matteo, et al. "False discovery rate control in genome-wide association studies with population structure." Proceedings of the National Academy of Sciences 118.40 (2021). 
+
+This tutorial closely follows the original [knockoffgwas tutorial](https://msesia.github.io/knockoffgwas/tutorial.html). Currently users need to manually run and process various input/intermediate files, but eventually, we will write native Julia wrappers to circumvent these tedious procedures. Stay tuned. 
 
 !!! note
 

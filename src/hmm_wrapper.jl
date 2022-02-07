@@ -25,8 +25,7 @@ Wrapper for the RaPID program.
 - `s`: Minimum number of successes to consider a hit
 
 # Optional Inputs
-- `a`: If `true`, ignore MAFs. By default (`a=false`) the sites are selected at random weighted
-    by their MAFs.
+- `a`: If `true`, ignore MAFs. By default (`a=false`) the sites are selected at random weighted by their MAFs.
 """
 function rapid(
     rapid_exe::AbstractString,
