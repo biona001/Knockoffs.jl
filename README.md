@@ -25,7 +25,7 @@ This package supports Julia `v1.6`+.
 # simulate random matrix, then normalize columns
 using Knockoffs
 X = randn(1000, 200)
-normalize_col!(X)
+standardize!(X)
 
 # fixed equi and SDP knockoffs
 Aequi = fixed_knockoffs(X, :equi)

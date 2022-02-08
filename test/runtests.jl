@@ -14,7 +14,7 @@ using Distributions
     p = 1000
     X = randn(n, p)
     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    normalize_col!(X) # normalize Xj to unit length
+    standardize!(X) # normalize Xj to unit length
 
     # equi-correlated knockoff
     @time knockoff = fixed_knockoffs(X, :equi)
@@ -51,7 +51,7 @@ end
     p = 100
     X = randn(n, p)
     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    normalize_col!(X) # normalize Xj to unit length
+    standardize!(X) # normalize Xj to unit length
 
     # SDP knockoff
     @time knockoff = fixed_knockoffs(X, :sdp)
@@ -88,7 +88,7 @@ end
     p = 100
     X = randn(n, p)
     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    normalize_col!(X) # normalize Xj to unit length
+    standardize!(X) # normalize Xj to unit length
 
     # construct knockoff struct and the real [A Ã]
     @time A = fixed_knockoffs(X, :sdp)
@@ -121,13 +121,11 @@ end
 @testset "model X Guassian Knockoffs" begin
     Random.seed!(2021)
 
-    # simulate matrix (but manually normalizing columns leads to rank deficiency for some reason)
+    # simulate matrix
     n = 300
     p = 600
     X = randn(n, p)
-    # zscore!(X, mean(X, dims=1), std(X, dims=1))
-    # normalize_col!(X)
-    # @show rank(X)
+    standardize!(X)
 
     # generate knockoff
     @time knockoff = modelX_gaussian_knockoffs(X, :sdp, zeros(p));
