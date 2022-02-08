@@ -4,7 +4,6 @@
 
 ```julia
 # load packages needed for this tutorial
-using Revise
 using SnpArrays
 using Knockoffs
 using Plots

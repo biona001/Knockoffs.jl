@@ -7,7 +7,7 @@ makedocs(
     modules = [Knockoffs],
     pages = [
         "Home" => "index.md",
-        # "Fixed-X Knockoffs" => "man/fixedx.md",
+        "Fixed-X Knockoffs" => "man/fixed.md",
         # "Model-X HMM Knockoffs" => "man/modelx.md",
         # "MRC minimizing Knockoffs" => "man/mrc.md",
         "fastPHASE HMM Knockoffs" => "man/fastphase_hmm.md",
