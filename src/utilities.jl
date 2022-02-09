@@ -38,7 +38,7 @@ function compare_pairwise_correlation(X::SnpArray, X̃::SnpArray; snps::Int = si
     n == size(X̃, 1) || error("Number of samples does not match")
     p == size(X̃, 2) || error("Number of SNPs does not match")
     snps ≤ p || error("snps = $snps exceeds total number of SNPs, which was $p")
-    r1, r2,  = sizehint!(Float64[], snps*(snps-1)>>1), sizehint!(Float64[], snps*(snps-1)>>1)
+    r1, r2 = sizehint!(Float64[], snps*(snps-1)>>1), sizehint!(Float64[], snps*(snps-1)>>1)
     snp1, snp2 = zeros(n), zeros(n)
     for i in 1:snps, j in 1:i
         copyto!(snp1, @view(X[:, i]), center=true, scale=true, impute=true)
