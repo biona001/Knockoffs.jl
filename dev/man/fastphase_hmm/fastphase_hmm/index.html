@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>fastPHASE HMM Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.039/juliamono-regular.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.11/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><script src="../../../../copy.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../../">Home</a></li><li><a class="tocitem" href="../../fixed/fixed/">Fixed-X Knockoffs</a></li><li class="is-active"><a class="tocitem" href>fastPHASE HMM Knockoffs</a><ul class="internal"><li><a class="tocitem" href="#Step-0:-Prepare-example-data"><span>Step 0: Prepare example data</span></a></li><li><a class="tocitem" href="#Step-1:-Generate-Knockoffs"><span>Step 1: Generate Knockoffs</span></a></li><li><a class="tocitem" href="#Step-2:-Examine-knockoff-statistics"><span>Step 2: Examine knockoff statistics</span></a></li><li><a class="tocitem" href="#LASSO-example"><span>LASSO example</span></a></li></ul></li><li><a class="tocitem" href="../../shapeit_hmm/">SHAPEIT HMM Knockoffs</a></li><li><a class="tocitem" href="../../knockoffscreen/knockoffscreen/">KnockoffScreen Knockoffs</a></li><li><a class="tocitem" href="../../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>fastPHASE HMM Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>fastPHASE HMM Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/fastphase_hmm/fastphase_hmm.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="fastPHASE-HMM-knockoffs"><a class="docs-heading-anchor" href="#fastPHASE-HMM-knockoffs">fastPHASE HMM knockoffs</a><a id="fastPHASE-HMM-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#fastPHASE-HMM-knockoffs" title="Permalink"></a></h1><p>This is a tutorial for generating (fastPHASE) HMM knockoffs for <a href="https://en.wikipedia.org/wiki/Genome-wide_association_study">genome-wide association studies</a>. This kind of knockoffs is suitable for data <em>without</em> population admixture or cryptic relatedness. The methodology is described in the following paper:</p><blockquote><p>Sesia, Matteo, Chiara Sabatti, and Emmanuel J. Candès. &quot;Gene hunting with hidden Markov model knockoffs.&quot; Biometrika 106.1 (2019): 1-18.</p></blockquote><p>If your samples have diverse ancestries and/or extensive relatedness, we recommend those samples to be filtered out, or use SHAPEIT-HMM knockoffs.</p><pre><code class="language-julia hljs"># first load packages needed for this tutorial
+using Revise
+using SnpArrays
+using Knockoffs
+using Statistics
+using Plots
+using GLMNet
+using Distributions
+using Random
+gr(fmt=:png);</code></pre><h2 id="Step-0:-Prepare-example-data"><a class="docs-heading-anchor" href="#Step-0:-Prepare-example-data">Step 0: Prepare example data</a><a id="Step-0:-Prepare-example-data-1"></a><a class="docs-heading-anchor-permalink" href="#Step-0:-Prepare-example-data" title="Permalink"></a></h2><p>To illustrate we need example PLINK data, which are available in <code>Knockoffs.jl/data/</code></p><ul><li><code>mouse.(bed/bim/fam)</code> are mouse genotypes with missing data</li><li><code>mouse.imputed.(bed/bim/fam)</code> are genotypes without missing</li></ul><pre><code class="language-julia hljs"># Path to PLINK data
+mouse_path = joinpath(normpath(Knockoffs.datadir()), &quot;mouse.imputed&quot;)</code></pre><pre><code class="nohighlight hljs">&quot;/Users/biona001/.julia/dev/Knockoffs/data/mouse.imputed&quot;</code></pre><h2 id="Step-1:-Generate-Knockoffs"><a class="docs-heading-anchor" href="#Step-1:-Generate-Knockoffs">Step 1: Generate Knockoffs</a><a id="Step-1:-Generate-Knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Step-1:-Generate-Knockoffs" title="Permalink"></a></h2><p>Knockoffs are made using the wrapper function <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hmm_knockoff">hmm_knockoff</a>. This function does 3 steps sequentially:</p><ol><li>Run fastPHASE on <span>$\mathbf{X}_{n\times p}$</span> to estimate <span>$\alpha, \theta, r$</span> (this step takes 5-10 min for the example data)</li><li>Fit and generate knockoff copies of the HMM </li><li>Store knockoffs <span>$\tilde{\mathbf{X}}_{n\times p}$</span> in binary PLINK format (by default under a new directory called <code>knockoffs</code>) and return it as a <code>SnpArray</code></li></ol><pre><code class="language-julia hljs">@time X̃ = hmm_knockoff(mouse_path, plink_outfile=&quot;mouse.imputed.fastphase.knockoffs&quot;)</code></pre><pre><code class="nohighlight hljs">seed = 1644450675
+
+This is fastPHASE 1.4.8
+
+Copyright 2005-2006.  University of Washington. All rights reserved.
+Written by Paul Scheet, with algorithm developed by Paul Scheet and
+Matthew Stephens in the Department of Statistics at the University of
+Washington.  Please contact pscheet@alum.wustl.edu for questions, or to
+obtain the software visit
+http://stephenslab.uchicago.edu/software.html
+
+Total proportion of missing genotypes: 0.000000
+1940 diploids below missingness threshold, 0 haplotypes
+ data read successfully
+1940 diploid individuals, 10150 loci
+
+K selected (by user): 		 12
+seed: 			 1
+no. EM starts: 		 1
+EM iterations: 		 10
+no. haps from posterior: 0
+NOT using subpopulation labels
+
+
+ this is random start no. 1 of 1 for the EM...
+
+seed for this start: 1
+-26738091.04286946
+-11720205.34566784
+-7171267.67432936
+-4803219.04014266
+-3887857.98290528
+-3526175.78761014
+-3347940.68266002
+-3246324.07127825
+-3183163.68989361
+-3139623.34004118
+final loglikelihood: -3108467.614822
+iterations: 10
+
+writing parameter estimates to disk
+
+  simulating 0 haplotype configurations for each individual... done.
+
+[32mProgress: 100%|█████████████████████████████████████████| Time: 0:05:06[39m
+
+
+
+
+simulating 0 haplotypes from model: knockoffs/tmp1_hapsfrommodel.out
+1111.844531 seconds (169.60 M allocations: 8.091 GiB, 0.22% gc time, 2.71% compilation time)
+
+
+
+
+
+1940×10150 SnpArray:
+ 0x02  0x02  0x02  0x02  0x03  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x03  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
+ 0x02  0x02  0x02  0x02  0x03  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x02  0x02  0x02  0x02  0x02  0x02
+ 0x03  0x03  0x03  0x03  0x03  0x03  …  0x00  0x00  0x00  0x00  0x00  0x00
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x00  0x00  0x00  0x00  0x00  0x00
+    ⋮                             ⋮  ⋱           ⋮                    
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x03  0x03  0x03  0x03  0x03  0x03     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x03  0x02  …  0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x02  0x02  0x02  0x02     0x03  0x03  0x03  0x03  0x03  0x03
+ 0x02  0x02  0x03  0x02  0x02  0x02     0x00  0x00  0x00  0x00  0x00  0x00
+ 0x00  0x00  0x00  0x00  0x03  0x00     0x03  0x03  0x03  0x03  0x03  0x03</code></pre><h3 id="Optional-parameters"><a class="docs-heading-anchor" href="#Optional-parameters">Optional parameters</a><a id="Optional-parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Optional-parameters" title="Permalink"></a></h3><p>Here are some optional parameters one can tune when fitting the HMM procedure. </p><ul><li><code>K</code>: Number of haplotype clusters. Defaults to 12</li><li><code>C</code>: Number of EM iterations before convergence. Defaults to 10.</li><li><code>n</code>: Number of samples used to fit HMM in fastPHASE. Defaults to using all samples</li></ul><p>They can be specified via:</p><pre><code class="language-julia hljs">@time X̃ = hmm_knockoff(mouse_imputed_file,
+    plink_outfile=&quot;mouse.imputed.fastphase.knockoffs&quot;,
+    K = 12,
+    C = 10,
+    n = 100)</code></pre><h2 id="Step-2:-Examine-knockoff-statistics"><a class="docs-heading-anchor" href="#Step-2:-Examine-knockoff-statistics">Step 2: Examine knockoff statistics</a><a id="Step-2:-Examine-knockoff-statistics-1"></a><a class="docs-heading-anchor-permalink" href="#Step-2:-Examine-knockoff-statistics" title="Permalink"></a></h2><p>Lets check if the knockoffs &quot;make sense&quot;. We will use <a href="https://github.com/OpenMendel/SnpArrays.jl">SnpArrays.jl</a> to import the original and knockoff genotypes, and compare summary statistics using built-in functions <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.compare_pairwise_correlation">compare<em>pairwise</em>correlation</a> and <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.compare_correlation">compare_correlation</a></p><pre><code class="language-julia hljs"># import original and knockoff genotypes
+X = SnpArray(mouse_path * &quot;.bed&quot;)
+X̃ = SnpArray(&quot;knockoffs/mouse.imputed.fastphase.knockoffs.bed&quot;)
+n, p = size(X̃)</code></pre><pre><code class="nohighlight hljs">(1940, 10150)</code></pre><p>Compare <span>$cor(X_i, X_j)$</span> and <span>$cor(X_i, \tilde{X}_j)$</span>. If knockoffs satisfy exchangability, their correlation should be very similar and form a diagonal line. </p><pre><code class="language-julia hljs"># look at only pairwise correlation between first 200 snps
+r1, r2 = compare_pairwise_correlation(X, X̃, snps=200)
+
+# make plot
+scatter(r1, r2, xlabel = &quot;cor(Xi, Xj)&quot;, ylabel=&quot;cor(Xi, X̃j)&quot;, legend=false)
+Plots.abline!(1, 0, line=:dash)</code></pre><p><img src="../output_11_0.png" alt="png"/></p><p>Plots distribution of <span>$cor(X_j, \tilde{X}_j)$</span> for all <span>$j$</span>. Ideally, we want <span>$cor(X_j, \tilde{X}_j)$</span> to be small in magnitude (i.e. <span>$X$</span> and <span>$\tilde{X}$</span> is very different). Here the knockoffs are tightly correlated with the original genotypes, so they will likely have low power. </p><pre><code class="language-julia hljs">r2 = compare_correlation(X, X̃)
+histogram(r2, legend=false, xlabel=&quot;cor(Xi, X̃i)&quot;, ylabel=&quot;count&quot;)</code></pre><p><img src="../output_13_0.png" alt="png"/></p><h2 id="LASSO-example"><a class="docs-heading-anchor" href="#LASSO-example">LASSO example</a><a id="LASSO-example-1"></a><a class="docs-heading-anchor-permalink" href="#LASSO-example" title="Permalink"></a></h2><p>Let us apply the generated knockoffs to the model selection problem. In layman&#39;s term, it can be stated as</p><blockquote><p>Given response <span>$\mathbf{y}_{n \times 1}$</span>, design matrix <span>$\mathbf{X}_{n \times p}$</span>, we want to select a subset <span>$S \subset \{1,...,p\}$</span> of variables that are truly causal for <span>$\mathbf{y}$</span>. </p></blockquote><h3 id="Simulate-data"><a class="docs-heading-anchor" href="#Simulate-data">Simulate data</a><a id="Simulate-data-1"></a><a class="docs-heading-anchor-permalink" href="#Simulate-data" title="Permalink"></a></h3><p>We will simulate </p><p class="math-container">\[\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)\]</p><p>where <span>$k=50$</span> positions of <span>$\mathbf{\beta}$</span> is non-zero with effect size <span>$\beta_j \sim N(0, 1)$</span>. The goal is to recover those 50 positions using LASSO.</p><pre><code class="language-julia hljs"># set seed for reproducibility
+Random.seed!(2022)
+
+# simulate true beta
+n, p = size(X)
+k = 50
+βtrue = zeros(p)
+βtrue[1:k] .= randn(k)
+shuffle!(βtrue)
+
+# find true causal variables
+correct_position = findall(!iszero, βtrue)
+
+# simulate y
+y = X * βtrue + randn(n);</code></pre><h3 id="Standard-LASSO"><a class="docs-heading-anchor" href="#Standard-LASSO">Standard LASSO</a><a id="Standard-LASSO-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-LASSO" title="Permalink"></a></h3><p>Lets try running standard LASSO, which will produce <span>$\hat{\mathbf{\beta}}_{p \times 1}$</span> where we typically declare SNP <span>$j$</span> to be selected if <span>$\hat{\beta}_j \ne 0$</span>. We use LASSO solver in <a href="https://github.com/JuliaStats/GLMNet.jl">GLMNet.jl</a> package, which is just a Julia wrapper for the GLMnet Fortran code. </p><p>How well does LASSO perform in terms of power and FDR?</p><pre><code class="language-julia hljs"># run 10-fold cross validation to find best λ minimizing MSE
+lasso_cv = glmnetcv(X, y)
+λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
+
+# use λbest to fit LASSO on full data
+βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
+
+# check power and false discovery rate
+power = length(findall(!iszero, βlasso) ∩ correct_position) / k
+FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
+
+#summarize
+count(!iszero, βlasso), power, FDR</code></pre><pre><code class="nohighlight hljs">(356, 0.7, 0.901685393258427)</code></pre><p>Observe that </p><ul><li>LASSO found a total of 364 SNPs</li><li>LASSO found <span>$35/50 = 70$</span>% of all true predictors</li><li>329/364 SNPs were false positive (false discovery rate is 90%)</li></ul><h3 id="KnockoffLASSO"><a class="docs-heading-anchor" href="#KnockoffLASSO">Knockoff+LASSO</a><a id="KnockoffLASSO-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffLASSO" title="Permalink"></a></h3><p>Now lets try applying the knockoff methodology. Recall that consists of a few steps </p><ol><li>Run LASSO on <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span></li><li>Compare coefficient difference statistic <span>$W_j$</span> for each <span>$j = 1,...,p$</span>. Here we use <span>$W_j = |\beta_j| - |\beta_{j, knockoff}|$</span></li><li>Choose target FDR <span>$0 \le q \le 1$</span> and compute </li></ol><p class="math-container">\[\tau = min_{t}\left\{t &gt; 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}\]</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In step 1, <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span> is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. </p></div></div><pre><code class="language-julia hljs"># interleave knockoffs with originals
+Xfull, original, knockoff = merge_knockoffs_with_original(mouse_path,
+    &quot;knockoffs/mouse.imputed.fastphase.knockoffs&quot;,
+    des=&quot;knockoffs/merged&quot;) 
+Xfull = convert(Matrix{Float64}, Xfull, center=true, scale=true)
+
+# step 1
+knockoff_cv = glmnetcv(Xfull, y)                         # cross validation step
+λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)] # find lambda that minimizes MSE
+βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]    # refit lasso with best lambda
+
+# target FDR is 0.05, 0.1, ..., 0.5
+FDR = collect(0.05:0.05:0.5)
+empirical_power = Float64[]
+empirical_fdr = Float64[]
+for fdr in FDR
+    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
+
+    # compute power and false discovery proportion
+    power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
+    fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
+    push!(empirical_power, power)
+    push!(empirical_fdr, fdp)
+end
+
+# visualize FDR and power
+power_plot = plot(FDR, empirical_power, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical power&quot;, legend=false)
+fdr_plot = plot(FDR, empirical_fdr, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical FDR&quot;, legend=false)
+Plots.abline!(fdr_plot, 1, 0, line=:dash)
+plot(power_plot, fdr_plot)</code></pre><p><img src="../output_19_0.png" alt="png"/></p><p>Observe that</p><ul><li>LASSO + knockoffs controls the false discovery rate at below the target (dashed line)</li><li>The power of LASSO + knockoffs is lower than standard LASSO</li></ul><p>The empirical FDR should hug the target FDR more closely once we repeated the simulation multiple times and generate the knockoffs in a way so that they are not so correlated with the original genotypes. </p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../fixed/fixed/">« Fixed-X Knockoffs</a><a class="docs-footer-nextpage" href="../../shapeit_hmm/">SHAPEIT HMM Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.12 on <span class="colophon-date" title="Thursday 10 February 2022 02:12">Thursday 10 February 2022</span>. Using Julia version 1.6.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
