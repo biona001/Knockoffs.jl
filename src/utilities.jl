@@ -176,8 +176,8 @@ function merge_knockoffs_with_original(
     for i in 1:p
         # decide which of original or knockoff SNP comes first
         orig, knoc = rand() < 0.5 ? (2i - 1, 2i) : (2i, 2i - 1)
-        copyto!(@view(Xfull[:, knoc]), @view(X[:, i]))
-        copyto!(@view(Xfull[:, orig]), @view(X̃[:, i]))
+        copyto!(@view(Xfull[:, orig]), @view(X[:, i]))
+        copyto!(@view(Xfull[:, knoc]), @view(X̃[:, i]))
         push!(original, orig)
         push!(knockoff, knoc)
     end

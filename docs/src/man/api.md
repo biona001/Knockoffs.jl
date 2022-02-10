@@ -15,6 +15,7 @@ Pages = ["api.md"]
   fixed_knockoffs
   modelX_gaussian_knockoffs
   hmm_knockoff
+  full_knockoffscreen
 ```
 
 ## Regular functions
@@ -25,6 +26,8 @@ Pages = ["api.md"]
   extract_beta
   compare_correlation
   compare_pairwise_correlation
+  merge_knockoffs_with_original
+  standardize!
 ```
 
 ## Wrapper functions for SHAPEIT HMM knockoffs

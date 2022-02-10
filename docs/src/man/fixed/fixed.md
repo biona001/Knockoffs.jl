@@ -12,15 +12,18 @@ This tutorial generates fixed-X knockoffs and checks some of its basic propertie
 
 ```julia
 # load packages needed for this tutorial
+using Revise
 using Knockoffs
 using Plots
-using Statistics
-using StatsBase
 using Random
 using GLMNet
 using LinearAlgebra
 gr(fmt=:png);
 ```
+
+    ┌ Info: Precompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
+    └ @ Base loading.jl:1423
+
 
 ## Generate knockoffs
 
@@ -116,14 +119,14 @@ Let us apply the generated knockoffs to the model selection problem. In layman's
 
 We will simulate 
 
-$$\mathbf{y} \sim N(\mathbf{X}\mathbf{\beta}, \mathbf{\epsilon}), \quad \mathbf{\epsilon} \sim N(0, 1)$$
+$$\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)$$
 
 where $k=50$ positions of $\mathbf{\beta}$ is non-zero with effect size $\beta_j \sim N(0, 1)$. The goal is to recover those 50 positions using LASSO.
 
 
 ```julia
 # set seed for reproducibility
-Random.seed!(999)
+Random.seed!(100)
 
 # simulate true beta
 n, p = size(X)
@@ -141,9 +144,9 @@ y = X * βtrue + randn(n);
 
 ### Standard LASSO
 
-Lets try running standard LASSO. We use LASSO solver in [GLMNet.jl](https://github.com/JuliaStats/GLMNet.jl) package, which is just a Julia wrapper for the GLMnet Fortran code. 
+Lets try running standard LASSO, which will produce $\hat{\mathbf{\beta}}_{p \times 1}$ where we typically declare SNP $j$ to be selected if $\hat{\beta}_j \ne 0$. We use LASSO solver in [GLMNet.jl](https://github.com/JuliaStats/GLMNet.jl) package, which is just a Julia wrapper for the GLMnet Fortran code. 
 
-How does it perform in power and FDR?
+How well does LASSO perform in terms of power and FDR?
 
 
 ```julia
@@ -163,7 +166,7 @@ power, FDR
 
 
 
-    (0.96, 0.5428571428571428)
+    (1.0, 0.5370370370370371)
 
 
 
@@ -178,19 +181,24 @@ Now lets try applying the knockoff methodology. Recall that consists of a few st
 3. Choose target FDR $0 \le q \le 1$ and compute 
 $$\tau = min_{t}\left\{t > 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}$$
 
+!!! note
+    
+    In step 1, $[\mathbf{X} \mathbf{\tilde{X}}]$ is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. 
+
 
 ```julia
 # step 1
-knockoff_cv = glmnetcv([X X̃], y)
+Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
+knockoff_cv = glmnetcv(Xfull, y)
 λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-βestim = glmnet([X X̃], y, lambda=[λbest]).betas[:, 1]
+βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]
 
 # target FDR is 0.05, 0.1, ..., 0.5
 FDR = collect(0.05:0.05:0.5)
 empirical_power = Float64[]
 empirical_fdr = Float64[]
 for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr) # steps 2-3 happen here
+    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
 
     # compute power and false discovery proportion
     power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
@@ -213,4 +221,9 @@ plot(power_plot, fdr_plot)
 
 
 
-**Conclusion:** Compared to LASSO, knockoff's empirical FDR is controlled below the target FDR (dashed line). Controlled FDR is compensated by a small price in power. If this experiment is repeated multiple times, we expected the empirical FDR to hug the target (dashed) line more closely. 
+Observe that
+
++ LASSO + knockoffs controls the false discovery rate at below the target (dashed line)
++ The power of LASSO + knockoffs is lower than standard LASSO
+
+If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.

@@ -1,5 +1,5 @@
 """
-    modelX_gaussian_knockoffs(X::Matrix{T})
+    modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol, μ::Vector{T})
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions.

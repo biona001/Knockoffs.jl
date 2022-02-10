@@ -104,7 +104,7 @@ function full_knockoffscreen(x::SnpArray; windowsize::Int=100)
 end
 
 full_knockoffscreen(plinkfile::AbstractString; windowsize::Int=100) = 
-    full_knockoffscreen(SnpArray(plinkfile), windowsize=windowsize)
+    full_knockoffscreen(SnpData(plinkfile).snparray, windowsize=windowsize)
 
 # function full_knockoffscreen(x::SnpArray, windowsize::Int=100)
 #     n, p = size(x)

@@ -253,7 +253,7 @@ function forward_backward_sampling(
 end
 
 """
-    hmm_knockoff(plinkname, fastphase_outfile, datadir=pwd())
+    hmm_knockoff(plinkname; [datadir], [plink_outfile], [fastphase_outfile], [outdir], [verbose], args...)
 
 Generates HMM knockoffs from binary PLINK formatted files. This is done by
 first running fastPHASE, then running Algorithm 2 of "Gene hunting with hidden
@@ -266,7 +266,7 @@ Markov model knockoffs" by Sesia, Sabatti, and Candes
 + `datadir`: Full path to the PLINK and fastPHASE files (default = current directory)
 + `plink_outfile`: Output PLINK format name
 + `fastphase_outfile`: The output file name from fastPHASE's alpha, theta, r files
-+ `args...`: Any parameter specified in `fastphase`
++ `args...`: Any parameter that accepted in `fastPHASE.fastphase_estim_param()`
 
 # Output
 + `plink_outfile.bed`: `n × p` knockoff genotypes
@@ -311,6 +311,12 @@ end
     hmm_knockoff(snpdata::SnpData, r::AbstractVecOrMat, θ::AbstractMatrix, α::AbstractMatrix)
 
 Generates knockoff of `snpdata` with loaded r, θ, α
+
+# Input
++ `SnpData`: A `SnpData` object from SnpArrays
++ `r`: The r vector estimated by fastPHASE
++ `θ`: The θ matrix estimated by fastPHASE
++ `α`: The α matrix estimated by fastPHASE
 """
 function hmm_knockoff(
     snpdata::SnpData,
