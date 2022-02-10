@@ -32,7 +32,9 @@ export fixed_knockoffs, modelX_gaussian_knockoffs, standardize!,
     # knockoffscreen knockoffs
     full_knockoffscreen,
     # diagnostics
-    compare_correlation, compare_pairwise_correlation
+    compare_correlation, compare_pairwise_correlation,
+    # utilities
+    merge_knockoffs_with_original
 
 include("struct.jl")
 include("fixed.jl")

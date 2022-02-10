@@ -105,3 +105,81 @@ function _std(z, μ)
     end
     return σ
 end
+
+"""
+    merge_knockoffs_with_original(xdata, x̃data; des::AbstractString = "knockoff")
+
+Interleaves the original PLINK genotypes with its knockoff into a single PLINK file.
+
+# Inputs
++ `xdata`: A `SnpData` or `Array{T, 2}` of original covariates, or a `String` that points to the original PLINK file (without .bed/bim/fam suffix)
++ `x̃data`: A `SnpData` or `Array{T, 2}` of knockoff covariates, or a `String` that points to the knockoff PLINK file (without .bed/bim/fam suffix)
++ `des`: A `String` for output PLINK file name (without .bed/bim/fam suffix)
+
+# Outputs
++ `xfull`: A `n × 2p` array of original and knockoff genotypes. 
++ `original`: Indices of original genotypes. `original[i]` is the column number for the `i`th SNP. 
++ `knockoff`: Indices of knockoff genotypes. `knockoff[i]` is the column number for the `i`th SNP. 
+"""
+function merge_knockoffs_with_original(
+    xdata::SnpData,
+    x̃data::SnpData;
+    des::AbstractString = "merged.knockoff"
+    )
+    n, p = size(xdata)
+    x, x̃ = xdata.snparray, x̃data.snparray
+    xfull = SnpArray(des * ".bed", n, 2p)
+    original, knockoff = sizehint!(Int[], p), sizehint!(Int[], p)
+    for i in 1:p
+        # decide which of original or knockoff SNP comes first
+        orig, knoc = rand() < 0.5 ? (2i - 1, 2i) : (2i, 2i - 1)
+        copyto!(@view(xfull[:, orig]), @view(x[:, i]))
+        copyto!(@view(xfull[:, knoc]), @view(x̃[:, i]))
+        push!(original, orig)
+        push!(knockoff, knoc)
+    end
+    # copy fam files
+    cp(xdata.srcfam, des * ".fam", force=true)
+    # copy bim file, knockoff SNPs end in ".k"
+    new_bim = copy(xdata.snp_info)
+    empty!(new_bim)
+    for i in 1:p
+        if original[i] < knockoff[i]
+            push!(new_bim, xdata.snp_info[i, :])
+            push!(new_bim, x̃data.snp_info[i, :])
+        else
+            push!(new_bim, x̃data.snp_info[i, :])
+            push!(new_bim, xdata.snp_info[i, :])
+        end
+    end
+    CSV.write(des * ".bim", new_bim, delim='\t', header=false)
+    return xfull, original, knockoff
+end
+
+function merge_knockoffs_with_original(
+    x_path::AbstractString,
+    x̃_path::AbstractString;
+    des::AbstractString = "merged.knockoff"
+    )
+    xdata = SnpData(x_path)
+    x̃data = SnpData(x̃_path)
+    return merge_knockoffs_with_original(xdata, x̃data, des=des)
+end
+
+function merge_knockoffs_with_original(
+    X::AbstractMatrix{T},
+    X̃::AbstractMatrix{T}
+    ) where T
+    n, p = size(X)
+    Xfull = zeros(n, 2p)
+    original, knockoff = sizehint!(Int[], p), sizehint!(Int[], p)
+    for i in 1:p
+        # decide which of original or knockoff SNP comes first
+        orig, knoc = rand() < 0.5 ? (2i - 1, 2i) : (2i, 2i - 1)
+        copyto!(@view(Xfull[:, knoc]), @view(X[:, i]))
+        copyto!(@view(Xfull[:, orig]), @view(X̃[:, i]))
+        push!(original, orig)
+        push!(knockoff, knoc)
+    end
+    return Xfull, original, knockoff
+end
