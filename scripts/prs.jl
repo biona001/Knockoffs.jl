@@ -85,6 +85,83 @@ end
 #     return result.beta
 # end
 
+function decorrelate_knockoffs(
+    xdata::SnpData;
+    mutate_probability::Number = 0.01
+    )
+    # import original and knockoffs genotypes
+    x = xdata.snparray
+    original = findall(!endswith(".k"), xdata.snp_info[!, 2])
+    knockoff = findall(endswith(".k"), xdata.snp_info[!, 2])
+    n, p = size(x)
+    xnew = SnpArray(undef, n, p)
+    # variables needed for sampling uniform genotypes
+    d = Categorical([1/3 for i in 1:3])
+    geno = [0x00, 0x02, 0x03]
+    # loop over snps
+    for j in 1:p>>1
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # randomly change 1% of genotypes in knockoffs
+        jj = knockoff[j]
+        for i in 1:n
+            if rand() < mutate_probability
+                xnew[i, jj] = geno[rand(d)] # uniformly sample 0, 1, 2
+            else
+                xnew[i, jj] = x[i, jj]
+            end
+        end
+    end
+    return xnew
+end
+
+function maf_noflip!(out::AbstractVector{T}, s::AbstractSnpArray) where T <: AbstractFloat
+    cc = SnpArrays._counts(s, 1)
+    @inbounds for j in 1:size(s, 2)
+        out[j] = (cc[3, j] + 2cc[4, j]) / 2(cc[1, j] + cc[3, j] + cc[4, j])
+    end
+    out
+end
+maf_noflip(s::AbstractSnpArray) = maf_noflip!(Vector{Float64}(undef, size(s, 2)), s)
+
+function decorrelate_knockoffs_maf(
+    xdata::SnpData;
+    mutate_probability::Number = 0.01
+    )
+    # import original and knockoffs genotypes
+    x = xdata.snparray
+    original = findall(!endswith(".k"), xdata.snp_info[!, 2])
+    knockoff = findall(endswith(".k"), xdata.snp_info[!, 2])
+    n = size(x, 1)
+    p = length(original)
+    xnew = SnpArray(undef, n, 2p)
+    # minor allele freq
+    alternate_allele_freq = maf_noflip(x)[original]
+    # variables needed for sampling uniform genotypes
+    d = Categorical([1/3 for i in 1:3])
+    geno = [0x00, 0x02, 0x03]
+    # loop over snps
+    for j in 1:p
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # change probabilities based on alternate allele freq
+        alf = alternate_allele_freq[j]
+        d.p[1] = (1 - alf)^2
+        d.p[2] = 2*(1 - alf) * alf
+        d.p[3] = alf^2
+        # randomly change 1% of genotypes in knockoffs
+        jj = knockoff[j]
+        for i in 1:n
+            if rand() < mutate_probability
+                xnew[i, jj] = geno[rand(d)] # uniformly sample 0, 1, 2
+            else
+                xnew[i, jj] = x[i, jj]
+            end
+        end
+    end
+    return xnew
+end
+
 # todo: bolt
 function run_sims(seed::Int; 
     k = 10, # number of causal SNPs
@@ -93,7 +170,8 @@ function run_sims(seed::Int;
     extra_k = 0,
     confounders = 0, # number of confounders
     causal_snp_upper_r2 = 1, # causal SNPs and their knockoffs must have correlation less than causal_snp_upper_r2
-    causal_snp_lower_r2 = 0  # causal SNPs and their knockoffs must have correlation larger than causal_snp_lower_r2
+    causal_snp_lower_r2 = 0,  # causal SNPs and their knockoffs must have correlation larger than causal_snp_lower_r2
+    mutate_probability = 0.0
     )
     #
     # import fastphase knockoffs
@@ -126,30 +204,51 @@ function run_sims(seed::Int;
     # cur_dir = pwd()
 
     #
-    # import Julia fastphase knockoffs
+    # import Julia fastphase knockoffs (K=20)
     #
     chr = 10
-    # plinkname = "/scratch/users/bbchu/fastphase/1k/ukb.10k.chr10.bed"
-    # knockoffname = "/scratch/users/bbchu/fastphase/1k/ukb.10k.chr10.merged.bed"
-    # original = collect(29482:58962)
-    # knockoff = collect(1:29481)
-    plinkname = "/scratch/users/bbchu/fastphase/1k/ukb.10k.chr10.bed"
-    knockoffname = "/scratch/users/bbchu/fastphase/1k/knockoff.bed"
-    bimfile = CSV.read("/scratch/users/bbchu/fastphase/1k/knockoff.bim", DataFrame, header=false)
-    original = findall(!endswith(".k"), bimfile[!, 2])
-    knockoff = findall(endswith(".k"), bimfile[!, 2])
+    plinkname = "/scratch/users/bbchu/fastphase/10k_K20/ukb.10k.chr10.bed"
+    knockoffname = "/scratch/users/bbchu/fastphase/10k_K20/knockoffs/ukb.10k.K20.chr10.knockoff.merged"
+    xdata = SnpData(knockoffname)
+    xko = xdata.snparray
+    original = findall(!endswith(".k"), xdata.snp_info[!, 2])
+    knockoff = findall(endswith(".k"), xdata.snp_info[!, 2])
     x = SnpArray(plinkname)
-    xko = SnpArray(knockoffname)
+    if mutate_probability > 0
+        xko = decorrelate_knockoffs_maf(xdata, mutate_probability=mutate_probability)
+    end
     xla = convert(Matrix{Float64}, x, center=true, scale=true, impute=true)
     xko_la = convert(Matrix{Float64}, xko, center=true, scale=true, impute=true)
     cur_dir = pwd()
+
+    #
+    # import Julia knockoffscreen knockoffs
+    #
+    # chr = 10
+    # plinkname = "/scratch/users/bbchu/ukb_knockoffscreen/ukb.10k.chr10.bed"
+    # knockoffname = "/scratch/users/bbchu/ukb_knockoffscreen/ukb.10k.chr10.knockoff.txt"
+    # x = SnpArray(plinkname)
+    # xla = convert(Matrix{Float64}, x, center=true, scale=true, impute=true)
+    # xko = readdlm(knockoffname)
+    # xko_la = zeros(size(xla, 1), 2size(xla, 2))
+    # p = size(xko, 2)
+    # original, knockoff = sizehint!(Int[], p), sizehint!(Int[], p)
+    # for i in 1:p
+    #     # decide which of original or knockoff SNP comes first
+    #     orig, knoc = rand() < 0.5 ? (2i - 1, 2i) : (2i, 2i - 1)
+    #     copyto!(@view(xko_la[:, knoc]), @view(xko[:, i]))
+    #     copyto!(@view(xko_la[:, orig]), @view(xla[:, i]))
+    #     push!(original, orig)
+    #     push!(knockoff, knoc)
+    # end
+    # cur_dir = pwd()
 
     #
     # Import PCs
     # if use_PCA, make augmented design matrix for lasso and covarirate matrix for IHT
     # 
     z = readdlm("/scratch/users/bbchu/ukb_SHAPEIT/subset_pca/ukb.10k.chr$chr.projections.txt")
-    standardize!(z)
+    MendelIHT.standardize!(z)
     xla_full = use_PCA ? [xla z] : xla
     xko_la_full = use_PCA ? [xko_la z] : xko_la
     covar = use_PCA ? [ones(size(xla, 1)) z] : ones(size(xla, 1))
@@ -206,7 +305,9 @@ function run_sims(seed::Int;
     # Run standard lasso
     #
     Random.seed!(seed)
-    @time lasso_cv = glmnetcv(xla_full, y, nfolds=5, parallel=true) 
+    @time lasso_cv = glmnetcv(xla_full, y, nfolds=5, parallel=true)
+    λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
+    β_lasso = glmnet(xla_full, y, lambda=[λbest]).betas[:, 1]
 
     #
     # run knockoff IHT 
@@ -230,6 +331,8 @@ function run_sims(seed::Int;
     #
     Random.seed!(seed)
     @time lasso_ko_cv = glmnetcv(xko_la_full, y, nfolds=5, parallel=true)
+    λbest = lasso_ko_cv.lambda[argmin(lasso_ko_cv.meanloss)]
+    β_lasso_ko = glmnet(xko_la_full, y, lambda=[λbest]).betas[:, 1]
 
     #
     # Run bolt lmm (need to make covariate and phenotype file first)
@@ -271,10 +374,10 @@ function run_sims(seed::Int;
         # save IHT, lasso, iht+knockoff, lasso+knockoff results
         writedlm("iht.beta", iht_result.beta)
         writedlm("iht.covariates", iht_result.c)
-        writedlm("lasso.beta", coef(lasso_cv))
+        writedlm("lasso.beta", β_lasso)
         writedlm("iht.knockoff.beta", iht_ko_result.beta)
         writedlm("iht.knockoff.covariates", iht_ko_result.c)
-        writedlm("lasso.knockoff.beta", coef(lasso_ko_cv))
+        writedlm("lasso.knockoff.beta", β_lasso_ko)
 
         #
         # run knockoff IHT with wrapped cross validation
@@ -303,12 +406,12 @@ function run_sims(seed::Int;
         #
         # combine_beta = false
         p = length(β)
-        β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
-        # β_iht = iht_result.beta
-        β_lasso = coef(lasso_cv)[1:p]
-        # β_iht_knockoff = extract_beta(iht_ko_result.beta, fdr,
-        #     original, knockoff, :knockoff, combine_beta)
-        β_lasso_knockoff = extract_beta(coef(lasso_ko_cv), fdr,
+        # β_iht = β_iht_knockoff = β_iht_knockoff_cv = zeros(p)
+        β_iht = iht_result.beta
+        β_lasso = β_lasso[1:p]
+        β_iht_knockoff = extract_beta(iht_ko_result.beta, fdr,
+            original, knockoff, :knockoff, combine_beta)
+        β_lasso_knockoff = extract_beta(β_lasso_ko, fdr,
             original, knockoff, :knockoff, combine_beta)[1:p]
 
         writedlm("iht.knockoff.beta.postfilter", β_iht_knockoff)
@@ -326,27 +429,27 @@ function run_sims(seed::Int;
             # simulate "true" phenotypes for these populations
             Random.seed!(seed)
             ytest = Xtest * β + rand(ϵ, size(Xtest, 1))
-            # # IHT
-            # iht_r2 = R2(Xtest, ytest, β_iht)
-            # # IHT knockoff (low dimensional fit)
-            # iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
+            # IHT
+            iht_r2 = R2(Xtest, ytest, β_iht)
+            # IHT knockoff (low dimensional fit)
+            iht_ko_r2 = R2(xla, Xtest, y, ytest, β_iht_knockoff)
             # lasso β
             lasso_r2 = R2(Xtest, ytest, β_lasso)
             # knockoff lasso β (low dimensional)
             lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
             # save to dataframe
-            # push!(df, hcat(pop, iht_r2, iht_ko_r2, lasso_r2, lasso_ko_r2))
-            push!(df, hcat(pop, 0, 0, lasso_r2, lasso_ko_r2))
+            push!(df, hcat(pop, iht_r2, iht_ko_r2, lasso_r2, lasso_ko_r2))
+            # push!(df, hcat(pop, 0, 0, lasso_r2, lasso_ko_r2))
             GC.gc()
         end
 
         # count non-zero entries of β returned from cross validation
         push!(df, hcat("beta_non_zero_count",
-            # count(!iszero, β_iht), 
-            # count(!iszero, iht_ko_result.beta),
-            0, 0,
+            count(!iszero, β_iht), 
+            count(!iszero, iht_ko_result.beta),
+            # 0, 0,
             count(!iszero, β_lasso),
-            count(!iszero, coef(lasso_ko_cv))
+            count(!iszero, β_lasso_ko)
             ))
         # count non-zero entries after knockoff filter
         push!(df, hcat("beta_selected", 
@@ -380,9 +483,9 @@ end
 # Run simulation (via `julia prs.jl n`)
 # where n is a seed
 #
-# seed = parse(Int, ARGS[1])
-# # causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
-# # causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
-# k = 100
-# confounders = 0 # 1 PC
-# run_sims(seed, k=k, use_PCA=false, confounders=confounders)
+seed = parse(Int, ARGS[1])
+# causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
+# causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
+k = 100
+mutate_probability = 0.01
+run_sims(seed, k=k, mutate_probability=mutate_probability)
