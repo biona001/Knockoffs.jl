@@ -19,15 +19,13 @@ pkg"add https://github.com/biona001/Knockoffs.jl"
 ```
 This package supports Julia `v1.6`+. 
 
-## Design principle
-
-A `knockoff` is essentially a `n*2p` `AbstractMatrix` with custom defined operations. Internally, a `knockoff` stores the original design matrix and its knockoff separately in memory, in addition to a few other variables. You can plug a `knockoff` into any functions that supports `AbstractMatrix` as inputs (e.g. a LASSO solver) and internally, linear algebra will automatically be dispatched to relvant BLAS functions. 
+## Examples
 
 ```Julia
 # simulate random matrix, then normalize columns
 using Knockoffs
 X = randn(1000, 200)
-normalize_col!(X)
+standardize!(X)
 
 # fixed equi and SDP knockoffs
 Aequi = fixed_knockoffs(X, :equi)
@@ -40,16 +38,17 @@ Aequi = modelX_gaussian_knockoffs(X, :equi, μtrue)
 Asdp  = modelX_gaussian_knockoffs(X, :sdp, μtrue)
 ```
 
+## Features
+
++ Fixed equi-correlated knockoffs
++ Fixed SDP knockoffs
++ Multivariate normal knockoffs based on conditional formulas
++ Discrete Markov chain knockoffs
+
 ## Development Roadmap
 
-+ Fixed equi-correlated knockoffs (done)
-+ Fixed SDP knockoffs (done)
-+ Multivariate normal knockoffs based on conditional formulas (done)
-+ Parallelized ASDP knockoffs
-+ Markov chain knockoffs (work in progress)
-+ HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (done)
++ fastPHASE HMM knockoffs (in progress) (note: this is a native Julia implementation)
++ SHAPEIT HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (in progress)
 + MRC minimizing knockoffs ([ref](https://arxiv.org/abs/2011.14625))
-+ Threshold functions (done)
-+ Example with lasso path
-+ Example with IHT path
-+ Compare to [existing implementations](https://github.com/msesia/knockoff-filter)
++ Parallelized ASDP knockoffs
++ [KnockoffScreen](https://www.nature.com/articles/s41467-021-22889-4) knockoffs (in progress)

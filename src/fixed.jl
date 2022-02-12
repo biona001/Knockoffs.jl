@@ -5,14 +5,11 @@ Creates fixed knockoffs based on equation (2.2)-(2.4) of
 "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015)
 
 # Inputs
-+ `X`: A `n × p` numeric matrix, each row is a sample, and each column is normalized
-to mean 0 variance 1 with unit norm. 
-+ `method`: :equi for equi-distant knockoffs (eq 2.3) or :sdp for SDP
-knockoffs (eq 2.4)
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is normalized to mean 0 variance 1 with unit norm. 
++ `method`: :equi for equi-distant knockoffs (eq 2.3) or :sdp for SDP knockoffs (eq 2.4)
 
 # Output
-+ `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, 
-in addition to other variables (e.g. `s`)
++ `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, in addition to other variables (e.g. `s`)
 """
 function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
     n, p = size(X)

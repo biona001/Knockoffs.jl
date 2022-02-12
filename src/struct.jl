@@ -37,18 +37,6 @@ function LinearAlgebra.mul!(c::AbstractVector, A::Knockoff, b::AbstractVector)
     mul!(c, A.X̃, @view(b[p+1:end]), 1.0, 1.0)
 end
 
-function normalize_col!(X::AbstractMatrix)
-    n, p = size(X)
-    @inbounds for x in eachcol(X)
-        μi = mean(x)
-        xnorm = norm(x)
-        @simd for i in eachindex(x)
-            x[i] = (x[i] - μi) / xnorm
-        end
-    end
-    return X
-end
-
 # 1 state of a markov chain
 struct GenotypeState
     a::Int # int between 1 and K

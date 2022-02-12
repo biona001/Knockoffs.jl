@@ -1,7 +1,0 @@
-[deps]
-Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
-Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
-Knockoffs = "878bf26d-0c49-448a-9df5-b057c815d613"
-MendelIHT = "921c7187-1484-5754-b919-5d3ed9ac03c4"
-ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
-SnpArrays = "4e780e97-f5bf-4111-9dc4-b70aaf691b06"

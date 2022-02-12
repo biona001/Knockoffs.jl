@@ -33,6 +33,11 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
+      - run: | # add unregistered packages
+          julia --project=docs -e '
+            using Pkg
+            pkg"add https://github.com/biona001/fastPHASE.jl"
+            pkg"add https://github.com/biona001/Knockoffs.jl"'
       - uses: actions/cache@v2
         env:
           cache-name: cache-artifacts
@@ -53,6 +58,8 @@ jobs:
       - uses: codecov/codecov-action@v1
         with:
           file: lcov.info
+        env:
+          JULIA_NUM_THREADS: ${{ matrix.threads }}
 
   slack:
     name: Notify Slack Failure
@@ -79,6 +86,11 @@ jobs:
       - uses: julia-actions/setup-julia@v1
         with:
           version: '1.6'
+      - run: | # add unregistered packages first
+          julia --project=docs -e '
+            using Pkg
+            pkg"add https://github.com/biona001/fastPHASE.jl"
+            pkg"add https://github.com/biona001/Knockoffs.jl"'
       - run: |
           julia --project=docs -e '
             using Pkg

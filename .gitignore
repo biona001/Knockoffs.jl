@@ -5,10 +5,12 @@
 .ipynb_checkpoints/
 Manifest.toml
 *.DS_Store
-
+fastphase.inp
 
 docs/src/man/rapid
 docs/src/man/sim*
 docs/src/man/*.txt
+docs/src/man/knockoffs
 
 fastphase
+fastphase_1k

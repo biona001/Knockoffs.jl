@@ -1,14 +1,14 @@
 """
-    markov_knockoffs()
+    markov_knockoffs(Z::Vector{Int}, Q::Array{T, 3}, q::Vector{T})
 
 Generates knockoff of variables distributed as a discrete Markov Chain
 with `K` states.
 
 # Inputs
-+ `Z`: Length `p` vector of `GenotypeState` where Z[i] = (ka, kb) is the 2
-    haplotype motifs of state `i`
-+ `Q`: `K × K × p - 1` array. `Q[:, :, j]` is a `K × K` matrix of transition
++ `Z`: Length `p` vector of `Int` where `Z[i]` is the `i`th state
++ `Q`: `K × K × p` array. `Q[:, :, j]` is a `K × K` matrix of transition
     probabilities for `j`th state, i.e. Q[l, k, j] = P(X_{j} = k | X_{j - 1} = l)
+    The first transition matrix is not used. 
 + `q`: `K × 1` vector of initial probabilities
 
 # Reference
@@ -16,7 +16,7 @@ Equations 4-5 of "Gene hunting with hidden Markov model knockoffs" by
 Sesia, Sabatti, and Candes
 """
 function markov_knockoffs(
-    Z::Vector{Int},
+    Z::AbstractVector{Int},
     Q::Array{T, 3},
     q::Vector{T}
     ) where T <: AbstractFloat
@@ -30,8 +30,8 @@ function markov_knockoffs(
 end
 
 function markov_knockoffs!(
-    Z̃::Vector{Int},
-    Z::Vector{Int},
+    Z̃::AbstractVector{Int},
+    Z::AbstractVector{Int},
     N::AbstractMatrix,
     d::Categorical, # Categorical distribution from Distributions.jl
     Q::Array{T, 3},
@@ -64,7 +64,8 @@ function update_normalizing_constants!(
     Z̃::AbstractVector{Int},
     Q::Array{T, 3},
     q::AbstractVector{T},
-    j::Int
+    j::Int,
+    Nmin = 1e-10
     ) where T <: AbstractFloat
     statespace, p = size(Q, 1), size(Q, 3)
     if j == 1
@@ -80,9 +81,18 @@ function update_normalizing_constants!(
             @inbounds N[j, k] += Q[Z[j-1], l, j] * Q[Z̃[j-1], l, j] * Q[l, k, j + 1] / N[j - 1, l]
         end
     end
+    # replace 0s with Nmin, todo: is this necessary?
+    @inbounds for k in 1:statespace
+        if N[j, k] ≈ 0
+            N[j, k] = Nmin
+        end
+    end
     return nothing
 end
 
+"""
+Samples `Zj`, the `j` state of the hidden Markov chain. 
+"""
 function single_state_dmc_knockoff!(
     Z̃::AbstractVector{Int},
     Z::AbstractVector{Int},
@@ -106,7 +116,7 @@ function single_state_dmc_knockoff!(
             @inbounds d.p[z̃] = Q[Z[j - 1], z̃, j] * Q[Z̃[j-1], z̃, j] * Q[z̃, Z[j+1], j+1] / N[j-1, z̃] / N[j, Z[j+1]]
         end
     end
-    @assert sum(d.p) ≈ 1 "single_state_dmc_knockoff!: probability should sum to 1 but was $(sum(d.p))"
+    @assert sum(d.p) ≈ 1 "single_state_dmc_knockoff!: probability should sum to 1 but was $(sum(d.p)) and j = $j"
     Z̃[j] = rand(d)
     return nothing
 end

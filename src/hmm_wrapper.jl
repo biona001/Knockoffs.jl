@@ -25,8 +25,7 @@ Wrapper for the RaPID program.
 - `s`: Minimum number of successes to consider a hit
 
 # Optional Inputs
-- `a`: If `true`, ignore MAFs. By default (`a=false`) the sites are selected at random weighted
-    by their MAFs.
+- `a`: If `true`, ignore MAFs. By default (`a=false`) the sites are selected at random weighted by their MAFs.
 """
 function rapid(
     rapid_exe::AbstractString,
@@ -157,86 +156,4 @@ function decorrelate_knockoffs(
     cp(plinkfile * ".bim", joinpath(outdir, outfile * ".bim"), force=true)
     cp(plinkfile * ".fam", joinpath(outdir, outfile * ".fam"), force=true)
     return xnew
-end
-
-function fastphase(
-    xdata::SnpData;
-    n::Int = size(xdata.snparray, 1), # number of samples used to fit HMM
-    T::Int = 10, # number of different initial conditions for EM
-    K::Int = 10, # number of clusters
-    C::Int = 25, # number of EM iterations
-    out::AbstractString = "out"
-    )
-    x = xdata.snparray
-    n ≤ size(x, 1) || error("n must be smaller than the number of samples!")
-    sampleid = xdata.person_info[!, :iid]
-    # create input format for fastPHASE software
-    p = size(x, 2)
-    open("fastphase.inp", "w") do io
-        println(io, n)
-        println(io, p)
-        for i in 1:n
-            println(io, "ID ", sampleid[i])
-            # print genotypes for each sample on 2 lines. The "1" for heterozygous
-            # genotypes will always go on the 1st line.
-            for j in 1:p
-                if x[i, j] == 0x00
-                    print(io, 0)
-                elseif x[i, j] == 0x02 || x[i, j] == 0x03
-                    print(io, 1)
-                else
-                    print(io, '?')
-                end
-            end
-            print(io, "\n")
-            for j in 1:p
-                if x[i, j] == 0x00 || x[i, j] == 0x02
-                    print(io, 0)
-                elseif x[i, j] == 0x03
-                    print(io, 1)
-                else
-                    print(io, '?')
-                end
-            end
-            print(io, "\n")
-        end
-    end
-    run(`./fastPHASE -T$T -K$K -C$C -o$(out) -Pp fastphase.inp`)
-    return nothing
-end
-
-"""
-    process_fastphase_output(datadir::AbstractString, T::Int)
-
-Reads fastPHASE results and performs averaging over `T` runs
-
-# Inputs
-+ `datadir`: Directory that stores fastPHASE's results (`out_rhat.txt`, `out_thetahat.txt`, `out_alphahat.txt`)
-+ `T`: the number of different initial conditions for EM used in fastPHASE
-"""
-function process_fastphase_output(datadir::AbstractString, T::Int; extension="out_")
-    # read full data 
-    rfile = joinpath(datadir, "$(extension)rhat.txt") # T*p × 1
-    θfile = joinpath(datadir, "$(extension)thetahat.txt") # T*p × K
-    αfile = joinpath(datadir, "$(extension)alphahat.txt") # T*p × K
-    isfile(rfile) && isfile(θfile) && isfile(αfile) || error("Files not found!")
-    r_full = readdlm(rfile, comments=true, comment_char = '>', header=false)
-    θ_full = readdlm(θfile, comments=true, comment_char = '>', header=false)
-    α_full = readdlm(θfile, comments=true, comment_char = '>', header=false)
-
-    # compute averages across T simulations as suggested by Scheet et al 2006
-    p = Int(size(r_full, 1) / T)
-    K = size(θ_full, 2)
-    r, θ, α = zeros(p), zeros(p, K), zeros(p, K)
-    for i in 1:T
-        rows = (i - 1) * p + 1:p*i
-        r .+= @view(r_full[rows])
-        θ .+= @view(θ_full[rows, :])
-        α .+= @view(α_full[rows, :])
-    end
-    r ./= T
-    θ ./= T
-    α ./= T
-    α ./= sum(α, dims = 2) # normalize rows to sum to 1
-    return r, θ, α
 end
