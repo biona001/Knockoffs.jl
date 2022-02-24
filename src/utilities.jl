@@ -183,3 +183,81 @@ function merge_knockoffs_with_original(
     end
     return Xfull, original, knockoff
 end
+
+"""
+    decorrelate_knockoffs(plinkfile, original, knockoff, α)
+
+For each knockoff `x̃j`, we will randomly choose `α`% samples uniformly and set 
+`x̃j[i] ~ binomail(2, ρj)` where `ρj ∈ [0, 1]` is the alternate allele frequency of SNP j.
+
+# Inputs
++ `xdata`: A `SnpArrays.SnpData` storing original and knockoff genotypes from binary PLINK trios
+
+# Optional inputs
++ `α`: A number between 0 and 1 specifying how many samples for each knockoff should be resampled (defualt 0.1)
++ `original`: Indices of original genotypes. `@view(xdata.snparray[:, original])` would be the original genotype (default: entries in 2nd column `bim` file not ending with `.k`)
++ `knockoff`: Indices of knockoff genotypes. `@view(xdata.snparray[:, knockoff])` would be the knockoff genotype (default: entries in 2nd column `bim` file ending with `.k`)
++ `outfile`: Output file name (defaults to "decorrelated_knockoffs")
++ `outdir`: Directory for storing output file (defaults to current directory)
+
+# Output
++ `xnew`: A `n × 2p` `SnpArray` where the knockoffs `@view(xnew[:, knockoff])` have been decorrelated
+"""
+function decorrelate_knockoffs(
+    xdata::SnpData;
+    α::Number = 0.1,
+    original::AbstractVector{Int} = findall(!endswith(".k"), xdata.snp_info[!, 2]),
+    knockoff::AbstractVector{Int} = findall(endswith(".k"), xdata.snp_info[!, 2]),
+    outfile = "decorrelated_knockoffs",
+    outdir = pwd(),
+    verbose::Bool = true
+    )
+    0.0 ≤ α ≤ 1.0 || error("decorrelate_knockoffs_maf: α must be between 0 and 1 but was $α")
+    length(original) == length(knockoff) || 
+        error("decorrelate_knockoffs_maf: original and knockoff SNPs have different numbers!")
+    # import genotypes
+    x = xdata.snparray
+    n = size(x, 1)
+    p = length(original)
+    # display progress
+    pmeter = verbose ? Progress(p, "Decorrelating...") : nothing
+    # output array
+    xnew = SnpArray(joinpath(outdir, outfile * ".bed"), n, 2p)
+    # alternate allele freq for original genotypes
+    alternate_allele_freq = maf_noflip(x)[original]
+    # variables needed for sampling uniform genotypes
+    d = Categorical([1/3 for i in 1:3])
+    geno = [0x00, 0x02, 0x03]
+    # loop over snps
+    for j in 1:p
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # change probabilities based on alternate allele freq
+        alf = alternate_allele_freq[j]
+        d.p[1] = (1 - alf)^2
+        d.p[2] = 2 * (1 - alf) * alf
+        d.p[3] = alf^2
+        # randomly change α% of genotypes in knockoffs
+        jj = knockoff[j]
+        for i in 1:n
+            if rand() < α
+                xnew[i, jj] = geno[rand(d)] # uniformly sample 0, 1, 2
+            else
+                xnew[i, jj] = x[i, jj]
+            end
+        end
+        # update progress
+        verbose && next!(pmeter)
+    end
+    return xnew
+end
+
+# adapted from https://github.com/OpenMendel/SnpArrays.jl/blob/d63c0162338e98b74ccefce7440c95281ad1ff12/src/snparray.jl#L258
+function maf_noflip!(out::AbstractVector{T}, s::AbstractSnpArray) where T <: AbstractFloat
+    cc = SnpArrays._counts(s, 1)
+    @inbounds for j in 1:size(s, 2)
+        out[j] = (cc[3, j] + 2cc[4, j]) / 2(cc[1, j] + cc[3, j] + cc[4, j])
+    end
+    out
+end
+maf_noflip(s::AbstractSnpArray) = maf_noflip!(Vector{Float64}(undef, size(s, 2)), s)

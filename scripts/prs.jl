@@ -31,6 +31,20 @@ function R2(Xtrain::AbstractMatrix, Xtest::AbstractMatrix,
     t = ytest .- mean(ytest)
     return 1 - dot(μ, μ) / dot(t, t)
 end
+    
+# predict with relaxed lasso/IHT: https://www.stat.cmu.edu/~ryantibs/papers/bestsubset.pdf
+function R2_relaxed(Xtrain::AbstractMatrix, Xtest::AbstractMatrix,
+    ytrain::AbstractVector, ytest::AbstractVector, β̂::AbstractVector, γ) # gamma is between 0 and 1
+    # fit low dimensional model on original data
+    idx = findall(!iszero, β̂)
+    β_low_dim = zeros(length(β̂))
+    β_low_dim[idx] .= Xtrain[:, idx] \ ytrain
+    # predict with relaxed lasso (when γ = 1, we get standard lasso. When γ = 0, get full debias)
+    β_relaxed = γ .* β̂ + (1 - γ) .* β_low_dim
+    μ = ytest - Xtest * β_relaxed
+    t = ytest .- mean(ytest)
+    return 1 - dot(μ, μ) / dot(t, t)
+end
 
 function TP(correct_groups, signif_groups)
     return length(signif_groups ∩ correct_groups) / length(correct_groups)
@@ -85,6 +99,83 @@ end
 #     return result.beta
 # end
 
+function decorrelate_knockoffs(
+    xdata::SnpData;
+    mutate_probability::Number = 0.01
+    )
+    # import original and knockoffs genotypes
+    x = xdata.snparray
+    original = findall(!endswith(".k"), xdata.snp_info[!, 2])
+    knockoff = findall(endswith(".k"), xdata.snp_info[!, 2])
+    n, p = size(x)
+    xnew = SnpArray(undef, n, p)
+    # variables needed for sampling uniform genotypes
+    d = Categorical([1/3 for i in 1:3])
+    geno = [0x00, 0x02, 0x03]
+    # loop over snps
+    for j in 1:p>>1
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # randomly change x% of genotypes in knockoffs
+        jj = knockoff[j]
+        for i in 1:n
+            if rand() < mutate_probability
+                xnew[i, jj] = geno[rand(d)] # uniformly sample 0, 1, 2
+            else
+                xnew[i, jj] = x[i, jj]
+            end
+        end
+    end
+    return xnew
+end
+
+function maf_noflip!(out::AbstractVector{T}, s::AbstractSnpArray) where T <: AbstractFloat
+    cc = SnpArrays._counts(s, 1)
+    @inbounds for j in 1:size(s, 2)
+        out[j] = (cc[3, j] + 2cc[4, j]) / 2(cc[1, j] + cc[3, j] + cc[4, j])
+    end
+    out
+end
+maf_noflip(s::AbstractSnpArray) = maf_noflip!(Vector{Float64}(undef, size(s, 2)), s)
+
+function decorrelate_knockoffs_maf(
+    xdata::SnpData;
+    mutate_probability::Number = 0.01
+    )
+    # import original and knockoffs genotypes
+    x = xdata.snparray
+    original = findall(!endswith(".k"), xdata.snp_info[!, 2])
+    knockoff = findall(endswith(".k"), xdata.snp_info[!, 2])
+    n = size(x, 1)
+    p = length(original)
+    xnew = SnpArray(undef, n, 2p)
+    # minor allele freq
+    alternate_allele_freq = maf_noflip(x)[original]
+    # variables needed for sampling uniform genotypes
+    d = Categorical([1/3 for i in 1:3])
+    geno = [0x00, 0x02, 0x03]
+    # loop over snps
+    for j in 1:p
+        # copy original snp
+        copyto!(@view(xnew[:, original[j]]), @view(x[:, original[j]]))
+        # change probabilities based on alternate allele freq
+        alf = alternate_allele_freq[j]
+        d.p[1] = (1 - alf)^2
+        d.p[2] = 2*(1 - alf) * alf
+        d.p[3] = alf^2
+        # randomly change x% of genotypes in knockoffs
+        jj = knockoff[j]
+        for i in 1:n
+            if rand() < mutate_probability
+                xnew[i, jj] = geno[rand(d)]
+            else
+                xnew[i, jj] = x[i, jj]
+            end
+        end
+    end
+    return xnew
+end
+
 # todo: bolt
 function run_sims(seed::Int; 
     k = 10, # number of causal SNPs
@@ -93,7 +184,9 @@ function run_sims(seed::Int;
     extra_k = 0,
     confounders = 0, # number of confounders
     causal_snp_upper_r2 = 1, # causal SNPs and their knockoffs must have correlation less than causal_snp_upper_r2
-    causal_snp_lower_r2 = 0  # causal SNPs and their knockoffs must have correlation larger than causal_snp_lower_r2
+    causal_snp_lower_r2 = 0,  # causal SNPs and their knockoffs must have correlation larger than causal_snp_lower_r2
+    mutate_probability = 0.0,
+    explore_sparsity = false # if true, will try to fit IHT/lasso with different sparsity and record R2 and sparsity for all ethnicity
     )
     #
     # import fastphase knockoffs
@@ -163,17 +256,18 @@ function run_sims(seed::Int;
     h2 = 0.5 # heritability
     d = Normal(0, sqrt(h2 / (2k))) # from paper: Efficient Implementation of Penalized Regression for Genetic Risk Prediction
     β = zeros(p)
-    # β[1:k] .= rand(d, k)
-    # shuffle!(β)
+    β[1:k] .= rand(d, k)
+    shuffle!(β)
     # causal SNPs can only be those that aren't very correlated with their knockoffs
-    possible_causal_snp_idx = Int[]
-    for snp in 1:size(xla, 2)
-        r2 = cor(@view(xko_la[:, 2snp]), @view(xko_la[:, 2snp - 1]))
-        causal_snp_lower_r2 ≤ r2 ≤ causal_snp_upper_r2 && push!(possible_causal_snp_idx, snp)
-    end
-    shuffle!(possible_causal_snp_idx)
-    β[possible_causal_snp_idx[1:k]] .= rand(d, k)
+    # possible_causal_snp_idx = Int[]
+    # for snp in 1:size(xla, 2)
+    #     r2 = cor(@view(xko_la[:, 2snp]), @view(xko_la[:, 2snp - 1]))
+    #     causal_snp_lower_r2 ≤ r2 ≤ causal_snp_upper_r2 && push!(possible_causal_snp_idx, snp)
+    # end
+    # shuffle!(possible_causal_snp_idx)
+    # β[possible_causal_snp_idx[1:k]] .= rand(d, k)
     # simulate y
+    Random.seed!(seed)
     ϵ = Normal(0, 1 - h2)
     y = xla * β + rand(ϵ, n)
     #
@@ -203,10 +297,33 @@ function run_sims(seed::Int;
     GC.gc()
 
     #
+    # explore different sparsity for IHT
+    #
+    iht_explore = []
+    if explore_sparsity
+        for k in 10:10:200
+            Random.seed!(seed)
+            explore = fit_iht(y, xla, covar, k=k, init_beta=true, max_iter=500)
+            push!(iht_explore, explore.beta)
+            GC.gc()
+        end
+    end
+
+    #
     # Run standard lasso
     #
     Random.seed!(seed)
     @time lasso_cv = glmnetcv(xla_full, y, nfolds=5, parallel=true) 
+
+    #
+    # explore different sparsity for lasso (only search for larger lambda)
+    #
+    lasso_path = lasso_cv.lambda[findall(x -> x ≥ λbest, lasso_cv.lambda)]
+    lasso_explore = nothing
+    if explore_sparsity
+        explore = glmnet(xla_full, y, lambda=lasso_path)
+        lasso_explore = [explore.betas[:, i] for i in 1:length(lasso_path)]
+    end
 
     #
     # run knockoff IHT 
@@ -318,7 +435,11 @@ function run_sims(seed::Int;
             "indian", "irish", "pakistani", "white_asian", "white_black", "white"]
 
         df = DataFrame(pop = String[], IHT_R2 = Float64[], IHT_ko_R2 = Float64[],
-            LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[])
+            LASSO_R2 = Float64[], LASSO_ko_R2 = Float64[], LASSO_ko_relaxed_25 = Float64[], 
+            LASSO_ko_relaxed_50 = Float64[], LASSO_ko_relaxed_75 = Float64[], 
+            LASSO_ko_relaxed_100 = Float64[])
+        df_iht_vary_sparsity = explore_sparsity ? DataFrame(sparsity = path) : nothing
+        df_lasso_vary_sparsity = explore_sparsity ? DataFrame(sparsity = count.(!iszero, lasso_explore)) : nothing
 
         for pop in populations
             xtest = SnpArray("/scratch/users/bbchu/ukb_SHAPEIT/populations/chr10/ukb.chr$chr.$pop.bed") # 10k samples with all snps
@@ -334,33 +455,56 @@ function run_sims(seed::Int;
             lasso_r2 = R2(Xtest, ytest, β_lasso)
             # knockoff lasso β (low dimensional)
             lasso_ko_r2 = R2(xla, Xtest, y, ytest, β_lasso_knockoff)
+            # knockoff lasso β (interpolate between lasso and its low dimensional fit, γ = 0.5)
+            lasso_ko_relaxed1_r2 = R2_relaxed(xla, Xtest, y, ytest, β_lasso_knockoff, 0.25) # closer to low dimensional fit
+            lasso_ko_relaxed2_r2 = R2_relaxed(xla, Xtest, y, ytest, β_lasso_knockoff, 0.5)
+            lasso_ko_relaxed3_r2 = R2_relaxed(xla, Xtest, y, ytest, β_lasso_knockoff, 0.75)
+            lasso_ko_relaxed4_r2 = R2_relaxed(xla, Xtest, y, ytest, β_lasso_knockoff, 1.0) # closer to lasso
             # save to dataframe
-            # push!(df, hcat(pop, iht_r2, iht_ko_r2, lasso_r2, lasso_ko_r2))
-            push!(df, hcat(pop, 0, 0, lasso_r2, lasso_ko_r2))
+            push!(df, hcat(pop, iht_r2, iht_ko_r2, lasso_r2, lasso_ko_r2,
+                lasso_ko_relaxed1_r2, lasso_ko_relaxed2_r2, lasso_ko_relaxed3_r2, lasso_ko_relaxed4_r2))
+            # push!(df, hcat(pop, 0, 0, lasso_r2, lasso_ko_r2))
+            if explore_sparsity # use standard lasso and standard IHT
+                # iht
+                r2 = Float64[]
+                for iht_beta in iht_explore
+                    push!(r2, R2(Xtest, ytest, iht_beta))
+                end
+                df_iht_vary_sparsity[!, pop] = r2
+                # lasso
+                r2 = Float64[]
+                for lasso_beta in lasso_explore
+                    push!(r2, R2(Xtest, ytest, lasso_beta))
+                end
+                df_lasso_vary_sparsity[!, pop] = r2
+            end
             GC.gc()
         end
+        CSV.write("iht_vary_sparsity.txt", df_iht_vary_sparsity)
+        CSV.write("lasso_vary_sparsity.txt", df_lasso_vary_sparsity)
 
         # count non-zero entries of β returned from cross validation
         push!(df, hcat("beta_non_zero_count",
-            # count(!iszero, β_iht), 
-            # count(!iszero, iht_ko_result.beta),
-            0, 0,
-            count(!iszero, β_lasso),
-            count(!iszero, coef(lasso_ko_cv))
+            count(!iszero, β_iht), count(!iszero, iht_ko_result.beta),
+            count(!iszero, β_lasso), count(!iszero, β_lasso_ko),
+            count(!iszero, β_lasso_ko), count(!iszero, β_lasso_ko), # they are the same as β_lasso_ko since they're only interpolating 
+            count(!iszero, β_lasso_ko), count(!iszero, β_lasso_ko)
             ))
         # count non-zero entries after knockoff filter
         push!(df, hcat("beta_selected", 
-            count(!iszero, β_iht), 
-            count(!iszero, β_iht_knockoff),
-            count(!iszero, β_lasso),
-            count(!iszero, β_lasso_knockoff)
+            count(!iszero, β_iht), count(!iszero, β_iht_knockoff),
+            count(!iszero, β_lasso), count(!iszero, β_lasso_knockoff),
+            count(!iszero, β_lasso_knockoff), count(!iszero, β_lasso_knockoff), # they are the same as β_lasso_knockoff since they're only interpolating 
+            count(!iszero, β_lasso_knockoff), count(!iszero, β_lasso_knockoff)
             ))
         # count TP proportion
         correct_snps = findall(!iszero, β)
         push!(df, hcat("TPP", 
-            TP(correct_snps,findall(!iszero, β_iht)),
-            TP(correct_snps, findall(!iszero, β_iht_knockoff)),
-            TP(correct_snps, findall(!iszero, β_lasso)),
+            TP(correct_snps,findall(!iszero, β_iht)), TP(correct_snps, findall(!iszero, β_iht_knockoff)),
+            TP(correct_snps, findall(!iszero, β_lasso)), TP(correct_snps, findall(!iszero, β_lasso_knockoff)),
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff)), # they are the same as β_lasso_knockoff since they're only interpolating 
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff)),
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff)),
             TP(correct_snps, findall(!iszero, β_lasso_knockoff))
             ))
         # count FDR
@@ -368,7 +512,11 @@ function run_sims(seed::Int;
             FDR(correct_snps, findall(!iszero, β_iht)),
             FDR(correct_snps, findall(!iszero, β_iht_knockoff)),
             FDR(correct_snps, findall(!iszero, β_lasso)),
-            FDR(correct_snps, findall(!iszero, β_lasso_knockoff))
+            FDR(correct_snps, findall(!iszero, β_lasso_knockoff)),
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff)), # they are the same as β_lasso_knockoff since they're only interpolating 
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff)),
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff)),
+            TP(correct_snps, findall(!iszero, β_lasso_knockoff))
             ))
 
         @show df
@@ -380,9 +528,10 @@ end
 # Run simulation (via `julia prs.jl n`)
 # where n is a seed
 #
-# seed = parse(Int, ARGS[1])
-# # causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
-# # causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
-# k = 100
-# confounders = 0 # 1 PC
-# run_sims(seed, k=k, use_PCA=false, confounders=confounders)
+seed = parse(Int, ARGS[1])
+# causal_snp_upper_r2 = parse(Float64, ARGS[2]) # 0.1, 0.2, ..., 1.0
+# causal_snp_lower_r2 = causal_snp_upper_r2 - 0.1 # 0, 0.1, ..., 0.9
+k = 100
+mutate_probability = 0.0
+explore_sparsity = true
+run_sims(seed, k=k, mutate_probability=mutate_probability, explore_sparsity=explore_sparsity)
