@@ -36,8 +36,8 @@ jobs:
       - run: | # add unregistered packages
           julia --project=docs -e '
             using Pkg
-            pkg"add https://github.com/biona001/fastPHASE.jl"
-            pkg"add https://github.com/biona001/Knockoffs.jl"'
+            Pkg.add("https://github.com/biona001/fastPHASE.jl")
+            Pkg.add("https://github.com/biona001/Knockoffs.jl")'
       - uses: actions/cache@v2
         env:
           cache-name: cache-artifacts
@@ -89,8 +89,8 @@ jobs:
       - run: | # add unregistered packages first
           julia --project=docs -e '
             using Pkg
-            pkg"add https://github.com/biona001/fastPHASE.jl"
-            pkg"add https://github.com/biona001/Knockoffs.jl"'
+            Pkg.add("https://github.com/biona001/fastPHASE.jl")
+            Pkg.add("https://github.com/biona001/Knockoffs.jl")'
       - run: |
           julia --project=docs -e '
             using Pkg

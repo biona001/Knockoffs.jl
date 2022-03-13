@@ -317,6 +317,12 @@ Generates knockoff of `snpdata` with loaded r, θ, α
 + `r`: The r vector estimated by fastPHASE
 + `θ`: The θ matrix estimated by fastPHASE
 + `α`: The α matrix estimated by fastPHASE
+
+# Optional Inputs
++ `outdir`: Output directory for generated knockoffs
++ `plink_outfile`: Output file name for knockoff genotypes
++ `estimate_δ`: If true, will estimate pseudo-FDR by computing a δ value 
+    for each SNP via likelihood ratio bound
 """
 function hmm_knockoff(
     snpdata::SnpData,
@@ -346,7 +352,7 @@ function hmm_knockoff(
     X̃ = zeros(Int, p)
     N = zeros(p, statespace)
     d_K = Categorical([1 / statespace for _ in 1:statespace]) # for sampling markov chains (length statespace)
-    d_3 = Categorical([1 / statespace for _ in 1:statespace]) # for sampling genotypes (length 3)
+    d_3 = Categorical([1 / 3 for _ in 1:3]) # for sampling genotypes (length 3) (todo: shouldn't this be length 3)
     α̂ = zeros(p, statespace) # scaled α, where α̂[j, k] = P(x_1,...,x_k, z_k) / P(x_1,...,x_k)
     c = zeros(p) # normalizing constants, c[k] = p(x_k | x_1,...,x_{k-1})
 
@@ -360,8 +366,6 @@ function hmm_knockoff(
 
         # sample knockoffs of genotypes (eq 6 in Sesia et al)
         sample_markov_chain!(X̃, Z̃, table, θ, d_3)
-
-        verbose && println("cor of sample $i = ", cor(X, X̃))
 
         # save knockoff
         write_plink!(X̃full, X̃, i)
@@ -402,6 +406,7 @@ function sample_markov_chain!(
         d.p[1] = get_genotype_emission_probabilities(θ, 0, a, b, j)
         d.p[2] = get_genotype_emission_probabilities(θ, 1, a, b, j)
         d.p[3] = get_genotype_emission_probabilities(θ, 2, a, b, j)
+        @assert sum(d.p) ≈ 1 "sample_markov_chain!: probability should sum to 1 but was $(sum(d.p))"
         X̃[j] = rand(d)
     end
     X̃ .-= 1 # sampling d returns states 1~3, but genotypes are 0~2
@@ -426,4 +431,23 @@ function write_plink!(
         end
     end
     return X̃full
+end
+
+"""
+    likelihood_ratio(θa, θb, ρ; α=0.1, n = 1000, threshold = true)
+
+Estimates the likelihood ratio bound log(P(x)Q(x̃) / Q(x)P(x̃)) for each a single
+HMM state (fixed i and j)
+
++ θa: State 1 of genotype markov state
++ θb: State 2 of genotype markov state
++ ρ is maf of SNP
++ α is % SNPs decorrelated (defaults 10%)
+"""
+function likelihood_ratio(θa::T, θb::T, ρ::T; α::T=0.1) where T <: Number
+    s = α / (1 - α)
+    s *= (1-ρ)^2 / (1-θa) / (1-θb)
+    s *= 2ρ*(1-ρ) / (θa*(1-θb) + θb*(1-θa))
+    s *= ρ^2 / θa / θb
+    return log(1 - α) + s
 end

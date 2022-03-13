@@ -13,7 +13,6 @@ makedocs(
         "fastPHASE HMM Knockoffs" => "man/fastphase_hmm/fastphase_hmm.md",
         "SHAPEIT HMM Knockoffs" => "man/shapeit_hmm.md",
         "KnockoffScreen Knockoffs" => "man/knockoffscreen/knockoffscreen.md",
-        # "LASSO Example" => "man/lasso_example.md",
         "API" => "man/api.md",
     ]
 )

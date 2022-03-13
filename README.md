@@ -15,10 +15,12 @@ For more information, please see the [main webpage](https://web.stanford.edu/gro
 Download and install [Julia](https://julialang.org/downloads/). Within Julia, copy and paste the following: 
 ```julia
 using Pkg
-pkg"add https://github.com/biona001/fastPHASE.jl" # this currently supports only mac and windows
+pkg"add https://github.com/biona001/fastPHASE.jl"
 pkg"add https://github.com/biona001/Knockoffs.jl"
 ```
 This package supports Julia `v1.6`+. 
+
+**fastPHASE.jl supports only mac and linux systems.** We are also experiencing some comptability issues with mac's M1 CPUs. Please file an issue if installation is a problem. 
 
 ## Examples
 
