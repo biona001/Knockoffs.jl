@@ -3,7 +3,6 @@
 *.jl.mem
 /docs/build/
 .ipynb_checkpoints/
-Manifest.toml
 *.DS_Store
 fastphase.inp
 
