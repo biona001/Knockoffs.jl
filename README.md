@@ -22,25 +22,6 @@ This package supports Julia `v1.6`+.
 
 **fastPHASE.jl supports only mac and linux systems.** We are also experiencing some comptability issues with mac's M1 CPUs. Please file an issue if installation is a problem. 
 
-## Examples
-
-```Julia
-# simulate random matrix, then normalize columns
-using Knockoffs
-X = randn(1000, 200)
-standardize!(X)
-
-# fixed equi and SDP knockoffs
-Aequi = fixed_knockoffs(X, :equi)
-Asdp  = fixed_knockoffs(X, :sdp)
-
-# model-X Gaussian knockoffs
-X = randn(200, 400)
-μtrue = zeros(400)
-Aequi = modelX_gaussian_knockoffs(X, :equi, μtrue)
-Asdp  = modelX_gaussian_knockoffs(X, :sdp, μtrue)
-```
-
 ## Features
 
 + Fixed equi-correlated knockoffs

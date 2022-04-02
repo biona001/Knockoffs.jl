@@ -16,6 +16,10 @@ function knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}) where T
     Knockoff(X, X̃, T[], Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0))
 end
 
+function knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, s::AbstractVector{T}) where T
+    Knockoff(X, X̃, s, Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0))
+end
+
 Base.size(A::Knockoff) = size(A.X, 1), 2size(A.X, 2)
 Base.eltype(A::Knockoff) = eltype(A.X)
 function Base.getindex(A::Knockoff, i::Int)
