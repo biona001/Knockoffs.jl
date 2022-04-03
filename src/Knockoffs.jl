@@ -13,6 +13,7 @@ using DataFrames
 using fastPHASE
 using ElasticArrays
 using Random
+using PositiveFactorizations
 
 import Base: eltype, getindex, size
 

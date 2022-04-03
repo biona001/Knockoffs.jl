@@ -1,9 +1,9 @@
 """
-    modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol)
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
-conditional multivariate normal distributions. The mean and covariance is 
-estimated from X. 
+conditional multivariate normal distributions. The true mean `μ` and covariance
+`Σ` is estimated from data. 
 
 # Inputs
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
@@ -50,18 +50,15 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
 end
 
 """
-    modelX_gaussian_knockoffs(X::Matrix{T}, method::Symbol)
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix)
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
-conditional multivariate normal distributions. The mean and covariance is 
-estimated from X. 
+conditional multivariate normal distributions. 
 
 # Inputs
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
 + `method`: Either `:equi`, `:sdp`, or `:asdp`
-+ `μ`: Length `p` vector for mean of each column
-+ `Σ`: `p × p` covariance matrix for each row of X
 
 # Reference: 
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
@@ -77,16 +74,15 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
         svar = Variable(p)
         problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
         solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
+        s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
     elseif method==:asdp
         # todo
         error("ASDP not supported yet! sorry!")
     else
         error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
     end
-    Σinv = inv(Σ)
-    X̃ = condition(X, μ, Σinv, Diagonal(s))
-    return Knockoff(X, X̃, s, Σ, Σinv)
+    X̃ = condition(X, μ, inv(Σ), Diagonal(s))
+    return knockoff(X, X̃, s)
 end
 
 """
@@ -102,7 +98,7 @@ x̃|x = N(x - D*inv(Σ)(x - μ), 2D - D*inv(Σ)*D)
 function condition(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::AbstractMatrix)
     n, p = size(X)
     ΣinvD = Σinv * D
-    new_V = Symmetric(2D - D * ΣinvD + 0.00001I) # small perturbation ensures positive eigvals
-    L = cholesky(new_V).L
+    new_V = Symmetric(2D - D * ΣinvD)
+    L = cholesky(PositiveFactorizations.Positive, new_V).L
     return X - (X .- μ') * ΣinvD + randn(n, p) * L
 end
