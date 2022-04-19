@@ -59,6 +59,8 @@ conditional multivariate normal distributions.
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
 + `method`: Either `:equi`, `:sdp`, or `:asdp`
++ `μ`: A `p × 1` vector of (true) mean of `X`
++ `Σ`: A `p × p` matrix of covariance of `X`
 
 # Reference: 
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
@@ -66,15 +68,13 @@ Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix)
     n, p = size(X)
+    # todo: convert covariance matrix to correlation matrix
     # compute s vector using the specified method
     if method == :equi
         λmin = minimum(svdvals(X))^2
         s = min(1, 2λmin) .* ones(p)
     elseif method == :sdp
-        svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
-        solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
+        s = solve_SDP(Σ)
     elseif method==:asdp
         # todo
         error("ASDP not supported yet! sorry!")

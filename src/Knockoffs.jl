@@ -3,7 +3,7 @@ module Knockoffs
 using LinearAlgebra
 using Statistics
 using Convex
-using SCS
+using Hypatia
 using SnpArrays
 using DelimitedFiles
 using ProgressMeter

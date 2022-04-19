@@ -1,4 +1,21 @@
 """
+    solve_SDP(Σ::AbstractMatrix)
+
+Solves the SDP problem for fixed-X and model-X knockoffs. The optimization problem
+is stated in equation 3.13 of "Panning for Gold: Model-X Knocko s for High-dimensional
+Controlled Variable Selection" by Candes et al. 
+"""
+function solve_SDP(Σ::AbstractMatrix)
+    svar = Variable(size(Σ, 1), Convex.Positive())
+    add_constraint!(svar, svar ≤ 1)
+    constraint = 2*Σ - diagm(svar) in :SDP
+    problem = maximize(sum(svar), constraint)
+    solve!(problem, Hypatia.Optimizer; silent_solver=true)
+    s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
+    return s
+end
+
+"""
     compare_correlation()
 
 Computes correlation between X[:, i] and X̃[:, i] for each i.

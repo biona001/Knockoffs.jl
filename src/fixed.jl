@@ -26,10 +26,7 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
         end
         s = min(1, 2λmin) .* ones(size(Σ, 1))
     elseif method == :sdp
-        svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
-        solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
+        s = solve_SDP(Σ)
     else
         error("fixed_knockoffs: method can only be :equi or :sdp")
     end
