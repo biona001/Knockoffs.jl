@@ -21,6 +21,7 @@ fastPHASE = "c92b9ef3-c483-4111-80ad-75972133fafc"
 
 [compat]
 Convex = "0.14"
+PositiveFactorizations = "0.2"
 julia = "1"
 
 [extras]
