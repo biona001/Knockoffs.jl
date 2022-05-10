@@ -8,7 +8,7 @@ Controlled Variable Selection" by Candes et al.
 function solve_SDP(Σ::AbstractMatrix)
     svar = Variable(size(Σ, 1), Convex.Positive())
     add_constraint!(svar, svar ≤ 1)
-    constraint = 2*Σ - diagm(svar) in :SDP
+    constraint = 2*Symmetric(Σ) - diagm(svar) in :SDP
     problem = maximize(sum(svar), constraint)
     solve!(problem, Hypatia.Optimizer; silent_solver=true)
     s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)

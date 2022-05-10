@@ -19,7 +19,7 @@ using StatsBase
 
 import Base: eltype, getindex, size
 
-export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
+export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
     coefficient_diff, threshold, extract_beta,
     partition, rapid, snpknock2, decorrelate_knockoffs,
     process_fastphase_output, fastphase, 
