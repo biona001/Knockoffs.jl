@@ -82,9 +82,9 @@ end
 
 Normalize each column of `X` so they sum to 1. 
 """
-function normalize_col!(X::AbstractVecOrMat)
+function normalize_col!(X::AbstractVecOrMat; center::Bool=false)
     @inbounds for x in eachcol(X)
-        μi = mean(x)
+        μi = center ? mean(x) : zero(eltype(X))
         xnorm = norm(x)
         @simd for i in eachindex(x)
             x[i] = (x[i] - μi) / xnorm
@@ -92,6 +92,7 @@ function normalize_col!(X::AbstractVecOrMat)
     end
     return X
 end
+normalize_col(X) = normalize_col!(copy(X))
 
 """
     merge_knockoffs_with_original(xdata, x̃data; des::AbstractString = "knockoff")

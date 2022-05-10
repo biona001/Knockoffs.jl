@@ -15,6 +15,7 @@ using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
+using StatsBase
 
 import Base: eltype, getindex, size
 

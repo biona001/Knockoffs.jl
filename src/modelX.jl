@@ -43,10 +43,13 @@ to mean 0 variance 1.
 # Reference: 
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+
+# todo: convert covariance matrix to correlation matrix
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix)
     n, p = size(X)
-    # todo: convert covariance matrix to correlation matrix
+    # center/scale Xj to mean 0 var 1
+    X = zscore(X, mean(X, dims=1), std(X, dims=1)) 
     # compute s vector using the specified method
     if method == :equi
         λmin = minimum(svdvals(X))^2
@@ -59,8 +62,9 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
     else
         error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
     end
-    X̃ = condition(X, μ, inv(Σ), Diagonal(s))
-    return knockoff(X, X̃, s)
+    Σinv = inv(Σ)
+    X̃ = condition(X, μ, Σinv, Diagonal(s))
+    return Knockoff(X, X̃, s, Σ, Σinv)
 end
 
 """
