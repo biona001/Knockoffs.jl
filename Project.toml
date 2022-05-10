@@ -23,7 +23,7 @@ fastPHASE = "c92b9ef3-c483-4111-80ad-75972133fafc"
 
 [compat]
 CSV = "0.10"
-Convex = "0.14"
+Convex = "0.14, 0.15"
 SnpArrays = "0.3"
 PositiveFactorizations = "0.2"
 ElasticArrays = "1"
