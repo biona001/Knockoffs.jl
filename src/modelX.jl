@@ -14,39 +14,17 @@ to mean 0 variance 1.
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 
-# todo: the SDP routine for this is quite slow for some reason. May need better
-way to estimate Σ
+# Note: 
+The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which
+is recommended for p>n case. We do not simply use `cov(X)` since `isposdef(cov(X))`
+is typically false. For reference, see 
+https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
-    n, p = size(X)
-    T = eltype(X)
-    full_svd = n > p ? true : false
-    # compute gram matrix using full svd
-    U, σ, V = svd(X, full=full_svd)
-    Σ = V * Diagonal(σ)^2 * V'
-    Σinv = V * inv(Diagonal(σ)^2) * V'
+    Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    # compute s vector using the specified method
-    if method == :equi
-        λmin = typemax(T)
-        for σi in σ
-            σi^2 < λmin && (λmin = σi^2)
-        end
-        s = min(1, 2λmin) .* ones(size(Σ, 1))
-    elseif method == :sdp
-        svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
-        solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
-    elseif method==:asdp
-        # todo
-        error("ASDP not supported yet! sorry!")
-    else
-        error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
-    end
-    X̃ = condition(X, μ, Σinv, Diagonal(s))
-    return Knockoff(X, X̃, s, Σ, Σinv)
+    return modelX_gaussian_knockoffs(X, method, μ, Σapprox)
 end
 
 """
@@ -59,30 +37,34 @@ conditional multivariate normal distributions.
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
 + `method`: Either `:equi`, `:sdp`, or `:asdp`
++ `μ`: A `p × 1` vector of (true) mean of `X`
++ `Σ`: A `p × p` matrix of covariance of `X`
 
 # Reference: 
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+
+# todo: convert covariance matrix to correlation matrix
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix)
     n, p = size(X)
+    # center/scale Xj to mean 0 var 1
+    X = zscore(X, mean(X, dims=1), std(X, dims=1)) 
     # compute s vector using the specified method
     if method == :equi
         λmin = minimum(svdvals(X))^2
         s = min(1, 2λmin) .* ones(p)
     elseif method == :sdp
-        svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
-        solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
+        s = solve_SDP(Σ)
     elseif method==:asdp
         # todo
         error("ASDP not supported yet! sorry!")
     else
         error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
     end
-    X̃ = condition(X, μ, inv(Σ), Diagonal(s))
-    return knockoff(X, X̃, s)
+    Σinv = inv(Σ)
+    X̃ = condition(X, μ, Σinv, Diagonal(s))
+    return Knockoff(X, X̃, s, Σ, Σinv)
 end
 
 """

@@ -3,7 +3,7 @@ module Knockoffs
 using LinearAlgebra
 using Statistics
 using Convex
-using SCS
+using Hypatia
 using SnpArrays
 using DelimitedFiles
 using ProgressMeter
@@ -14,11 +14,13 @@ using fastPHASE
 using ElasticArrays
 using Random
 using PositiveFactorizations
+using CovarianceEstimation
+using StatsBase
 
 import Base: eltype, getindex, size
 
 export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col!,
-    coefficient_diff, threshold, extract_beta, 
+    coefficient_diff, threshold, extract_beta, extract_beta2,
     partition, rapid, snpknock2, decorrelate_knockoffs,
     process_fastphase_output, fastphase, 
     # constructors

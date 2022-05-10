@@ -46,6 +46,26 @@ function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
     return β_groups
 end
 
+function coefficient_diff2(β::AbstractVector, groups::AbstractVector{Int},
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int})
+    length(β) == length(groups) || error("coefficient_diff: length(β) does not equal length(groups)")
+    unique_groups = unique(groups)
+    β_groups = zeros(length(unique_groups))
+    # find which variables are Knockoffs
+    knockoff_idx = falses(length(β))
+    knockoff_idx[knockoff] .= true
+    # loop over each variable
+    for i in 1:length(β)
+        idx = findfirst(x -> x == groups[i], unique_groups)
+        if knockoff_idx[i]
+            β_groups[idx] -= β[i]^2
+        else
+            β_groups[idx] += β[i]^2
+        end
+    end
+    return β_groups
+end
+
 """
     extract_beta(β̂_knockoff::Vector, fdr::Number, original::Vector{Int}, knockoff::Vector{Int}, method=:knockoff)
     extract_beta(β̂_knockoff::Vector, fdr::Number, groups::Vector{Int}, original::Vector{Int}, knockoff::Vector{Int}, method=:knockoff)
@@ -78,6 +98,24 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
+    τ = threshold(W, fdr, method)
+    detected_groups = findall(W .≥ τ)
+    # construct the full β
+    β = zeros(T, length(β̂_knockoff))
+    for g in detected_groups
+        group_idx = findall(x -> x == g, groups)
+        β[group_idx] .= @view(β̂_knockoff[group_idx])
+    end
+    return β[original]
+end
+
+function extract_beta2(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
+    ) where T <: AbstractFloat
+    # first handle errors
+    0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
+    # find set of selected predictors
+    W = coefficient_diff2(β̂_knockoff, groups, original, knockoff)
     τ = threshold(W, fdr, method)
     detected_groups = findall(W .≥ τ)
     # construct the full β

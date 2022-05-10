@@ -8,7 +8,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Fixed-X Knockoffs" => "man/fixed/fixed.md",
-        # "Model-X HMM Knockoffs" => "man/modelx.md",
+        "Model-X Knockoffs" => "man/modelX/modelX.md",
         # "MRC minimizing Knockoffs" => "man/mrc.md",
         "fastPHASE HMM Knockoffs" => "man/fastphase_hmm/fastphase_hmm.md",
         "SHAPEIT HMM Knockoffs" => "man/shapeit_hmm.md",

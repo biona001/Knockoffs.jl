@@ -6,27 +6,30 @@ version = "0.2.0"
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
+CovarianceEstimation = "587fd27a-f159-11e8-2dae-1979310e6154"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 ElasticArrays = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"
+Hypatia = "b99e6be6-89ff-11e8-14f8-45c827f4f8f2"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 PositiveFactorizations = "85a6dd25-e78a-55b7-8502-1745935b8125"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-SCS = "c946c3f1-0d1f-5ce8-9dea-7daa1f7e2d13"
 SnpArrays = "4e780e97-f5bf-4111-9dc4-b70aaf691b06"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 fastPHASE = "c92b9ef3-c483-4111-80ad-75972133fafc"
 
 [compat]
-Convex = "0.14"
+Convex = "0.14, 0.15"
 julia = "1"
 
 [extras]
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+ToeplitzMatrices = "c751599d-da0a-543b-9d20-d0a503d91d24"
 
 [targets]
-test = ["Test", "Random", "StatsBase"]
+test = ["Test", "Random", "StatsBase", "ToeplitzMatrices"]

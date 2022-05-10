@@ -1,8 +1,7 @@
 """
     fixed_knockoffs(X::Matrix{T}; method=:sdp)
 
-Creates fixed knockoffs based on equation (2.2)-(2.4) of 
-"Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015)
+Creates fixed knockoffs. 
 
 # Inputs
 + `X`: A `n × p` numeric matrix, each row is a sample, and each column is normalized to mean 0 variance 1 with unit norm. 
@@ -10,10 +9,16 @@ Creates fixed knockoffs based on equation (2.2)-(2.4) of
 
 # Output
 + `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, in addition to other variables (e.g. `s`)
+
+# Reference
+Equation (2.2)-(2.4) of 
+"Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
 """
 function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
     n, p = size(X)
-    n ≥ 2p || error("fixed_knockoffs: only works for n ≥ 2p case! sorry!")
+    n ≥ 2p || error("fixed_knockoffs: currently only works for n ≥ 2p case! sorry!")
+    # use column-normalized X 
+    X = normalize_col(X)
     # compute gram matrix using full svd
     U, σ, V = svd(X, full=true)
     Σ = V * Diagonal(σ)^2 * V'
@@ -26,10 +31,7 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
         end
         s = min(1, 2λmin) .* ones(size(Σ, 1))
     elseif method == :sdp
-        svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
-        solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
+        s = solve_SDP(Σ)
     else
         error("fixed_knockoffs: method can only be :equi or :sdp")
     end
