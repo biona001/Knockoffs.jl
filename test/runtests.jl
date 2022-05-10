@@ -5,6 +5,8 @@ using Random
 using StatsBase
 using Statistics
 using Distributions
+using ToeplitzMatrices
+# using RCall # for comparing with Matteo's knockoffs
 
 @testset "fixed equi knockoffs" begin
     Random.seed!(2021)
@@ -51,7 +53,7 @@ end
     p = 100
     X = randn(n, p)
     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    normalize_col!(X) # normalize columns 
+    # normalize_col!(X) # normalize columns 
 
     # SDP knockoff
     @time knockoff = fixed_knockoffs(X, :sdp)
@@ -60,6 +62,33 @@ end
     s = knockoff.s
     Σ = knockoff.Σ
     Σinv = knockoff.Σinv
+
+    # compare with Matteo's result
+    # @rput X
+    # R"""
+    # library(knockoff)
+    # X_ko = create.fixed(X)
+    
+    # # get s vector (need to load many functions in https://github.com/msesia/knockoff-filter/blob/508ed64d914137d22ae8ad344311e147900fb437/R/knockoff/R/create_fixed.R)
+    # X.svd = decompose(X, 'F')
+    # tol = 1e-5
+    # d = X.svd$d
+    # d_inv = 1 / d
+    # d_zeros = d <= tol*max(d)
+    # if (any(d_zeros)) {
+    #   warning(paste('Data matrix is rank deficient.',
+    #                 'Model is not identifiable, but proceeding with SDP knockoffs'),immediate.=T)
+    #   d_inv[d_zeros] = 0
+    # }
+    # G = (X.svd$v %*diag% d^2) %*% t(X.svd$v)
+    # G_inv = (X.svd$v %*diag% d_inv^2) %*% t(X.svd$v)
+    # s_matteo = create.solve_sdp(G)
+    # s_matteo[s_matteo <= tol] = 0
+    # """
+    # @rget X_ko s_matteo
+    # [s matteo_s]
+    # histogram(vec(X_ko))
+    # histogram(vec(X̃))
 
     @test all(X' * X .≈ Σ)
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-1)) # numerical accuracy not good?
@@ -117,37 +146,44 @@ end
     @test all(Ctrue .≈ C)
 end
 
-# @testset "model X Guassian Knockoffs" begin
-#     Random.seed!(2021)
+@testset "model X Guassian Knockoffs" begin
+    # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
 
-#     # simulate matrix
-#     n = 300
-#     p = 600
-#     X = randn(n, p)
-#     zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-#     # normalize_col!(X) # normalize columns 
+    # simulate matrix
+    Random.seed!(2022)
+    n = 100
+    p = 200
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
+    # X ./= sum(X, dims=1)
+    # normalize_col!(X) # normalize columns 
 
-#     # generate knockoff
-#     true_μ = zeros(p)
-#     true_var = Matrix{Float64}(I, p, p)
-#     @time knockoff = modelX_gaussian_knockoffs(X, :sdp, true_μ, true_var)
-#     X = knockoff.X
-#     X̃ = knockoff.X̃
-#     s = knockoff.s
+    # generate knockoff
+    true_mu = zeros(p)
+    @time knockoff = modelX_gaussian_knockoffs(X, :sdp, true_mu, Sigma)
+    X = knockoff.X
+    X̃ = knockoff.X̃
+    s = knockoff.s
 
-#     # test properties
-#     @test all(X' * X .≈ Σ)
-#     @test all(isapprox.(X̃' * X̃, Σ, atol=0.5)) # numerical accuracy not good?
-#     @test all(s .≥ 0)
-#     @test all(1 .≥ s)
-#     for i in 1:p, j in 1:p
-#         if i == j
-#             @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i], atol=1.0) # numerical accuracy not good?
-#         else
-#             @test isapprox(dot(X[:, i], X̃[:, j]), dot(X[:, i], X[:, j]), atol=1.0) # numerical accuracy not good?
-#         end
-#     end
-# end
+    # compare with Matteo's result
+    # @rput Sigma X true_mu
+    # R"""
+    # library(knockoff)
+    # diag_s = create.solve_sdp(Sigma)
+    # X_ko = create.gaussian(X, true_mu, Sigma, method = "sdp", diag_s = diag_s)
+    # """
+    # @rget diag_s X_ko
+    # [diag_s s]
+    # histogram(vec(X_ko))
+    # histogram(vec(X̃))
+
+    # test properties
+    @test all(s .≥ 0)
+    @test all(1 .≥ s)
+end
 
 @testset "threshold functions" begin
     w = [0.1, 1.9, 1.3, 1.8, 0.8, -0.7, -0.1]
