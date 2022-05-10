@@ -15,8 +15,6 @@ using ToeplitzMatrices
     n = 3000
     p = 1000
     X = randn(n, p)
-    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    normalize_col!(X) # normalize columns 
 
     # equi-correlated knockoff
     @time knockoff = fixed_knockoffs(X, :equi)
@@ -30,13 +28,15 @@ using ToeplitzMatrices
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-2)) # numerical accuracy not good?
     @test all(s .≥ 0)
     @test all(1 .≥ s)
-    # λ = eigvals(2Σ - Diagonal(s))
-    # for λi in λ
-    #     @test λi ≥ 0 || λi ≈ 0
-    # end
+    λ = eigvals(2Σ - Diagonal(s))
+    for λi in λ
+        @test λi ≥ 0 || isapprox(λi, 0, atol=1e-10)
+    end
     # @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
     for i in 1:p, j in 1:p
         if i == j
+            @test isapprox(dot(X[:, i], X[:, i]), 1, atol=1e-1)
+            @test isapprox(dot(X̃[:, i], X̃[:, i]), 1, atol=1e-1)
             @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i])
             @test isapprox(dot(X[:, i], X̃[:, i]), 1 - s[i], atol=5e-2) # numerical accuracy not good?
         else
@@ -52,8 +52,6 @@ end
     n = 1000
     p = 100
     X = randn(n, p)
-    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    # normalize_col!(X) # normalize columns 
 
     # SDP knockoff
     @time knockoff = fixed_knockoffs(X, :sdp)
@@ -94,13 +92,15 @@ end
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-1)) # numerical accuracy not good?
     @test all(s .≥ 0)
     @test all(1 .≥ s)
-    # λ = eigvals(2Σ - Diagonal(s))
-    # for λi in λ
-    #     @test λi ≥ 0 || λi ≈ 0
-    # end
+    λ = eigvals(2Σ - Diagonal(s))
+    for λi in λ
+        @test λi ≥ 0 || isapprox(λi, 0, atol=1e-10)
+    end
     # @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
     for i in 1:p, j in 1:p
         if i == j
+            @test isapprox(dot(X[:, i], X[:, i]), 1, atol=1e-1)
+            @test isapprox(dot(X̃[:, i], X̃[:, i]), 1, atol=1e-1)
             @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i], atol=1e-8)
             @test isapprox(dot(X[:, i], X̃[:, i]), 1 - s[i], atol=1e-8)
         else
@@ -157,9 +157,6 @@ end
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
     L = cholesky(Sigma).L
     X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
-    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-    # X ./= sum(X, dims=1)
-    # normalize_col!(X) # normalize columns 
 
     # generate knockoff
     true_mu = zeros(p)
@@ -167,6 +164,7 @@ end
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
+    # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -183,6 +181,8 @@ end
     # test properties
     @test all(s .≥ 0)
     @test all(1 .≥ s)
+    @test all(isapprox.(mean(X, dims=1), 0, atol=1e-8))
+    @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
 end
 
 @testset "threshold functions" begin
