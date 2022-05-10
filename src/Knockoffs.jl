@@ -14,6 +14,7 @@ using fastPHASE
 using ElasticArrays
 using Random
 using PositiveFactorizations
+using CovarianceEstimation
 
 import Base: eltype, getindex, size
 

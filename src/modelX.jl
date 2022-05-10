@@ -19,34 +19,26 @@ way to estimate Σ
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
     n, p = size(X)
-    T = eltype(X)
-    full_svd = n > p ? true : false
-    # compute gram matrix using full svd
-    U, σ, V = svd(X, full=full_svd)
-    Σ = V * Diagonal(σ)^2 * V'
-    Σinv = V * inv(Diagonal(σ)^2) * V'
+    # approximate covariance by Ledoit-Wolf optimal shrinkage as recommended for p>n
+    # see https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
+    Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
     # compute s vector using the specified method
     if method == :equi
-        λmin = typemax(T)
-        for σi in σ
-            σi^2 < λmin && (λmin = σi^2)
-        end
-        s = min(1, 2λmin) .* ones(size(Σ, 1))
+        λmin = minimum(eigvals(Σapprox))
+        s = min(1, 2λmin) .* ones(p)
     elseif method == :sdp
-        svar = Variable(p)
-        problem = maximize(sum(svar), svar ≥ 0, 1 ≥ svar, 2Σ - Diagonal(svar) in :SDP)
-        solve!(problem, () -> SCS.Optimizer(verbose=false))
-        s = clamp.(evaluate(svar), 0, 1) # for numeric stability
+        s = solve_SDP(Σapprox)
     elseif method==:asdp
         # todo
         error("ASDP not supported yet! sorry!")
     else
         error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
     end
+    Σinv = inv(Σapprox)
     X̃ = condition(X, μ, Σinv, Diagonal(s))
-    return Knockoff(X, X̃, s, Σ, Σinv)
+    return knockoff(X, X̃, s)
 end
 
 """
