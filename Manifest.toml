@@ -163,6 +163,12 @@ git-tree-sha1 = "145c5e0b3ea3c9dd3bba134a58bab4112aa250c8"
 uuid = "f65535da-76fb-5f13-bab9-19810c17039a"
 version = "0.14.18"
 
+[[deps.CovarianceEstimation]]
+deps = ["LinearAlgebra", "Statistics", "StatsBase"]
+git-tree-sha1 = "a3e070133acab996660d31dcf479ea42849e368f"
+uuid = "587fd27a-f159-11e8-2dae-1979310e6154"
+version = "0.2.7"
+
 [[deps.CpuId]]
 deps = ["Markdown"]
 git-tree-sha1 = "32d125af0fb8ec3f8935896122c5e345709909e5"

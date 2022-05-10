@@ -14,31 +14,17 @@ to mean 0 variance 1.
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
 Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 
-# todo: the SDP routine for this is quite slow for some reason. May need better
-way to estimate Σ
+# Note: 
+The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which
+is recommended for p>n case. We do not simply use `cov(X)` since `isposdef(cov(X))`
+is typically false. For reference, see 
+https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
-    n, p = size(X)
-    # approximate covariance by Ledoit-Wolf optimal shrinkage as recommended for p>n
-    # see https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
     Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    # compute s vector using the specified method
-    if method == :equi
-        λmin = minimum(eigvals(Σapprox))
-        s = min(1, 2λmin) .* ones(p)
-    elseif method == :sdp
-        s = solve_SDP(Σapprox)
-    elseif method==:asdp
-        # todo
-        error("ASDP not supported yet! sorry!")
-    else
-        error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
-    end
-    Σinv = inv(Σapprox)
-    X̃ = condition(X, μ, Σinv, Diagonal(s))
-    return knockoff(X, X̃, s)
+    return modelX_gaussian_knockoffs(X, method, μ, Σapprox)
 end
 
 """

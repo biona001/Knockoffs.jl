@@ -9,6 +9,7 @@ fastphase.inp
 docs/src/man/rapid
 docs/src/man/sim*
 docs/src/man/*.txt
+docs/src/man/*.zip
 docs/src/man/knockoffs
 
 fastphase
