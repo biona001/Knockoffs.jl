@@ -22,9 +22,14 @@ gr(fmt=:png);
 ## Gaussian model-X knockoffs with known mean and covariance
 
 To illustrate, lets simulate data $\mathbf{X}$ with covariance $\Sigma$ and mean $\mu$. Our model is
-$$X_{p \times 1} \sim N(\mathbf{0}_p, \Sigma)$$
+```math
+\begin{aligned}
+    X_{p \times 1} \sim N(\mathbf{0}_p, \Sigma)
+\end{aligned}
+```
 where
-$$
+```math
+\begin{aligned}
 \Sigma = 
 \begin{pmatrix}
     1 & \rho & \rho^2 & ... & \rho^p\\
@@ -32,17 +37,21 @@ $$
     \vdots & & & \rho^2 & \vdots \\
     \rho^p & \cdots & & & 1
 \end{pmatrix}
-$$
+\end{aligned}
+```
 Given $n$ iid samples from the above distribution, we will generate knockoffs according to 
-$$(X, \tilde{X}) \sim N
+```math
+\begin{aligned}
+(X, \tilde{X}) \sim N
 \left(0, \ 
 \begin{pmatrix}
     \Sigma & \Sigma - diag(s)\\
     \Sigma - diag(s) & \Sigma
 \end{pmatrix}
 \right)
-$$
-where $s$ is solved so that $0 \le s_j \le 1 \forall j$ and $G$ is PSD (i.e. $2Σ - diag(s)$ is PSD)
+\end{aligned}
+```
+where $s$ is solved so that $0 \le s_j \le 1$ for all $j$ and $2Σ - diag(s)$ is PSD
 
 
 ```julia
@@ -98,8 +107,8 @@ To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](htt
 @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ);
 ```
 
-     25.374835 seconds (77.06 M allocations: 4.570 GiB, 7.09% gc time, 99.98% compilation time)
-     19.660112 seconds (47.04 M allocations: 2.997 GiB, 3.44% gc time, 87.12% compilation time)
+      0.005939 seconds (64 allocations: 2.917 MiB)
+      2.591943 seconds (507.14 k allocations: 399.694 MiB, 2.22% gc time)
 
 
 The return type is a `Knockoff` struct, which contains the following fields
@@ -165,8 +174,8 @@ The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoff
 @time sdp = modelX_gaussian_knockoffs(X, :sdp);
 ```
 
-      1.561771 seconds (4.73 M allocations: 298.165 MiB, 3.88% gc time, 99.69% compilation time)
-      1.438611 seconds (493.38 k allocations: 400.977 MiB, 10.01% gc time, 0.02% compilation time)
+      1.409218 seconds (4.73 M allocations: 298.165 MiB, 4.27% gc time, 99.64% compilation time)
+      1.461627 seconds (493.38 k allocations: 400.977 MiB, 9.59% gc time, 0.01% compilation time)
 
 
 ## LASSO example
@@ -199,8 +208,41 @@ shuffle!(βtrue)
 correct_position = findall(!iszero, βtrue)
 
 # simulate y
-y = X * βtrue + randn(n);
+y = X * βtrue + randn(n)
 ```
+
+
+
+
+    100-element Vector{Float64}:
+      14.266919127149842
+      -6.278692480799679
+       9.858885910732875
+     -12.01490500271363
+      -1.264625231680485
+      -9.769930220860891
+       3.4576966857455744
+      -4.631698401211534
+       3.479660036871339
+       5.02259952477322
+       4.191524397227919
+      -4.474533126730386
+      -2.8622201907878875
+       ⋮
+      10.11939558872792
+     -11.662501908832477
+      -2.809588350162475
+       1.6702533418206555
+      -5.112528268377324
+      -4.265199507809577
+      -0.12649360594358572
+       5.335060353670969
+      -5.077205020091405
+       9.112279751079477
+      -6.097478882110593
+      -1.7059999133041275
+
+
 
 ### Standard LASSO
 
