@@ -8,7 +8,6 @@ This tutorial generates model-X knockoffs, which handles the cases where covaria
 
 ```julia
 # load packages needed for this tutorial
-using Revise
 using Knockoffs
 using Plots
 using Random
@@ -20,13 +19,30 @@ using StatsBase
 gr(fmt=:png);
 ```
 
-    ┌ Info: Precompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
-    └ @ Base loading.jl:1423
-
-
 ## Gaussian model-X knockoffs with known mean and covariance
 
-To illustrate, lets simulate data X with covariance Σ and mean μ
+To illustrate, lets simulate data $\mathbf{X}$ with covariance $\Sigma$ and mean $\mu$. Our model is
+$$X_{p \times 1} \sim N(\mathbf{0}_p, \Sigma)$$
+where
+$$
+\Sigma = 
+\begin{pmatrix}
+    1 & \rho & \rho^2 & ... & \rho^p\\
+    \rho & \rho^2 & & ... & \rho^{p-1}\\
+    \vdots & & & \rho^2 & \vdots \\
+    \rho^p & \cdots & & & 1
+\end{pmatrix}
+$$
+Given $n$ iid samples from the above distribution, we will generate knockoffs according to 
+$$(X, \tilde{X}) \sim N
+\left(0, \ 
+\begin{pmatrix}
+    \Sigma & \Sigma - diag(s)\\
+    \Sigma - diag(s) & \Sigma
+\end{pmatrix}
+\right)
+$$
+where $s$ is solved so that $0 \le s_j \le 1 \forall j$ and $G$ is PSD (i.e. $2Σ - diag(s)$ is PSD)
 
 
 ```julia
@@ -74,7 +90,7 @@ zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale columns to mean 0 var
 
 
 
-To generate knockoffs, the 4 argument function [modelX_gaussian_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument can be ither `:equi`, `:sdp`, or `:asdp`. The SDP construction will yield more powerful knockoffs, but is more computationally expensive. 
+To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument can be ither `:equi`, `:sdp`, or `:asdp`. The SDP construction will yield more powerful knockoffs, but is more computationally expensive. 
 
 
 ```julia
@@ -82,8 +98,8 @@ To generate knockoffs, the 4 argument function [modelX_gaussian_knockoffs](https
 @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ);
 ```
 
-     25.882800 seconds (76.93 M allocations: 4.564 GiB, 6.25% gc time, 99.98% compilation time)
-     21.144031 seconds (46.67 M allocations: 2.981 GiB, 4.94% gc time, 87.14% compilation time)
+     25.374835 seconds (77.06 M allocations: 4.570 GiB, 7.09% gc time, 99.98% compilation time)
+     19.660112 seconds (47.04 M allocations: 2.997 GiB, 3.44% gc time, 87.12% compilation time)
 
 
 The return type is a `Knockoff` struct, which contains the following fields
@@ -140,7 +156,7 @@ s = Xko_sdp.s
 
 ## Second order knockoffs
 
-The 2 argument [modelX_gaussian_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will estimate the mean and covariance of `X` and use them to generate model-X knockoffs
+The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will estimate the mean and covariance of `X` and use them to generate model-X knockoffs
 
 
 ```julia
@@ -149,8 +165,8 @@ The 2 argument [modelX_gaussian_knockoffs](https://biona001.github.io/Knockoffs.
 @time sdp = modelX_gaussian_knockoffs(X, :sdp);
 ```
 
-      1.521634 seconds (4.82 M allocations: 302.390 MiB, 5.24% gc time, 99.61% compilation time)
-      1.579576 seconds (1.33 M allocations: 443.163 MiB, 4.65% gc time, 18.31% compilation time)
+      1.561771 seconds (4.73 M allocations: 298.165 MiB, 3.88% gc time, 99.69% compilation time)
+      1.438611 seconds (493.38 k allocations: 400.977 MiB, 10.01% gc time, 0.02% compilation time)
 
 
 ## LASSO example

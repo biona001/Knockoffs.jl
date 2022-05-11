@@ -185,6 +185,46 @@ end
     @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
 end
 
+
+@testset "model X 2nd order Knockoffs" begin
+    # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
+
+    # simulate matrix
+    Random.seed!(2022)
+    n = 100
+    p = 200
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    # generate knockoff
+    true_mu = zeros(p)
+    @time knockoff = modelX_gaussian_knockoffs(X, :sdp)
+    X = knockoff.X
+    X̃ = knockoff.X̃
+    s = knockoff.s
+    # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
+
+    # compare with Matteo's result
+    # @rput Sigma X true_mu
+    # R"""
+    # library(knockoff)
+    # diag_s = create.solve_sdp(Sigma)
+    # X_ko = create.gaussian(X, true_mu, Sigma, method = "sdp", diag_s = diag_s)
+    # """
+    # @rget diag_s X_ko
+    # [diag_s s]
+    # histogram(vec(X_ko))
+    # histogram(vec(X̃))
+
+    # test properties
+    @test all(s .≥ 0)
+    @test all(1 .≥ s)
+    @test all(isapprox.(mean(X, dims=1), 0, atol=1e-8))
+    @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
+end
+
 @testset "threshold functions" begin
     w = [0.1, 1.9, 1.3, 1.8, 0.8, -0.7, -0.1]
     @test threshold(w, 0.2) == 0.8

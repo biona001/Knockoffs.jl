@@ -62,9 +62,8 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
     else
         error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
     end
-    Σinv = inv(Σ)
-    X̃ = condition(X, μ, Σinv, Diagonal(s))
-    return Knockoff(X, X̃, s, Σ, Σinv)
+    X̃ = condition(X, μ, inv(Σ), Diagonal(s))
+    return knockoff(X, X̃, s)
 end
 
 """
