@@ -18,6 +18,7 @@ using Plots
 using Random
 using GLMNet
 using LinearAlgebra
+using Distributions
 gr(fmt=:png);
 ```
 
@@ -30,8 +31,7 @@ gr(fmt=:png);
 We will
 
 1. Simulate Gaussian design matrix
-2. Standardize the columns to mean 0 variance 1
-3. Generate knockoffs
+2. Generate knockoffs
 
 Both equi-correlated and SDP knockoffs are supported. 
 
@@ -39,18 +39,21 @@ Both equi-correlated and SDP knockoffs are supported.
 ```julia
 Random.seed!(2022)   # set random seed for reproducibility
 X = randn(1000, 200) # simulate Gaussian matrix
-standardize!(X)      # normalize columns
 
 # make equi-correlated and SDP knockoffs
-Aequi = fixed_knockoffs(X, :equi)
-Asdp = fixed_knockoffs(X, :sdp);
+@time Aequi = fixed_knockoffs(X, :equi)
+@time Asdp = fixed_knockoffs(X, :sdp);
 ```
+
+      0.063920 seconds (80 allocations: 20.696 MiB)
+      3.041085 seconds (509.89 k allocations: 417.777 MiB, 3.77% gc time)
+
 
 The return type is a `Knockoff` struct, which contains the following fields
 
 ```julia
 struct Knockoff{T}
-    X::Matrix{T}    # n × p original design matrix
+    X::Matrix{T}    # n × p normalized design matrix
     X̃::Matrix{T}    # n × p knockoff of X
     s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::Matrix{T}    # p × p gram matrix X'X
@@ -62,6 +65,7 @@ Thus, to access these fields, one can do
 
 
 ```julia
+X = Asdp.X
 X̃ = Asdp.X̃
 s = Asdp.s
 Σ = Asdp.Σ
@@ -80,32 +84,32 @@ We can check some knockoff properties. For instance, is it true that $X'\tilde{X
 
 
     40000×2 Matrix{Float64}:
-     998.0      998.0
-     -18.5421   -18.5421
-     -25.4908   -25.4908
-     -34.946    -34.946
-      20.1673    20.1673
-      51.0641    51.0641
-      14.7028    14.7028
-     -24.1644   -24.1644
-     -46.411    -46.411
-     -33.7503   -33.7503
-      -4.25934   -4.25934
-     -24.1531   -24.1531
-      13.1971    13.1971
-       ⋮        
-      20.4727    20.4727
-     -13.4668   -13.4668
-     -13.3521   -13.3521
-      33.889     33.889
-      30.8905    30.8905
-     -30.8344   -30.8344
-      42.4959    42.4959
-       4.39748    4.39748
-       2.57332    2.57332
-      -7.19466   -7.19466
-       9.84951    9.84951
-     998.0      998.0
+      0.221993     0.221993
+     -0.0184072   -0.0184072
+     -0.0274339   -0.0274339
+     -0.0359705   -0.0359705
+      0.0202419    0.0202419
+      0.0514162    0.0514162
+      0.0154546    0.0154546
+     -0.0250518   -0.0250518
+     -0.0468651   -0.0468651
+     -0.0358149   -0.0358149
+     -0.00507354  -0.00507354
+     -0.0238295   -0.0238295
+      0.0140797    0.0140797
+      ⋮           
+      0.0192772    0.0192772
+     -0.0157356   -0.0157356
+     -0.0116071   -0.0116071
+      0.0338745    0.0338745
+      0.029913     0.029913
+     -0.03115     -0.03115
+      0.0437582    0.0437582
+      0.00350153   0.00350153
+      0.00382205   0.00382205
+     -0.0072671   -0.0072671
+      0.00966888   0.00966888
+      0.444122     0.444122
 
 
 
@@ -119,27 +123,27 @@ Let us apply the generated knockoffs to the model selection problem. In layman's
 
 We will simulate 
 
-$$\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)$$
+$$\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 0.5)$$
 
 where $k=50$ positions of $\mathbf{\beta}$ is non-zero with effect size $\beta_j \sim N(0, 1)$. The goal is to recover those 50 positions using LASSO.
 
 
 ```julia
 # set seed for reproducibility
-Random.seed!(100)
+Random.seed!(2022)
 
 # simulate true beta
 n, p = size(X)
 k = 50
 βtrue = zeros(p)
-βtrue[1:k] .= randn(50)
+βtrue[1:k] .= 3randn(50)
 shuffle!(βtrue)
 
 # find true causal variables
 correct_position = findall(!iszero, βtrue)
 
-# simulate y
-y = X * βtrue + randn(n);
+# simulate y using normalized X
+y = X * βtrue + rand(Normal(0, 0.5), n);
 ```
 
 ### Standard LASSO
@@ -166,20 +170,20 @@ power, FDR
 
 
 
-    (1.0, 0.5370370370370371)
+    (0.86, 0.5222222222222223)
 
 
 
-It seems LASSO have power 96% (it missed only 2/50 predictors), but the false discovery rate is 54%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. 
+It seems LASSO have power 86%, but the false discovery rate is 52%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. 
 
 ### Knockoff+LASSO
 
 Now lets try applying the knockoff methodology. Recall that consists of a few steps 
 
 1. Run LASSO on $[\mathbf{X} \mathbf{\tilde{X}}]$
-2. Compare coefficient difference statistic $W_j$ for each $j = 1,...,p$. Here we use $W_j = |\beta_j| - |\beta_{j, knockoff}|$
-3. Choose target FDR $0 \le q \le 1$ and compute 
-$$\tau = min_{t}\left\{t > 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}$$
+2. Compare feature importance score $W_j = \text{score}(x_j) - \text{score}(\tilde{x}_j)$ for each $j = 1,...,p$. Here we use $W_j = |\beta_j| - |\tilde{\beta}_{j}|$
+3. Choose target FDR $q \in [0, 1]$ and compute 
+$$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j ≥ t}\})} \le q\right\}$$
 
 !!! note
     
