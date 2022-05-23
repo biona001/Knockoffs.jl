@@ -6,64 +6,66 @@ using Plots
 using Random
 using GLMNet
 using LinearAlgebra
+using Distributions
 gr(fmt=:png);</code></pre><pre><code class="nohighlight hljs">┌ Info: Precompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
-└ @ Base loading.jl:1423</code></pre><h2 id="Generate-knockoffs"><a class="docs-heading-anchor" href="#Generate-knockoffs">Generate knockoffs</a><a id="Generate-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Generate-knockoffs" title="Permalink"></a></h2><p>We will</p><ol><li>Simulate Gaussian design matrix</li><li>Standardize the columns to mean 0 variance 1</li><li>Generate knockoffs</li></ol><p>Both equi-correlated and SDP knockoffs are supported. </p><pre><code class="language-julia hljs">Random.seed!(2022)   # set random seed for reproducibility
+└ @ Base loading.jl:1423</code></pre><h2 id="Generate-knockoffs"><a class="docs-heading-anchor" href="#Generate-knockoffs">Generate knockoffs</a><a id="Generate-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Generate-knockoffs" title="Permalink"></a></h2><p>We will</p><ol><li>Simulate Gaussian design matrix</li><li>Generate knockoffs</li></ol><p>Both equi-correlated and SDP knockoffs are supported. </p><pre><code class="language-julia hljs">Random.seed!(2022)   # set random seed for reproducibility
 X = randn(1000, 200) # simulate Gaussian matrix
-standardize!(X)      # normalize columns
 
 # make equi-correlated and SDP knockoffs
-Aequi = fixed_knockoffs(X, :equi)
-Asdp = fixed_knockoffs(X, :sdp);</code></pre><p>The return type is a <code>Knockoff</code> struct, which contains the following fields</p><pre><code class="language-julia hljs">struct Knockoff{T}
-    X::Matrix{T}    # n × p original design matrix
+@time Aequi = fixed_knockoffs(X, :equi)
+@time Asdp = fixed_knockoffs(X, :sdp);</code></pre><pre><code class="nohighlight hljs">  0.063920 seconds (80 allocations: 20.696 MiB)
+  3.041085 seconds (509.89 k allocations: 417.777 MiB, 3.77% gc time)</code></pre><p>The return type is a <code>Knockoff</code> struct, which contains the following fields</p><pre><code class="language-julia hljs">struct Knockoff{T}
+    X::Matrix{T}    # n × p normalized design matrix
     X̃::Matrix{T}    # n × p knockoff of X
     s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::Matrix{T}    # p × p gram matrix X&#39;X
     Σinv::Matrix{T} # p × p inv(X&#39;X)
-end</code></pre><p>Thus, to access these fields, one can do</p><pre><code class="language-julia hljs">X̃ = Asdp.X̃
+end</code></pre><p>Thus, to access these fields, one can do</p><pre><code class="language-julia hljs">X = Asdp.X
+X̃ = Asdp.X̃
 s = Asdp.s
 Σ = Asdp.Σ
 Σinv = Asdp.Σinv;</code></pre><p>We can check some knockoff properties. For instance, is it true that <span>$X&#39;\tilde{X} \approx \Sigma - diag(s)$</span>?</p><pre><code class="language-julia hljs"># compare X&#39;X and Σ-diag(s) visually
 [vec(X&#39;*X̃) vec(Σ - Diagonal(s))]</code></pre><pre><code class="nohighlight hljs">40000×2 Matrix{Float64}:
- 998.0      998.0
- -18.5421   -18.5421
- -25.4908   -25.4908
- -34.946    -34.946
-  20.1673    20.1673
-  51.0641    51.0641
-  14.7028    14.7028
- -24.1644   -24.1644
- -46.411    -46.411
- -33.7503   -33.7503
-  -4.25934   -4.25934
- -24.1531   -24.1531
-  13.1971    13.1971
-   ⋮        
-  20.4727    20.4727
- -13.4668   -13.4668
- -13.3521   -13.3521
-  33.889     33.889
-  30.8905    30.8905
- -30.8344   -30.8344
-  42.4959    42.4959
-   4.39748    4.39748
-   2.57332    2.57332
-  -7.19466   -7.19466
-   9.84951    9.84951
- 998.0      998.0</code></pre><h2 id="LASSO-example"><a class="docs-heading-anchor" href="#LASSO-example">LASSO example</a><a id="LASSO-example-1"></a><a class="docs-heading-anchor-permalink" href="#LASSO-example" title="Permalink"></a></h2><p>Let us apply the generated knockoffs to the model selection problem. In layman&#39;s term, it can be stated as</p><blockquote><p>Given response <span>$\mathbf{y}_{n \times 1}$</span>, design matrix <span>$\mathbf{X}_{n \times p}$</span>, we want to select a subset <span>$S \subset \{1,...,p\}$</span> of variables that are truly causal for <span>$\mathbf{y}$</span>. </p></blockquote><h3 id="Simulate-data"><a class="docs-heading-anchor" href="#Simulate-data">Simulate data</a><a id="Simulate-data-1"></a><a class="docs-heading-anchor-permalink" href="#Simulate-data" title="Permalink"></a></h3><p>We will simulate </p><p class="math-container">\[\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)\]</p><p>where <span>$k=50$</span> positions of <span>$\mathbf{\beta}$</span> is non-zero with effect size <span>$\beta_j \sim N(0, 1)$</span>. The goal is to recover those 50 positions using LASSO.</p><pre><code class="language-julia hljs"># set seed for reproducibility
-Random.seed!(100)
+  0.221993     0.221993
+ -0.0184072   -0.0184072
+ -0.0274339   -0.0274339
+ -0.0359705   -0.0359705
+  0.0202419    0.0202419
+  0.0514162    0.0514162
+  0.0154546    0.0154546
+ -0.0250518   -0.0250518
+ -0.0468651   -0.0468651
+ -0.0358149   -0.0358149
+ -0.00507354  -0.00507354
+ -0.0238295   -0.0238295
+  0.0140797    0.0140797
+  ⋮           
+  0.0192772    0.0192772
+ -0.0157356   -0.0157356
+ -0.0116071   -0.0116071
+  0.0338745    0.0338745
+  0.029913     0.029913
+ -0.03115     -0.03115
+  0.0437582    0.0437582
+  0.00350153   0.00350153
+  0.00382205   0.00382205
+ -0.0072671   -0.0072671
+  0.00966888   0.00966888
+  0.444122     0.444122</code></pre><h2 id="LASSO-example"><a class="docs-heading-anchor" href="#LASSO-example">LASSO example</a><a id="LASSO-example-1"></a><a class="docs-heading-anchor-permalink" href="#LASSO-example" title="Permalink"></a></h2><p>Let us apply the generated knockoffs to the model selection problem. In layman&#39;s term, it can be stated as</p><blockquote><p>Given response <span>$\mathbf{y}_{n \times 1}$</span>, design matrix <span>$\mathbf{X}_{n \times p}$</span>, we want to select a subset <span>$S \subset \{1,...,p\}$</span> of variables that are truly causal for <span>$\mathbf{y}$</span>. </p></blockquote><h3 id="Simulate-data"><a class="docs-heading-anchor" href="#Simulate-data">Simulate data</a><a id="Simulate-data-1"></a><a class="docs-heading-anchor-permalink" href="#Simulate-data" title="Permalink"></a></h3><p>We will simulate </p><p class="math-container">\[\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 0.5)\]</p><p>where <span>$k=50$</span> positions of <span>$\mathbf{\beta}$</span> is non-zero with effect size <span>$\beta_j \sim N(0, 1)$</span>. The goal is to recover those 50 positions using LASSO.</p><pre><code class="language-julia hljs"># set seed for reproducibility
+Random.seed!(2022)
 
 # simulate true beta
 n, p = size(X)
 k = 50
 βtrue = zeros(p)
-βtrue[1:k] .= randn(50)
+βtrue[1:k] .= 3randn(50)
 shuffle!(βtrue)
 
 # find true causal variables
 correct_position = findall(!iszero, βtrue)
 
-# simulate y
-y = X * βtrue + randn(n);</code></pre><h3 id="Standard-LASSO"><a class="docs-heading-anchor" href="#Standard-LASSO">Standard LASSO</a><a id="Standard-LASSO-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-LASSO" title="Permalink"></a></h3><p>Lets try running standard LASSO, which will produce <span>$\hat{\mathbf{\beta}}_{p \times 1}$</span> where we typically declare SNP <span>$j$</span> to be selected if <span>$\hat{\beta}_j \ne 0$</span>. We use LASSO solver in <a href="https://github.com/JuliaStats/GLMNet.jl">GLMNet.jl</a> package, which is just a Julia wrapper for the GLMnet Fortran code. </p><p>How well does LASSO perform in terms of power and FDR?</p><pre><code class="language-julia hljs"># run 10-fold cross validation to find best λ minimizing MSE
+# simulate y using normalized X
+y = X * βtrue + rand(Normal(0, 0.5), n);</code></pre><h3 id="Standard-LASSO"><a class="docs-heading-anchor" href="#Standard-LASSO">Standard LASSO</a><a id="Standard-LASSO-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-LASSO" title="Permalink"></a></h3><p>Lets try running standard LASSO, which will produce <span>$\hat{\mathbf{\beta}}_{p \times 1}$</span> where we typically declare SNP <span>$j$</span> to be selected if <span>$\hat{\beta}_j \ne 0$</span>. We use LASSO solver in <a href="https://github.com/JuliaStats/GLMNet.jl">GLMNet.jl</a> package, which is just a Julia wrapper for the GLMnet Fortran code. </p><p>How well does LASSO perform in terms of power and FDR?</p><pre><code class="language-julia hljs"># run 10-fold cross validation to find best λ minimizing MSE
 lasso_cv = glmnetcv(X, y)
 λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
 
@@ -73,7 +75,7 @@ lasso_cv = glmnetcv(X, y)
 # check power and false discovery rate
 power = length(findall(!iszero, βlasso) ∩ correct_position) / k
 FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
-power, FDR</code></pre><pre><code class="nohighlight hljs">(1.0, 0.5370370370370371)</code></pre><p>It seems LASSO have power 96% (it missed only 2/50 predictors), but the false discovery rate is 54%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. </p><h3 id="KnockoffLASSO"><a class="docs-heading-anchor" href="#KnockoffLASSO">Knockoff+LASSO</a><a id="KnockoffLASSO-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffLASSO" title="Permalink"></a></h3><p>Now lets try applying the knockoff methodology. Recall that consists of a few steps </p><ol><li>Run LASSO on <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span></li><li>Compare coefficient difference statistic <span>$W_j$</span> for each <span>$j = 1,...,p$</span>. Here we use <span>$W_j = |\beta_j| - |\beta_{j, knockoff}|$</span></li><li>Choose target FDR <span>$0 \le q \le 1$</span> and compute </li></ol><p class="math-container">\[\tau = min_{t}\left\{t &gt; 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}\]</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In step 1, <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span> is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. </p></div></div><pre><code class="language-julia hljs"># step 1
+power, FDR</code></pre><pre><code class="nohighlight hljs">(0.86, 0.5222222222222223)</code></pre><p>It seems LASSO have power 86%, but the false discovery rate is 52%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. </p><h3 id="KnockoffLASSO"><a class="docs-heading-anchor" href="#KnockoffLASSO">Knockoff+LASSO</a><a id="KnockoffLASSO-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffLASSO" title="Permalink"></a></h3><p>Now lets try applying the knockoff methodology. Recall that consists of a few steps </p><ol><li>Run LASSO on <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span></li><li>Compare feature importance score <span>$W_j = \text{score}(x_j) - \text{score}(\tilde{x}_j)$</span> for each <span>$j = 1,...,p$</span>. Here we use <span>$W_j = |\beta_j| - |\tilde{\beta}_{j}|$</span></li><li>Choose target FDR <span>$q \in [0, 1]$</span> and compute </li></ol><p class="math-container">\[\tau = min_{t}\left\{t &gt; 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j ≥ t}\})} \le q\right\}\]</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In step 1, <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span> is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. </p></div></div><pre><code class="language-julia hljs"># step 1
 Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
 knockoff_cv = glmnetcv(Xfull, y)
 λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
@@ -97,4 +99,4 @@ end
 power_plot = plot(FDR, empirical_power, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical power&quot;, legend=false)
 fdr_plot = plot(FDR, empirical_fdr, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical FDR&quot;, legend=false)
 Plots.abline!(fdr_plot, 1, 0, line=:dash)
-plot(power_plot, fdr_plot)</code></pre><p><img src="../output_13_0.png" alt="png"/></p><p>Observe that</p><ul><li>LASSO + knockoffs controls the false discovery rate at below the target (dashed line)</li><li>The power of LASSO + knockoffs is lower than standard LASSO</li></ul><p>If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../../">« Home</a><a class="docs-footer-nextpage" href="../../modelX/modelX/">Model-X Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.17 on <span class="colophon-date" title="Sunday 22 May 2022 03:07">Sunday 22 May 2022</span>. Using Julia version 1.7.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+plot(power_plot, fdr_plot)</code></pre><p><img src="../output_13_0.png" alt="png"/></p><p>Observe that</p><ul><li>LASSO + knockoffs controls the false discovery rate at below the target (dashed line)</li><li>The power of LASSO + knockoffs is lower than standard LASSO</li></ul><p>If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../../">« Home</a><a class="docs-footer-nextpage" href="../../modelX/modelX/">Model-X Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.17 on <span class="colophon-date" title="Monday 23 May 2022 15:32">Monday 23 May 2022</span>. Using Julia version 1.7.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
