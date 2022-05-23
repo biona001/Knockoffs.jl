@@ -1,44 +1,22 @@
 """
-A `Knockoff` is an `AbstractMatrix`, essentially the matrix [X X̃] of
-concatenating X̃ to X. If `A` is a `Knockoff`, `A` behaves like a regular matrix
-and can be inputted into any function that supports inputs of type `AbstractMatrix`.
-Basic operations like @view(A[:, 1]) are supported. 
+A `Knockoff` holds the original design matrix `X`, along with its knockoff `X̃`.
 """
-struct Knockoff{T} <: AbstractMatrix{T}
+abstract type Knockoff end
+
+struct GaussianKnockoff{T} <: Knockoff
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::Matrix{T} # p × p gram matrix X'X
-    Σinv::Matrix{T} # p × p inv(X'X)
+    Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
+    method::Symbol
 end
 
-function knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}) where T
-    Knockoff(X, X̃, T[], Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0))
+function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, method::Symbol) where T
+    GaussianKnockoff(X, X̃, T[], Matrix{T}(undef, 0, 0), method)
 end
 
-function knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, s::AbstractVector{T}) where T
-    Knockoff(X, X̃, s, Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0))
-end
-
-Base.size(A::Knockoff) = size(A.X, 1), 2size(A.X, 2)
-Base.eltype(A::Knockoff) = eltype(A.X)
-function Base.getindex(A::Knockoff, i::Int)
-    n, p = size(A.X)
-    i ≤ n * p ? getindex(A.X, i) : getindex(A.X̃, i - n * p)
-end
-function Base.getindex(A::Knockoff, i::Int, j::Int)
-    n, p = size(A.X)
-    j ≤ p ? getindex(A.X, i, j) : getindex(A.X̃, i, j - p)
-end
-function LinearAlgebra.mul!(C::AbstractMatrix, A::Knockoff, B::AbstractMatrix)
-    p = size(A.X, 2)
-    mul!(C, A.X, @view(B[1:p, :]))
-    mul!(C, A.X̃, @view(B[p+1:end, :]), 1.0, 1.0)
-end
-function LinearAlgebra.mul!(c::AbstractVector, A::Knockoff, b::AbstractVector)
-    p = size(A.X, 2)
-    mul!(c, A.X, @view(b[1:p]))
-    mul!(c, A.X̃, @view(b[p+1:end]), 1.0, 1.0)
+function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, s::AbstractVector{T}, method::Symbol) where T
+    GaussianKnockoff(X, X̃, s, Matrix{T}(undef, 0, 0), method)
 end
 
 # 1 state of a markov chain
@@ -79,3 +57,43 @@ function index_to_pair(mc::MarkovChainTable, i::Int)
 end
 # mc = MarkovChainTable(5)
 # index_to_pair(mc, 10)
+
+"""
+A `ImportanceStatistic` holds the knockoff importance score `W`s and the computed 
+threshold `τ`. In the knockoff-filter methodology, selected predictors are 
+variable `j` such that `W[j] ≥ τ`, which controls the empirical FDR at level `q`
+"""
+struct ImportanceStatistic{T} <: AbstractVector{T}
+    W :: Vector{T}
+    τ :: T
+    q :: T
+end
+
+"""
+Each `Filter{T}` is the final β vector after applying the knockoff-filter to [XX̃],
+controlling FDR at level `fdr`. The `debiased` variable indicates whether the 
+effect size in `β` have been debiased using a secondary Lasso routine
+"""
+struct Filter{T} <: AbstractVector{T}
+    β :: Vector{T}
+    fdr :: T
+    τ :: T
+    debiased :: Bool
+end
+
+"""
+A `KnockoffFilter` is essentially a `Knockoff` that has gone through a feature 
+selection procedure, such as the Lasso. It stores, among other things, the final
+estimated parameters `β` after applying the knockoff-filter procedure.
+
+The `debiased` variable is a boolean
+indicating whether estimated effect size have been debiased with Lasso. The
+`W` vector stores the feature importance statistic that satisfies the flip coin 
+property. `τ` is the knockoff threshold, which controls the empirical FDR at 
+level `q`
+"""
+struct KnockoffFilter{T}
+    W :: Vector{T}
+    βs :: Vector{Filter{T}}
+    debiased :: Bool
+end

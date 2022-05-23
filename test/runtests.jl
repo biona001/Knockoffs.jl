@@ -22,7 +22,6 @@ using ToeplitzMatrices
     X̃ = knockoff.X̃
     s = knockoff.s
     Σ = knockoff.Σ
-    Σinv = knockoff.Σinv
 
     @test all(isapprox.(X' * X, Σ, atol=1e-10))
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-2)) # numerical accuracy not good?
@@ -59,7 +58,6 @@ end
     X̃ = knockoff.X̃
     s = knockoff.s
     Σ = knockoff.Σ
-    Σinv = knockoff.Σinv
 
     # compare with Matteo's result
     # @rput X
@@ -109,43 +107,6 @@ end
     end
 end
 
-@testset "Knockoff data structure" begin
-    Random.seed!(2021)
-
-    # simulate matrix and normalize columns
-    n = 1000
-    p = 100
-    X = randn(n, p)
-    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-
-    # construct knockoff struct and the real [A Ã]
-    @time A = fixed_knockoffs(X, :sdp)
-    Atrue = [A.X A.X̃]
-
-    # array operations
-    @test size(Atrue) == size(A)
-    @test eltype(Atrue) == eltype(A)
-    @test getindex(Atrue, 127) == getindex(A, 127)
-    @test getindex(Atrue, 2, 19) == getindex(A, 2, 19)
-    @test getindex(Atrue, 900, 110) == getindex(A, 900, 110)
-    @test all(@view(Atrue[:, 1]) .== @view(A[:, 1]))
-    @test all(@view(Atrue[1:2:end, 1:5:end]) .== @view(A[1:2:end, 1:5:end]))
-
-    # matrix-vector multiplication
-    b = randn(2p)
-    ctrue, c = zeros(n), zeros(n)
-    mul!(ctrue, Atrue, b)
-    mul!(c, A, b)
-    @test all(ctrue .≈ c)
-
-    # matrix-matrix multiplication 
-    B = randn(2p, n)
-    Ctrue, C = zeros(n, n), zeros(n, n)
-    mul!(Ctrue, Atrue, B)
-    mul!(C, A, B)
-    @test all(Ctrue .≈ C)
-end
-
 @testset "model X Guassian Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
 
@@ -164,6 +125,7 @@ end
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
+    Σ = knockoff.Σ
     # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
 
     # compare with Matteo's result
@@ -183,8 +145,8 @@ end
     @test all(1 .≥ s)
     @test all(isapprox.(mean(X, dims=1), 0, atol=1e-8))
     @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
+    @test isposdef(Σ)
 end
-
 
 @testset "model X 2nd order Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
@@ -204,6 +166,7 @@ end
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
+    Σ = knockoff.Σ
     # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
 
     # compare with Matteo's result
@@ -223,6 +186,7 @@ end
     @test all(1 .≥ s)
     @test all(isapprox.(mean(X, dims=1), 0, atol=1e-8))
     @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
+    @test isposdef(Σ)
 end
 
 @testset "threshold functions" begin
@@ -261,20 +225,6 @@ end
     @test w[2] ≈ 1.0 - 0.2
 end
 
-function sample_DMC(q, Q; n=1)
-    p = size(Q, 3)
-    d = Categorical(q)
-    X = zeros(Int, n, p)
-    for i in 1:n
-        X[i, 1] = rand(d)
-        for j in 2:p
-            d.p .= @view(Q[X[i, j-1], :, j])
-            X[i, j] = rand(d)
-        end
-    end
-    return X
-end
-
 # from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
 @testset "Markov chain knockoffs have the right correlation structure" begin
     p = 20 # Number of states in markov chain
@@ -291,7 +241,7 @@ end
     fill!(@view(Q[:, :, 1]), NaN)
 
     # sample a bunch of markov chains
-    X = sample_DMC(q, Q, n=samples)
+    X = Knockoffs.sample_DMC(q, Q, n=samples)
 
     # sample knockoff of the markov chains
     X̃ = zeros(Int, samples, p)

@@ -249,3 +249,17 @@ function maf_noflip!(out::AbstractVector{T}, s::AbstractSnpArray) where T <: Abs
     out
 end
 maf_noflip(s::AbstractSnpArray) = maf_noflip!(Vector{Float64}(undef, size(s, 2)), s)
+
+function sample_DMC(q, Q; n=1)
+    p = size(Q, 3)
+    d = Categorical(q)
+    X = zeros(Int, n, p)
+    for i in 1:n
+        X[i, 1] = rand(d)
+        for j in 2:p
+            d.p .= @view(Q[X[i, j-1], :, j])
+            X[i, j] = rand(d)
+        end
+    end
+    return X
+end

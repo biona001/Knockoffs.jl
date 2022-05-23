@@ -44,5 +44,5 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
     C = Diagonal(sqrt.(γ)) * P
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
-    return Knockoff(X, X̃, s, Σ, Σinv)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end
