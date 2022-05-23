@@ -8,7 +8,7 @@ struct GaussianKnockoff{T} <: Knockoff
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
-    method::Symbol
+    method::Symbol # :sdp or :equi
 end
 
 function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, method::Symbol) where T
@@ -58,28 +58,28 @@ end
 # mc = MarkovChainTable(5)
 # index_to_pair(mc, 10)
 
-"""
-A `ImportanceStatistic` holds the knockoff importance score `W`s and the computed 
-threshold `τ`. In the knockoff-filter methodology, selected predictors are 
-variable `j` such that `W[j] ≥ τ`, which controls the empirical FDR at level `q`
-"""
-struct ImportanceStatistic{T} <: AbstractVector{T}
-    W :: Vector{T}
-    τ :: T
-    q :: T
-end
+# """
+# A `ImportanceStatistic` holds the knockoff importance score `W`s and the computed 
+# threshold `τ`. In the knockoff-filter methodology, selected predictors are 
+# variable `j` such that `W[j] ≥ τ`, which controls the empirical FDR at level `q`
+# """
+# struct ImportanceStatistic{T}
+#     W :: Vector{T}
+#     τ :: T
+#     q :: T
+# end
 
-"""
-Each `Filter{T}` is the final β vector after applying the knockoff-filter to [XX̃],
-controlling FDR at level `fdr`. The `debiased` variable indicates whether the 
-effect size in `β` have been debiased using a secondary Lasso routine
-"""
-struct Filter{T} <: AbstractVector{T}
-    β :: Vector{T}
-    fdr :: T
-    τ :: T
-    debiased :: Bool
-end
+# """
+# Each `Filter{T}` is the final β vector after applying the knockoff-filter to [XX̃],
+# controlling FDR at level `fdr`. The `debiased` variable indicates whether the 
+# effect size in `β` have been debiased using a secondary Lasso routine
+# """
+# struct Filter{T}
+#     β :: Vector{T}
+#     fdr :: T
+#     τ :: T
+#     debiased :: Bool
+# end
 
 """
 A `KnockoffFilter` is essentially a `Knockoff` that has gone through a feature 
@@ -93,7 +93,13 @@ property. `τ` is the knockoff threshold, which controls the empirical FDR at
 level `q`
 """
 struct KnockoffFilter{T}
-    W :: Vector{T}
-    βs :: Vector{Filter{T}}
-    debiased :: Bool
+    XX̃ :: Matrix{T}
+    original :: Vector{Int}
+    knockoff :: Vector{Int}
+    W :: Vector{Vector{T}}
+    βs :: Vector{Vector{T}}
+    a0 :: Vector{T}   # intercepts for each model in βs
+    τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    debiased :: Bool # whether βs and a0 have been debiased
 end

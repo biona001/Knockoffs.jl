@@ -1,3 +1,9 @@
+# function extract_beta(β̂_knockoff::AbstractVector{T}, fdrs::::AbstractVector, 
+#     original::AbstractVector{Int}, knockoff::AbstractVector{Int},
+#     method::Symbol=:knockoff, debias::Bool = false) where T <: AbstractFloat
+
+# end
+
 """
     coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
 
@@ -62,13 +68,12 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, original, knockoff)
     τ = threshold(W, fdr, method)
-    detected = findall(W .≥ τ)
-    # construct final β
+    # construct the full β, thresholding indices that are not selected
     β = zeros(T, p)
-    for i in detected
-        β[i] = β̂_knockoff[original[i]]
+    for i in eachindex(W)
+        W[i] ≥ τ && (β[i] = β̂_knockoff[original[i]])
     end
-    return β
+    return β, W, τ
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
@@ -79,12 +84,11 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     # find set of selected predictors
     W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     τ = threshold(W, fdr, method)
-    detected_groups = findall(W .≥ τ)
-    # construct the full β
+    # construct the full β, thresholding indices that are not selected
     β = zeros(T, length(β̂_knockoff))
-    for g in detected_groups
+    for g in findall(W .≥ τ)
         group_idx = findall(x -> x == g, groups)
         β[group_idx] .= @view(β̂_knockoff[group_idx])
     end
-    return β[original]
+    return β[original], W, τ
 end

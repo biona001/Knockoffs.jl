@@ -282,6 +282,12 @@ version = "0.10.25"
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 
+[[deps.GLMNet]]
+deps = ["DataFrames", "Distributed", "Distributions", "Printf", "Random", "SparseArrays", "StatsBase", "glmnet_jll"]
+git-tree-sha1 = "49ef90cd140f8a99a81338f1e08e8ebc18837a63"
+uuid = "8d5ece8b-de18-5317-b113-243142960cc6"
+version = "0.7.0"
+
 [[deps.GenericLinearAlgebra]]
 deps = ["LinearAlgebra", "Printf", "Random"]
 git-tree-sha1 = "ac44f4f51ffee9ff1ea50bd3fbb5677ea568d33d"
@@ -824,6 +830,12 @@ repo-rev = "master"
 repo-url = "https://github.com/biona001/fastPHASE.jl"
 uuid = "c92b9ef3-c483-4111-80ad-75972133fafc"
 version = "0.1.0"
+
+[[deps.glmnet_jll]]
+deps = ["Libdl", "Pkg"]
+git-tree-sha1 = "a88d1783391cea1503e092e8a346751ec5e3b5d1"
+uuid = "78c6b45d-5eaf-5d68-bcfb-a5a2cb06c27f"
+version = "5.0.0+0"
 
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl", "OpenBLAS_jll"]
