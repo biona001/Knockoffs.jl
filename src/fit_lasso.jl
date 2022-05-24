@@ -22,24 +22,23 @@ function fit_lasso(
     knockoff_cv = glmnetcv(XX̃, y, d, kwargs...)
     βestim = GLMNet.coef(knockoff_cv)
     a0 = knockoff_cv.path.a0[argmin(knockoff_cv.meanloss)]
-    # preallocate knockoff-filter variables
-    βs, a0s, Ws, τs = Vector{T}[], T[], Vector{T}[], T[]
+    # compute feature importance statistics and allocate necessary knockoff-filter variables
+    W = isnothing(groups) ? coefficient_diff(βestim, original, knockoff) : 
+        coefficient_diff(βestim, groups, original, knockoff)
+    βs, a0s, τs = Vector{T}[], T[], T[]
     for fdr in fdrs
         # apply knockoff-filter based on target fdr
-        β_filtered, W, τ = isnothing(groups) ? 
-            extract_beta(βestim, fdr, original, knockoff, filter_method) : 
-            extract_beta(βestim, fdr, groups, original, knockoff, filter_method)
+        β_filtered, _, τ = isnothing(groups) ? 
+            extract_beta(βestim, fdr, original, knockoff, filter_method, W) : 
+            extract_beta(βestim, fdr, groups, original, knockoff, filter_method, W)
         # debias the estimates if requested
-        if debias
-            a0 = debias!(β_filtered, X, y)
-        end
+        debias && (a0 = debias!(β_filtered, X, y))
         # save knockoff statistics
         push!(βs, β_filtered)
-        push!(Ws, W)
         push!(τs, τ)
         push!(a0s, a0)
     end
-    return KnockoffFilter(XX̃, original, knockoff, Ws, βs, a0s, τs, fdrs, debias)
+    return KnockoffFilter(XX̃, original, knockoff, W, βs, a0s, τs, fdrs, debias)
 end
 
 function debias!(
@@ -52,12 +51,15 @@ function debias!(
     zero_idx = β̂ .== 0
     penalty_factor = ones(T, length(β̂))
     @view(penalty_factor[zero_idx]) .= typemax(T)
-    # run lasso
+    # run cross validated lasso
     cv = glmnetcv(x, y, penalty_factor=penalty_factor, kwargs...)
-    # extract best performing beta and intercept
-    fill!(β̂, zero(T))
-    β̂ .= cv.path.betas[:, argmin(cv.meanloss)]
-    intercept = cv.path.a0[argmin(cv.meanloss)]
+    # refit lasso on best performing lambda and extract resulting beta/intercept
+    λbest = cv.lambda[argmin(cv.meanloss)]
+    best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
+    β̂ .= best_fit.betas
+    intercept = best_fit.a0[1]
+    # β̂ .= cv.path.betas[:, argmin(cv.meanloss)]
+    # intercept = cv.path.a0[argmin(cv.meanloss)]
     sum(@view(β̂[zero_idx])) ≈ zero(T) || 
         error("Debiasing error: a zero index has non-zero coefficient")
     return intercept

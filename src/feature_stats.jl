@@ -61,12 +61,12 @@ original design matrix that controls the FDR.
 """
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
     original::AbstractVector{Int}, knockoff::AbstractVector{Int},
-    method::Symbol=:knockoff) where T <: AbstractFloat
+    method::Symbol=:knockoff, W::AbstractVector{T} = coefficient_diff(β̂_knockoff, original, knockoff)
+    ) where T <: AbstractFloat
     # first handle errors
     p = length(β̂_knockoff) >> 1
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    # find set of selected predictors
-    W = coefficient_diff(β̂_knockoff, original, knockoff)
+    # find knockoff-filter threshold
     τ = threshold(W, fdr, method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, p)
@@ -77,12 +77,12 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff,
+    W::AbstractVector{T} = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     ) where T <: AbstractFloat
     # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    # find set of selected predictors
-    W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
+    # find knockoff-filter threshold
     τ = threshold(W, fdr, method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, length(β̂_knockoff))

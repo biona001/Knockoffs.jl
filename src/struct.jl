@@ -58,29 +58,6 @@ end
 # mc = MarkovChainTable(5)
 # index_to_pair(mc, 10)
 
-# """
-# A `ImportanceStatistic` holds the knockoff importance score `W`s and the computed 
-# threshold `τ`. In the knockoff-filter methodology, selected predictors are 
-# variable `j` such that `W[j] ≥ τ`, which controls the empirical FDR at level `q`
-# """
-# struct ImportanceStatistic{T}
-#     W :: Vector{T}
-#     τ :: T
-#     q :: T
-# end
-
-# """
-# Each `Filter{T}` is the final β vector after applying the knockoff-filter to [XX̃],
-# controlling FDR at level `fdr`. The `debiased` variable indicates whether the 
-# effect size in `β` have been debiased using a secondary Lasso routine
-# """
-# struct Filter{T}
-#     β :: Vector{T}
-#     fdr :: T
-#     τ :: T
-#     debiased :: Bool
-# end
-
 """
 A `KnockoffFilter` is essentially a `Knockoff` that has gone through a feature 
 selection procedure, such as the Lasso. It stores, among other things, the final
@@ -93,11 +70,11 @@ property. `τ` is the knockoff threshold, which controls the empirical FDR at
 level `q`
 """
 struct KnockoffFilter{T}
-    XX̃ :: Matrix{T}
-    original :: Vector{Int}
-    knockoff :: Vector{Int}
-    W :: Vector{Vector{T}}
-    βs :: Vector{Vector{T}}
+    XX̃ :: Matrix{T} # n × 2p matrix of original X and its knockoff interleaved randomly
+    original :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X
+    knockoff :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X̃
+    W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
+    βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
     τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
     fdr_target :: Vector{T} # target FDR level for each τs and βs
