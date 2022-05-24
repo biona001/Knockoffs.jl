@@ -18,7 +18,7 @@ end
 """
     solve_MVR(Σ::AbstractMatrix)
 
-Solves the minimum variance-based reconstructability problem LMVR(S) = 0.5tr(inv(Gₛ))
+Solves the minimum variance-based reconstructability problem LMVR(S) = tr(inv(Gₛ))
 for fixed-X and model-X knockoffs.
 
 See algorithm 1 of "Powerful knockoffs via minimizing 
@@ -47,8 +47,8 @@ function solve_MVR(
         δj = solve_quadratic(cn, cd, s[j])
         s[j] += δj
         # rank 1 update to cholesky factor
-        ej[j] = δj
-        lowrankupdate!(L, ej)
+        ej[j] = sqrt(abs(δj))
+        δj > 0 ? lowrankdowndate!(L, ej) : lowrankupdate!(L, ej)
     end
     return s
 end
@@ -59,8 +59,8 @@ function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
 end
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
-    a = -cn * cd^2
-    b = 2*(cn*Sjj + cd)
+    a = -cn - cd^2
+    b = 2*(-cn*Sjj + cd)
     c = -cn*Sjj^2 - 1
     x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
