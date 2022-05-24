@@ -16,6 +16,59 @@ function solve_SDP(Σ::AbstractMatrix)
 end
 
 """
+    solve_MVR(Σ::AbstractMatrix)
+
+Solves the minimum variance-based reconstructability problem LMVR(S) = 0.5tr(inv(Gₛ))
+for fixed-X and model-X knockoffs.
+
+See algorithm 1 of "Powerful knockoffs via minimizing 
+reconstructability" by Spector, Asher, and Lucas Janson (2020)
+"""
+function solve_MVR(
+    Σ::AbstractMatrix{T};
+    λmin::T = eigmin(Σ),
+    niter::Int = 100
+    ) where T
+    p = size(Σ, 1)
+    # initialize s vector and compute initial cholesky factor
+    s = fill(λmin, p)
+    L = cholesky(Symmetric(2Σ - Diagonal(s)))
+    # preallocated vectors for efficiency
+    vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
+    for l in 1:niter, j in 1:p
+        fill!(ej, 0)
+        ej[j] = 1
+        # compute cn and cd as detailed in eq 72
+        vn = solve_vn!(vn, L, ej, storage) # solves LL'vn = ej via forward-backward subs
+        cn = -sum(abs2, vn)
+        ldiv!(vd, L, ej) # find vd as the solution to L*vd = ej
+        cd = sum(abs2, vd)
+        # solve quadratic optimality condition in eq 71
+        δj = solve_quadratic(cn, cd, s[j])
+        s[j] += δj
+        # rank 1 update to cholesky factor
+        ej[j] = δj
+        lowrankupdate!(L, ej)
+    end
+    return s
+end
+
+function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
+    ldiv!(storage, L, ej)
+    ldiv!(vn, L', storage)
+end
+
+function solve_quadratic(cn, cd, Sjj, verbose=false)
+    a = -cn * cd^2
+    b = 2*(cn*Sjj + cd)
+    c = -cn*Sjj^2 - 1
+    x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
+    x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
+    verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
+    return -Sjj < x1 < inv(cd) ? x1 : x2
+end
+
+"""
     compare_correlation()
 
 Computes correlation between X[:, i] and X̃[:, i] for each i.
