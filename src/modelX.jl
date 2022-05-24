@@ -8,7 +8,7 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 # Inputs
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
-+ `method`: Either `:equi`, `:sdp`, or `:asdp`
++ `method`: Either `:equi` or `:sdp`
 
 # Reference: 
 "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
@@ -21,6 +21,7 @@ is typically false. For reference, see
 https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
+    # approximate Σ by Ledoit-Wolf optimal shrinkage
     Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
@@ -36,7 +37,7 @@ conditional multivariate normal distributions.
 # Inputs
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
-+ `method`: Either `:equi`, `:sdp`, or `:asdp`
++ `method`: Either `:equi` or `:sdp`
 + `μ`: A `p × 1` vector of (true) mean of `X`
 + `Σ`: A `p × p` matrix of covariance of `X`
 
@@ -56,14 +57,11 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
         s = min(1, 2λmin) .* ones(p)
     elseif method == :sdp
         s = solve_SDP(Σ)
-    elseif method==:asdp
-        # todo
-        error("ASDP not supported yet! sorry!")
     else
-        error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
+        error("modelX_gaussian: method can only be :equi or :sdp")
     end
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
-    return knockoff(X, X̃, s)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end
 
 """
