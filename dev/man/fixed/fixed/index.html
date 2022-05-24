@@ -13,18 +13,17 @@ X = randn(1000, 200) # simulate Gaussian matrix
 
 # make equi-correlated and SDP knockoffs
 @time Aequi = fixed_knockoffs(X, :equi)
-@time Asdp = fixed_knockoffs(X, :sdp);</code></pre><pre><code class="nohighlight hljs">  0.063920 seconds (80 allocations: 20.696 MiB)
-  3.041085 seconds (509.89 k allocations: 417.777 MiB, 3.77% gc time)</code></pre><p>The return type is a <code>Knockoff</code> struct, which contains the following fields</p><pre><code class="language-julia hljs">struct Knockoff{T}
-    X::Matrix{T}    # n × p normalized design matrix
-    X̃::Matrix{T}    # n × p knockoff of X
-    s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::Matrix{T}    # p × p gram matrix X&#39;X
-    Σinv::Matrix{T} # p × p inv(X&#39;X)
+@time Asdp = fixed_knockoffs(X, :sdp);</code></pre><pre><code class="nohighlight hljs">  0.062395 seconds (80 allocations: 20.696 MiB)
+  3.067441 seconds (509.89 k allocations: 417.777 MiB, 3.49% gc time)</code></pre><p>The return type is a <code>Knockoff</code> struct, which contains the following fields</p><pre><code class="language-julia hljs">struct GaussianKnockoff{T} &lt;: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
+    Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
+    method::Symbol # :sdp or :equi
 end</code></pre><p>Thus, to access these fields, one can do</p><pre><code class="language-julia hljs">X = Asdp.X
 X̃ = Asdp.X̃
 s = Asdp.s
-Σ = Asdp.Σ
-Σinv = Asdp.Σinv;</code></pre><p>We can check some knockoff properties. For instance, is it true that <span>$X&#39;\tilde{X} \approx \Sigma - diag(s)$</span>?</p><pre><code class="language-julia hljs"># compare X&#39;X and Σ-diag(s) visually
+Σ = Asdp.Σ;</code></pre><p>We can check some knockoff properties. For instance, is it true that <span>$X&#39;\tilde{X} \approx \Sigma - diag(s)$</span>?</p><pre><code class="language-julia hljs"># compare X&#39;X and Σ-diag(s) visually
 [vec(X&#39;*X̃) vec(Σ - Diagonal(s))]</code></pre><pre><code class="nohighlight hljs">40000×2 Matrix{Float64}:
   0.221993     0.221993
  -0.0184072   -0.0184072
@@ -75,19 +74,23 @@ lasso_cv = glmnetcv(X, y)
 # check power and false discovery rate
 power = length(findall(!iszero, βlasso) ∩ correct_position) / k
 FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
-power, FDR</code></pre><pre><code class="nohighlight hljs">(0.86, 0.5222222222222223)</code></pre><p>It seems LASSO have power 86%, but the false discovery rate is 52%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. </p><h3 id="KnockoffLASSO"><a class="docs-heading-anchor" href="#KnockoffLASSO">Knockoff+LASSO</a><a id="KnockoffLASSO-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffLASSO" title="Permalink"></a></h3><p>Now lets try applying the knockoff methodology. Recall that consists of a few steps </p><ol><li>Run LASSO on <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span></li><li>Compare feature importance score <span>$W_j = \text{score}(x_j) - \text{score}(\tilde{x}_j)$</span> for each <span>$j = 1,...,p$</span>. Here we use <span>$W_j = |\beta_j| - |\tilde{\beta}_{j}|$</span></li><li>Choose target FDR <span>$q \in [0, 1]$</span> and compute </li></ol><p class="math-container">\[\tau = min_{t}\left\{t &gt; 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j ≥ t}\})} \le q\right\}\]</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In step 1, <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span> is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. </p></div></div><pre><code class="language-julia hljs"># step 1
-Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
-knockoff_cv = glmnetcv(Xfull, y)
-λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]
-
-# target FDR is 0.05, 0.1, ..., 0.5
-FDR = collect(0.05:0.05:0.5)
+power, FDR</code></pre><pre><code class="nohighlight hljs">(0.86, 0.5222222222222223)</code></pre><p>It seems LASSO have power 86%, but the false discovery rate is 52%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. </p><h3 id="KnockoffLASSO"><a class="docs-heading-anchor" href="#KnockoffLASSO">Knockoff+LASSO</a><a id="KnockoffLASSO-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffLASSO" title="Permalink"></a></h3><p>Now lets try applying the knockoff methodology. Recall that consists of a few steps </p><ol><li>Run LASSO on <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span></li><li>Compare feature importance score <span>$W_j = \text{score}(x_j) - \text{score}(\tilde{x}_j)$</span> for each <span>$j = 1,...,p$</span>. Here we use <span>$W_j = |\beta_j| - |\tilde{\beta}_{j}|$</span></li><li>Choose target FDR <span>$q \in [0, 1]$</span> and compute </li></ol><p class="math-container">\[\tau = min_{t}\left\{t &gt; 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j ≥ t}\})} \le q\right\}\]</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In step 1, <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span> is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. </p></div></div><pre><code class="language-julia hljs">@time knockoff_filter = fit_lasso(y, Asdp.X, Asdp.X̃);</code></pre><pre><code class="nohighlight hljs">  1.710676 seconds (4.78 k allocations: 138.989 MiB)</code></pre><p>The return type is now a <code>KnockoffFilter</code>, which contains the following information</p><pre><code class="language-julia hljs">struct KnockoffFilter{T}
+    XX̃ :: Matrix{T} # n × 2p matrix of original X and its knockoff interleaved randomly
+    original :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X
+    knockoff :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X̃
+    W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
+    βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
+    a0 :: Vector{T}   # intercepts for each model in βs
+    τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    debiased :: Bool # whether βs and a0 have been debiased
+end</code></pre><p>Given these information, we can e.g. visualize power and FDR trade-off:</p><pre><code class="language-julia hljs">FDR = knockoff_filter.fdr_target
 empirical_power = Float64[]
 empirical_fdr = Float64[]
-for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
-
+for i in eachindex(FDR)
+    # extract beta for current fdr
+    βknockoff = knockoff_filter.βs[i]
+    
     # compute power and false discovery proportion
     power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
     fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
@@ -96,7 +99,7 @@ for fdr in FDR
 end
 
 # visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical power&quot;, legend=false)
-fdr_plot = plot(FDR, empirical_fdr, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical FDR&quot;, legend=false)
+power_plot = plot(FDR, empirical_power, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical power&quot;, legend=false, w=2)
+fdr_plot = plot(FDR, empirical_fdr, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical FDR&quot;, legend=false, w=2)
 Plots.abline!(fdr_plot, 1, 0, line=:dash)
-plot(power_plot, fdr_plot)</code></pre><p><img src="../output_13_0.png" alt="png"/></p><p>Observe that</p><ul><li>LASSO + knockoffs controls the false discovery rate at below the target (dashed line)</li><li>The power of LASSO + knockoffs is lower than standard LASSO</li></ul><p>If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../../">« Home</a><a class="docs-footer-nextpage" href="../../modelX/modelX/">Model-X Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.17 on <span class="colophon-date" title="Tuesday 24 May 2022 03:22">Tuesday 24 May 2022</span>. Using Julia version 1.7.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+plot(power_plot, fdr_plot)</code></pre><p><img src="../output_15_0.png" alt="png"/></p><p>Observe that</p><ul><li>LASSO + knockoffs controls the false discovery rate at below the target (dashed line)</li><li>The power of LASSO + knockoffs is lower than standard LASSO</li></ul><p>If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../../">« Home</a><a class="docs-footer-nextpage" href="../../modelX/modelX/">Model-X Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.17 on <span class="colophon-date" title="Tuesday 24 May 2022 20:21">Tuesday 24 May 2022</span>. Using Julia version 1.7.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
