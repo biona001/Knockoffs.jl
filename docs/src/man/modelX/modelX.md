@@ -3,11 +3,12 @@
 
 This tutorial generates model-X knockoffs, which handles the cases where covariates outnumber sample size ($p > n$). The methodology is described in the following paper
 
-> Candes, Emmanuel, et al. "Panning for gold:‘model‐X’knockoffs for high dimensional controlled variable selection." Journal of the Royal Statistical Society: Series B (Statistical Methodology) 80.3 (2018): 551-577.
+> Candes E, Fan Y, Janson L, Lv J. *Panning for gold:‘model‐X’knockoffs for high dimensional controlled variable selection.* Journal of the Royal Statistical Society: Series B (Statistical Methodology). 2018 Jun;80(3):551-77.
 
 
 ```julia
 # load packages needed for this tutorial
+using Revise
 using Knockoffs
 using Plots
 using Random
@@ -106,19 +107,19 @@ To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](htt
 @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ);
 ```
 
-      0.005379 seconds (64 allocations: 2.917 MiB)
-      2.628181 seconds (507.14 k allocations: 399.694 MiB, 1.31% gc time)
+     29.307847 seconds (78.55 M allocations: 4.653 GiB, 5.12% gc time, 99.96% compilation time)
+     27.398426 seconds (46.74 M allocations: 2.986 GiB, 4.20% gc time, 87.65% compilation time)
 
 
-The return type is a `Knockoff` struct, which contains the following fields
+The return type is a `GaussianKnockoff` struct, which contains the following fields
 
 ```julia
-struct Knockoff{T}
+struct GaussianKnockoff{T}
     X::Matrix{T}    # n × p original design matrix
     X̃::Matrix{T}    # n × p knockoff of X
     s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::Matrix{T}    # p × p gram matrix X'X
-    Σinv::Matrix{T} # p × p inv(X'X)
+    method::Symbol # :sdp or :equi
 end
 ```
 
@@ -173,8 +174,8 @@ The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoff
 @time sdp = modelX_gaussian_knockoffs(X, :sdp);
 ```
 
-      1.912932 seconds (4.73 M allocations: 298.165 MiB, 2.91% gc time, 99.71% compilation time)
-      2.126727 seconds (497.03 k allocations: 401.085 MiB, 3.59% gc time, 0.01% compilation time)
+      1.740616 seconds (4.75 M allocations: 299.641 MiB, 2.51% gc time, 99.25% compilation time)
+      2.039740 seconds (497.05 k allocations: 401.086 MiB, 3.26% gc time, 0.01% compilation time)
 
 
 ## LASSO example
@@ -194,7 +195,7 @@ where $k=50$ positions of $\mathbf{\beta}$ is non-zero with effect size $\beta_j
 
 ```julia
 # set seed for reproducibility
-Random.seed!(1234)
+Random.seed!(2022)
 
 # simulate true beta
 n, p = size(X)
@@ -214,32 +215,32 @@ y = X * βtrue + randn(n)
 
 
     100-element Vector{Float64}:
-      15.547796218529353
-      -4.983700119557064
-      11.117115708776367
-     -10.146073275374484
-      -0.1978289570920985
-     -10.052271317457796
-       4.100652172657842
-      -3.8448295935228614
-       3.9571163745801883
-       5.2310220845615305
-       5.770383283825646
-      -4.308231924415864
-      -2.731178166339821
+      -7.29683323745739
+      -0.4827939678505152
+      -3.166139669157895
+      -3.1987955507535757
+      -1.7423039385036772
+      -6.990810699455535
+      10.960121100350387
+       0.504633936012002
+       2.3957494965724537
+       1.2234714855972766
+       7.365843466230051
+       5.712252157755721
+      11.53507487010848
        ⋮
-      11.484305933480233
-     -11.111082848535201
-      -1.1451317985532712
-       1.6946516008011558
-      -3.6372528602173926
-      -4.246965678457983
-       0.7544754162172402
-       6.190098057205346
-      -4.056314717588407
-       9.87821564753684
-      -5.8632072727216515
-      -0.544476491836925
+      -4.081805640484018
+      -2.0995751341031137
+      -0.7408465573414786
+      -5.879606753417609
+      -9.712640007178502
+     -10.367158124718355
+       5.951922169939996
+       4.7064742789344844
+     -10.607174668930146
+       2.3073770740226824
+      11.22462350764645
+      -4.172212046930051
 
 
 
@@ -256,7 +257,7 @@ lasso_cv = glmnetcv(X, y)
 λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
 
 # use λbest to fit LASSO on full data
-βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
+@time βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
 
 # check power and false discovery rate
 power = length(findall(!iszero, βlasso) ∩ correct_position) / k
@@ -264,10 +265,13 @@ FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!isze
 power, FDR
 ```
 
+      0.103309 seconds (244.18 k allocations: 13.559 MiB, 93.99% compilation time)
 
 
 
-    (0.7, 0.6022727272727273)
+
+
+    (0.66, 0.5875)
 
 
 
@@ -289,19 +293,39 @@ $$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j �
 
 
 ```julia
-# step 1 (use SDP knockoffs)
-Xfull, original, knockoff = merge_knockoffs_with_original(X, Xko_sdp.X̃ )
-knockoff_cv = glmnetcv(Xfull, y)
-λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]
+@time knockoff_filter = fit_lasso(y, sdp.X, sdp.X̃);
+```
 
-# target FDR is 0.05, 0.1, ..., 0.5
-FDR = collect(0.05:0.05:0.5)
+      2.686089 seconds (7.02 M allocations: 421.260 MiB, 1.67% gc time, 93.93% compilation time)
+
+
+The return type is now a `KnockoffFilter`, which contains the following information
+
+```julia
+struct KnockoffFilter{T}
+    XX̃ :: Matrix{T} # n × 2p matrix of original X and its knockoff interleaved randomly
+    original :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X
+    knockoff :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X̃
+    W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
+    βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
+    a0 :: Vector{T}   # intercepts for each model in βs
+    τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    debiased :: Bool # whether βs and a0 have been debiased
+end
+```
+
+Given these information, we can e.g. visualize power and FDR trade-off:
+
+
+```julia
+FDR = knockoff_filter.fdr_target
 empirical_power = Float64[]
 empirical_fdr = Float64[]
-for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
-
+for i in eachindex(FDR)
+    # extract beta for current fdr
+    βknockoff = knockoff_filter.βs[i]
+    
     # compute power and false discovery proportion
     power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
     fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
@@ -310,8 +334,8 @@ for fdr in FDR
 end
 
 # visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false)
-fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false)
+power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false, w=2)
+fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false, w=2)
 Plots.abline!(fdr_plot, 1, 0, line=:dash)
 plot(power_plot, fdr_plot)
 ```
@@ -319,7 +343,7 @@ plot(power_plot, fdr_plot)
 
 
 
-![png](output_16_0.png)
+![png](output_18_0.png)
 
 
 

@@ -45,19 +45,19 @@ X = randn(1000, 200) # simulate Gaussian matrix
 @time Asdp = fixed_knockoffs(X, :sdp);
 ```
 
-      0.063920 seconds (80 allocations: 20.696 MiB)
-      3.041085 seconds (509.89 k allocations: 417.777 MiB, 3.77% gc time)
+      0.062395 seconds (80 allocations: 20.696 MiB)
+      3.067441 seconds (509.89 k allocations: 417.777 MiB, 3.49% gc time)
 
 
 The return type is a `Knockoff` struct, which contains the following fields
 
 ```julia
-struct Knockoff{T}
-    X::Matrix{T}    # n × p normalized design matrix
-    X̃::Matrix{T}    # n × p knockoff of X
-    s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::Matrix{T}    # p × p gram matrix X'X
-    Σinv::Matrix{T} # p × p inv(X'X)
+struct GaussianKnockoff{T} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
+    Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
+    method::Symbol # :sdp or :equi
 end
 ```
 
@@ -68,8 +68,7 @@ Thus, to access these fields, one can do
 X = Asdp.X
 X̃ = Asdp.X̃
 s = Asdp.s
-Σ = Asdp.Σ
-Σinv = Asdp.Σinv;
+Σ = Asdp.Σ;
 ```
 
 We can check some knockoff properties. For instance, is it true that $X'\tilde{X} \approx \Sigma - diag(s)$?
@@ -191,19 +190,39 @@ $$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j �
 
 
 ```julia
-# step 1
-Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
-knockoff_cv = glmnetcv(Xfull, y)
-λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]
+@time knockoff_filter = fit_lasso(y, Asdp.X, Asdp.X̃);
+```
 
-# target FDR is 0.05, 0.1, ..., 0.5
-FDR = collect(0.05:0.05:0.5)
+      1.710676 seconds (4.78 k allocations: 138.989 MiB)
+
+
+The return type is now a `KnockoffFilter`, which contains the following information
+
+```julia
+struct KnockoffFilter{T}
+    XX̃ :: Matrix{T} # n × 2p matrix of original X and its knockoff interleaved randomly
+    original :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X
+    knockoff :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X̃
+    W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
+    βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
+    a0 :: Vector{T}   # intercepts for each model in βs
+    τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    debiased :: Bool # whether βs and a0 have been debiased
+end
+```
+
+Given these information, we can e.g. visualize power and FDR trade-off:
+
+
+```julia
+FDR = knockoff_filter.fdr_target
 empirical_power = Float64[]
 empirical_fdr = Float64[]
-for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
-
+for i in eachindex(FDR)
+    # extract beta for current fdr
+    βknockoff = knockoff_filter.βs[i]
+    
     # compute power and false discovery proportion
     power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
     fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
@@ -212,8 +231,8 @@ for fdr in FDR
 end
 
 # visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false)
-fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false)
+power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false, w=2)
+fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false, w=2)
 Plots.abline!(fdr_plot, 1, 0, line=:dash)
 plot(power_plot, fdr_plot)
 ```
@@ -221,7 +240,7 @@ plot(power_plot, fdr_plot)
 
 
 
-![png](output_13_0.png)
+![png](output_15_0.png)
 
 
 
