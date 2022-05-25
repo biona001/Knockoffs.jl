@@ -8,11 +8,12 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 # Inputs
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
-+ `method`: Either `:equi` or `:sdp`
++ `method`: Either `:equi` (ref 1), `:sdp` (ref 1), `:mvr` (ref 2), or `:maxent` (ref 2)
 
 # Reference: 
-"Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
-Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
+    Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 
 # Note: 
 The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which

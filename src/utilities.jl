@@ -27,7 +27,8 @@ reconstructability" by Spector, Asher, and Lucas Janson (2020)
 function solve_MVR(
     Σ::AbstractMatrix{T};
     λmin::T = eigmin(Σ),
-    niter::Int = 100
+    niter::Int = 100,
+    tol=1e-6 # converges when changes in s are all smaller than tol
     ) where T
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
@@ -35,20 +36,27 @@ function solve_MVR(
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
-    for l in 1:niter, j in 1:p
-        fill!(ej, 0)
-        ej[j] = 1
-        # compute cn and cd as detailed in eq 72
-        solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
-        cn = -sum(abs2, vn)
-        ldiv!(vd, L, ej) # find vd as the solution to L*vd = ej
-        cd = sum(abs2, vd)
-        # solve quadratic optimality condition in eq 71
-        δj = solve_quadratic(cn, cd, s[j])
-        s[j] += δj
-        # rank 1 update to cholesky factor
-        ej[j] = sqrt(abs(δj))
-        δj > 0 ? lowrankdowndate!(L, ej) : lowrankupdate!(L, ej)
+    for l in 1:niter
+        max_delta = typemin(T)
+        for j in 1:p
+            fill!(ej, 0)
+            ej[j] = 1
+            # compute cn and cd as detailed in eq 72
+            solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
+            cn = -sum(abs2, vn)
+            ldiv!(vd, L, ej) # find vd as the solution to L*vd = ej
+            cd = sum(abs2, vd)
+            # solve quadratic optimality condition in eq 71
+            δj = solve_quadratic(cn, cd, s[j])
+            s[j] += δj
+            # rank 1 update to cholesky factor
+            ej[j] = sqrt(abs(δj))
+            δj > 0 ? lowrankdowndate!(L, ej) : lowrankupdate!(L, ej)
+            # update convergence tol
+            abs(δj) > max_delta && (max_delta = abs(δj))
+        end
+        # declare convergence if changes in s are all smaller than tol
+        max_delta < tol && break
     end
     return s
 end
@@ -75,11 +83,14 @@ Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs.
 
 See algorithm 2 of "Powerful knockoffs via minimizing 
 reconstructability" by Spector, Asher, and Lucas Janson (2020)
+
+todo: the s vector from this routine is very strange looking, but I'm not sure what's the issue 
 """
 function solve_max_entropy(
     Σ::AbstractMatrix{T};
     λmin::T = eigmin(Σ),
-    niter::Int = 100
+    niter::Int = 100,
+    tol=1e-6 # converges when changes in s are all smaller than tol
     ) where T
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
@@ -87,22 +98,29 @@ function solve_max_entropy(
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     vm, u = zeros(p), zeros(p)
-    for l in 1:niter, j in 1:p
-        for i in 1:p
-            u[i] = 2Σ[i, j]
+    for l in 1:niter
+        max_delta = zero(T)
+        for j in 1:p
+            for i in 1:p
+                u[i] = 2Σ[i, j]
+            end
+            u[j] = 0
+            # compute vm as the solution to L*vm = u, and use it to compute cm
+            ldiv!(vm, L, u)
+            cm = sum(abs2, vm)
+            # solve optimality condition in eq 75
+            sj_new = (2Σ[j, j] - cm) / 2
+            δ = s[j] - sj_new
+            s[j] = sj_new
+            # rank 1 update to cholesky factor
+            fill!(u, 0)
+            u[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+            # update convergence tol
+            abs(δ) > max_delta && (max_delta = abs(δ))
         end
-        u[j] = 0
-        # compute vm as the solution to L*vm = u, and use it to compute cm
-        ldiv!(vm, L, u)
-        cm = sum(abs2, vm)
-        # solve optimality condition in eq 75
-        sj_new = (2Σ[j, j] - cm) / 2
-        δ = s[j] - sj_new
-        s[j] = sj_new
-        # rank 1 update to cholesky factor
-        fill!(u, 0)
-        u[j] = sqrt(abs(δ))
-        δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+        # declare convergence if changes in s are all smaller than tol
+        max_delta < tol && break 
     end
     return s
 end
