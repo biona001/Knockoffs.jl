@@ -39,7 +39,7 @@ function solve_MVR(
         fill!(ej, 0)
         ej[j] = 1
         # compute cn and cd as detailed in eq 72
-        vn = solve_vn!(vn, L, ej, storage) # solves LL'vn = ej via forward-backward subs
+        solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
         cn = -sum(abs2, vn)
         ldiv!(vd, L, ej) # find vd as the solution to L*vd = ej
         cd = sum(abs2, vd)
@@ -66,6 +66,45 @@ function solve_quadratic(cn, cd, Sjj, verbose=false)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
     verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
     return -Sjj < x1 < inv(cd) ? x1 : x2
+end
+
+"""
+    solve_max_entropy(Σ::AbstractMatrix)
+
+Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs.
+
+See algorithm 2 of "Powerful knockoffs via minimizing 
+reconstructability" by Spector, Asher, and Lucas Janson (2020)
+"""
+function solve_max_entropy(
+    Σ::AbstractMatrix{T};
+    λmin::T = eigmin(Σ),
+    niter::Int = 100
+    ) where T
+    p = size(Σ, 1)
+    # initialize s vector and compute initial cholesky factor
+    s = fill(λmin, p)
+    L = cholesky(Symmetric(2Σ - Diagonal(s)))
+    # preallocated vectors for efficiency
+    vm, u = zeros(p), zeros(p)
+    for l in 1:niter, j in 1:p
+        for i in 1:p
+            u[i] = 2Σ[i, j]
+        end
+        u[j] = 0
+        # compute vm as the solution to L*vm = u, and use it to compute cm
+        ldiv!(vm, L, u)
+        cm = sum(abs2, vm)
+        # solve optimality condition in eq 75
+        sj_new = (2Σ[j, j] - cm) / 2
+        δ = s[j] - sj_new
+        s[j] = sj_new
+        # rank 1 update to cholesky factor
+        fill!(u, 0)
+        u[j] = sqrt(abs(δ))
+        δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+    end
+    return s
 end
 
 """

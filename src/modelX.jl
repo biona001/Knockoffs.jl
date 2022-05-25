@@ -37,13 +37,14 @@ conditional multivariate normal distributions.
 # Inputs
 + `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
 to mean 0 variance 1. 
-+ `method`: Either `:equi` or `:sdp`
++ `method`: Either `:equi` (ref 1), `:sdp` (ref 1), `:mvr` (ref 2), or `:maxent` (ref 2)
 + `μ`: A `p × 1` vector of (true) mean of `X`
 + `Σ`: A `p × p` matrix of covariance of `X`
 
 # Reference: 
-"Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
-Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
+    Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 
 # todo: convert covariance matrix to correlation matrix
 """
@@ -57,8 +58,12 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
         s = min(1, 2λmin) .* ones(p)
     elseif method == :sdp
         s = solve_SDP(Σ)
+    elseif method == :mvr
+        s = solve_MVR(Σ)
+    elseif method == :maxent
+        s = solve_max_entropy(Σ)
     else
-        error("modelX_gaussian: method can only be :equi or :sdp")
+        error("modelX_gaussian: method can only be :equi, :sdp, :mvr, or :maxent")
     end
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
     return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)

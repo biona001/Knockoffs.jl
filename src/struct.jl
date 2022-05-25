@@ -8,7 +8,7 @@ struct GaussianKnockoff{T} <: Knockoff
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
-    method::Symbol # :sdp or :equi
+    method::Symbol # :mvr, :maxent, :sdp, or :equi
 end
 
 function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, method::Symbol) where T

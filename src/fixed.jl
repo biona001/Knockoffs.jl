@@ -6,8 +6,9 @@ Creates fixed knockoffs.
 # Inputs
 + `X`: A `n × p` numeric matrix, each row is a sample, and each column is normalized to mean 0 variance 1 with unit norm. 
 + `method`: :equi for equi-distant knockoffs (eq 2.3 in ref 1), :sdp for SDP 
-    knockoffs (eq 2.4 in ref 1), or :mvr for minimum variance-based
-    reconstructability knockoffs (alg 1 in ref 2)
+    knockoffs (eq 2.4 in ref 1), :mvr for minimum variance-based
+    reconstructability knockoffs (alg 1 in ref 2), or :maxent for maximum entropy
+    knockoffs (alg 2 in ref 2)
 
 # Output
 + `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, in addition to other variables (e.g. `s`)
@@ -25,23 +26,21 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
     U, σ, V = svd(X, full=true)
     Σ = V * Diagonal(σ)^2 * V'
     Σinv = V * inv(Diagonal(σ)^2) * V'
+    λmin = typemax(T)
+    for σi in σ
+        σi^2 < λmin && (λmin = σi^2)
+    end
     # compute s vector using the specified method
     if method == :equi
-        λmin = typemax(T)
-        for σi in σ
-            σi^2 < λmin && (λmin = σi^2)
-        end
         s = min(1, 2λmin) .* ones(size(Σ, 1))
     elseif method == :sdp
         s = solve_SDP(Σ)
     elseif method == :mvr
-        λmin = typemax(T)
-        for σi in σ
-            σi^2 < λmin && (λmin = σi^2)
-        end
         s = solve_MVR(Σ, λmin=λmin)
+    elseif method == :maxent
+        s = solve_max_entropy(Σ, λmin=λmin)
     else
-        error("fixed_knockoffs: method can only be :equi or :sdp")
+        error("fixed_knockoffs: method can only be :equi, :sdp, :mvr, or :maxent")
     end
     # compute Ũ such that Ũ'X = 0
     Ũ = @view(U[:, p+1:2p])
