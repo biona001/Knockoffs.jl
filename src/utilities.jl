@@ -126,6 +126,56 @@ function solve_max_entropy(
 end
 
 """
+    simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
+
+Generates `p`-dimensional correlation matrix for
+AR(1) Gaussian process, where successive correlations
+are drawn from Beta(`a`,`b`) independently. If `rho` is
+specified, then the process is stationary with correlation
+`rho`.
+
+# Source
+https://github.com/amspector100/knockpy/blob/20eddb3eb60e0e82b206ec989cb936e3c3ee7939/knockpy/dgp.py#L61
+"""
+function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
+    # Generate rhos, take log to make multiplication easier
+    d = Beta(a, b)
+    if isnothing(rho)
+        rhos = log.(clamp!(rand(d, p), 0, max_corr))
+    else
+        abs(rho) > 1 || error("rho $rho must be a correlation between -1 and 1")
+        rhos = log.([rho for _ in 1:p])
+    end
+    rhos[1] = 0
+
+    # Log correlations between x_1 and x_i for each i
+    cumrhos = cumsum(rhos)
+
+    # Use cumsum tricks to calculate all correlations
+    log_corrs = -1 * abs.(cumrhos .- cumrhos')
+    corr_matrix = exp.(log_corrs)
+
+    # Ensure PSD-ness
+    corr_matrix = cov2cor(shift_until_PSD(corr_matrix, tol))
+
+    return corr_matrix
+end
+
+"""
+    shift_until_PSD(Σ::AbstractMatrix)
+
+Keeps adding λI to Σ until the minimum eigenvalue > tol
+"""
+function shift_until_PSD(Σ::AbstractMatrix, tol=1e-4)
+    while eigmin(Σ) ≤ tol
+        Σ += tol*I
+    end
+    return Σ
+end
+
+cov2cor(C) = StatsBase.cov2cor(C, sqrt.(diag(C)))
+
+"""
     compare_correlation()
 
 Computes correlation between X[:, i] and X̃[:, i] for each i.
