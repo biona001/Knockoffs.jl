@@ -41,7 +41,7 @@ export knockoff_filter, fit_lasso,
     # diagnostics
     compare_correlation, compare_pairwise_correlation,
     # utilities
-    merge_knockoffs_with_original
+    merge_knockoffs_with_original, simulate_AR1
 
 include("struct.jl")
 include("fixed.jl")

@@ -62,8 +62,8 @@ function solve_MVR(
 end
 
 function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
-    ldiv!(storage, L, ej)
-    ldiv!(vn, L', storage)
+    ldiv!(storage, L.L, ej)
+    ldiv!(vn, L.U, storage)
 end
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
@@ -81,10 +81,16 @@ end
 
 Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs.
 
-See algorithm 2 of "Powerful knockoffs via minimizing 
-reconstructability" by Spector, Asher, and Lucas Janson (2020)
-
-todo: the s vector from this routine is very strange looking, but I'm not sure what's the issue 
+# Note
+The commented out code of `solve_max_entropy`` faithfully implements alg 2 of
+"Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and 
+Lucas Janson (2020). While I may have a bug there, the resulting `s` vector from
+the algorithm have strange behaviors. On the other hand, it seems knockpy code at
+https://github.com/amspector100/knockpy/blob/c4980ebd506c110473babd85836dbd8ae1d548b7/knockpy/mrc.py#L1045
+is somehow mixing in parts of algorithm 2.2 from
+"FANOK: KNOCKOFFS IN LINEAR TIME" by Askari et al. (2020), and this confuses me.
+I have replicated the implementation in knockpy here but in the future, it may
+be worth it to check which version is correct.
 """
 function solve_max_entropy(
     Σ::AbstractMatrix{T};
@@ -97,25 +103,28 @@ function solve_max_entropy(
     s = fill(λmin, p)
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
-    vm, u = zeros(p), zeros(p)
+    x, ỹ = zeros(p), zeros(p)
     for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
             for i in 1:p
-                u[i] = 2Σ[i, j]
+                ỹ[i] = 2Σ[i, j]
             end
-            u[j] = 0
-            # compute vm as the solution to L*vm = u, and use it to compute cm
-            ldiv!(vm, L, u)
-            cm = sum(abs2, vm)
-            # solve optimality condition in eq 75
-            sj_new = (2Σ[j, j] - cm) / 2
+            ỹ[j] = 0
+            # compute c as the solution to L*vm = u, and use it to compute cm
+            ldiv!(x, L, ỹ)
+            x_l2sum = sum(abs2, x)
+            # compute zeta and c as in alg 2.2 of askari et al
+            ζ = 2Σ[j, j] - s[j]
+            c = (ζ * x_l2sum) / (ζ + x_l2sum)
+            # solve optimality condition in eq 75 of spector et al 2020
+            sj_new = (2Σ[j, j] - c) / 2 # sj_new = min(1, max(2Σ[j, j] - c - λ, 0)) for SDP
             δ = s[j] - sj_new
             s[j] = sj_new
             # rank 1 update to cholesky factor
-            fill!(u, 0)
-            u[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+            fill!(x, 0)
+            x[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
@@ -124,6 +133,45 @@ function solve_max_entropy(
     end
     return s
 end
+
+# function solve_max_entropy(
+#     Σ::AbstractMatrix{T};
+#     λmin::T = eigmin(Σ),
+#     niter::Int = 100,
+#     tol=1e-6 # converges when changes in s are all smaller than tol
+#     ) where T
+#     p = size(Σ, 1)
+#     # initialize s vector and compute initial cholesky factor
+#     s = fill(λmin, p)
+#     L = cholesky(Symmetric(2Σ - Diagonal(s)))
+#     # preallocated vectors for efficiency
+#     vm, u = zeros(p), zeros(p)
+#     for l in 1:niter
+#         max_delta = zero(T)
+#         for j in 1:p
+#             for i in 1:p
+#                 u[i] = 2Σ[i, j]
+#             end
+#             u[j] = 0
+#             # compute vm as the solution to L*vm = u, and use it to compute cm
+#             ldiv!(vm, L, u)
+#             cm = sum(abs2, vm)
+#             # solve optimality condition in eq 75
+#             sj_new = (2Σ[j, j] - cm) / 2
+#             δ = s[j] - sj_new
+#             s[j] = sj_new
+#             # rank 1 update to cholesky factor
+#             fill!(u, 0)
+#             u[j] = sqrt(abs(δ))
+#             δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+#             # update convergence tol
+#             abs(δ) > max_delta && (max_delta = abs(δ))
+#         end
+#         # declare convergence if changes in s are all smaller than tol
+#         max_delta < tol && break 
+#     end
+#     return s
+# end
 
 """
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
