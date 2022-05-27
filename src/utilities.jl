@@ -28,7 +28,8 @@ function solve_MVR(
     Σ::AbstractMatrix{T};
     λmin::T = eigmin(Σ),
     niter::Int = 100,
-    tol=1e-6 # converges when changes in s are all smaller than tol
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
@@ -37,7 +38,7 @@ function solve_MVR(
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     for l in 1:niter
-        max_delta = typemin(T)
+        max_delta = zero(T)
         for j in 1:p
             fill!(ej, 0)
             ej[j] = 1
@@ -55,16 +56,33 @@ function solve_MVR(
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
         end
+        verbose && println("Iter $l: δ = $max_delta")
         # declare convergence if changes in s are all smaller than tol
         max_delta < tol && break
     end
     return s
 end
 
+# todo: solve_vn2! is 4x faster and much more memory efficient but doesn't work on Julia 1.6
 function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
     ldiv!(storage, L.L, ej)
     ldiv!(vn, L.U, storage)
 end
+# function solve_vn2!(vn, L, ej, storage=zeros(length(vn)))
+#     ldiv!(storage, L, ej)
+#     ldiv!(vn, L', storage)
+# end
+# adjoint(C::Union{Cholesky,CholeskyPivoted}) = C
+# using LinearAlgebra, BenchmarkTools
+# p = 100
+# X = rand(p, p)
+# Sigma = X'*X
+# vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
+# s = fill(eigmin(Sigma), p)
+# L = cholesky(Symmetric(2Sigma - Diagonal(s)))
+# ej[rand(1:p)] = 1
+# @benchmark solve_vn!($vn, $L, $ej, $storage) # 44.892 μs Memory estimate: 78.20 KiB, allocs estimate: 4
+# @benchmark solve_vn2!($vn, $L, $ej, $storage) # 11.824 μs Memory estimate: 192 bytes, allocs estimate: 4
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
     a = -cn - cd^2
@@ -96,7 +114,8 @@ function solve_max_entropy(
     Σ::AbstractMatrix{T};
     λmin::T = eigmin(Σ),
     niter::Int = 100,
-    tol=1e-6 # converges when changes in s are all smaller than tol
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
@@ -129,6 +148,7 @@ function solve_max_entropy(
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
         # declare convergence if changes in s are all smaller than tol
+        verbose && println("Iter $l: δ = $max_delta")
         max_delta < tol && break 
     end
     return s
@@ -210,11 +230,11 @@ function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
 end
 
 """
-    shift_until_PSD(Σ::AbstractMatrix)
+    shift_until_PSD!(Σ::AbstractMatrix)
 
 Keeps adding λI to Σ until the minimum eigenvalue > tol
 """
-function shift_until_PSD(Σ::AbstractMatrix, tol=1e-4)
+function shift_until_PSD!(Σ::AbstractMatrix, tol=1e-4)
     while eigmin(Σ) ≤ tol
         Σ += tol*I
     end
