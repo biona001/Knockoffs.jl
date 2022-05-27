@@ -63,26 +63,16 @@ function solve_MVR(
     return s
 end
 
-# todo: solve_vn2! is 4x faster and much more memory efficient but doesn't work on Julia 1.6
 function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
-    ldiv!(storage, L.L, ej)
-    ldiv!(vn, L.U, storage)
+    if applicable(adjoint, L)
+        # 4x faster and much more memory efficient but doesn't work on Julia 1.6
+        ldiv!(storage, L, ej)
+        ldiv!(vn, L', storage)
+    else
+        ldiv!(storage, L.L, ej)
+        ldiv!(vn, L.U, storage)
+    end
 end
-# function solve_vn2!(vn, L, ej, storage=zeros(length(vn)))
-#     ldiv!(storage, L, ej)
-#     ldiv!(vn, L', storage)
-# end
-# adjoint(C::Union{Cholesky,CholeskyPivoted}) = C
-# using LinearAlgebra, BenchmarkTools
-# p = 100
-# X = rand(p, p)
-# Sigma = X'*X
-# vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
-# s = fill(eigmin(Sigma), p)
-# L = cholesky(Symmetric(2Sigma - Diagonal(s)))
-# ej[rand(1:p)] = 1
-# @benchmark solve_vn!($vn, $L, $ej, $storage) # 44.892 μs Memory estimate: 78.20 KiB, allocs estimate: 4
-# @benchmark solve_vn2!($vn, $L, $ej, $storage) # 11.824 μs Memory estimate: 192 bytes, allocs estimate: 4
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
     a = -cn - cd^2
