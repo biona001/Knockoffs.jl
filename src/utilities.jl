@@ -184,6 +184,59 @@ end
 # end
 
 """
+    solve_sdp_fast(Σ::AbstractMatrix)
+
+Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent. 
+
+# Reference
+Algorithm 2.2 from "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
+"""
+function solve_sdp_fast(
+    Σ::AbstractMatrix{T};
+    λ::T = 0.5, # barrier coefficient
+    μ::T = 0.8, # decay parameter
+    niter::Int = 100,
+    tol=1e-6, # converges when lambda < tol?
+    verbose::Bool = false
+    ) where T
+    0 ≤ μ ≤ 1 || error("Decay parameter μ must be in [0, 1] but was $μ")
+    0 < λ || error("Barrier coefficient λ must be > 0 but was $λ")
+    # initialize s vector and compute initial cholesky factor
+    p = size(Σ, 1)
+    s = zeros(T, p)
+    L = cholesky(Symmetric(2Σ))
+    # preallocated vectors for efficiency
+    x, ỹ = zeros(p), zeros(p)
+    for l in 1:niter
+        for j in 1:p
+            for i in 1:p
+                ỹ[i] = 2Σ[i, j]
+            end
+            ỹ[j] = 0
+            # compute c as the solution to L*vm = u, and use it to compute cm
+            ldiv!(x, L, ỹ)
+            x_l2sum = sum(abs2, x)
+            # compute zeta and c as in alg 2.2 of askari et al
+            ζ = 2Σ[j, j] - s[j]
+            c = (ζ * x_l2sum) / (ζ + x_l2sum)
+            # 1st order optimality condition
+            sj_new = min(1, max(2Σ[j, j] - c - λ, 0))
+            δ = s[j] - sj_new
+            s[j] = sj_new
+            # rank 1 update to cholesky factor
+            fill!(x, 0)
+            x[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+        end
+        # check convergence 
+        λ *= μ
+        verbose && println("Iter $l: λ = $λ")
+        λ < tol && break
+    end
+    return s
+end
+
+"""
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
 
 Generates `p`-dimensional correlation matrix for

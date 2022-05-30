@@ -4,11 +4,13 @@
 Creates fixed knockoffs. 
 
 # Inputs
-+ `X`: A `n × p` numeric matrix, each row is a sample, and each column is normalized to mean 0 variance 1 with unit norm. 
-+ `method`: :equi for equi-distant knockoffs (eq 2.3 in ref 1), :sdp for SDP 
-    knockoffs (eq 2.4 in ref 1), :mvr for minimum variance-based
-    reconstructability knockoffs (alg 1 in ref 2), or :maxent for maximum entropy
-    knockoffs (alg 2 in ref 2)
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `method`: Can be one of the following
+    * `:mvr`: Minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:maxent`: Maximum entropy knockoffs (alg 2 in ref 2)
+    * `:equi`: Equi-distant knockoffs (eq 2.3 in ref 1), 
+    * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
+    * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 
 # Output
 + `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, in addition to other variables (e.g. `s`)
@@ -16,6 +18,7 @@ Creates fixed knockoffs.
 # Reference
 1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
+3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
 function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
     n, p = size(X)
@@ -39,8 +42,10 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
         s = solve_MVR(Σ, λmin=λmin)
     elseif method == :maxent
         s = solve_max_entropy(Σ, λmin=λmin)
+    elseif method == :sdp_fast
+        s = solve_sdp_fast(Σ)
     else
-        error("fixed_knockoffs: method can only be :equi, :sdp, :mvr, or :maxent")
+        error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
     # compute Ũ such that Ũ'X = 0
     Ũ = @view(U[:, p+1:2p])

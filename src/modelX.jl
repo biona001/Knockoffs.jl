@@ -6,14 +6,19 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 `Σ` is estimated from data. 
 
 # Inputs
-+ `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
-to mean 0 variance 1. 
-+ `method`: Either `:equi` (ref 1), `:sdp` (ref 1), `:mvr` (ref 2), or `:maxent` (ref 2)
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `method`: Can be one of the following
+    * `:mvr`: Minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:maxent`: Maximum entropy knockoffs (alg 2 in ref 2)
+    * `:equi`: Equi-distant knockoffs (eq 2.3 in ref 1), 
+    * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
+    * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
     Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
+3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 
 # Note: 
 The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which
@@ -36,16 +41,21 @@ Creates model-free multivariate normal knockoffs by sequentially sampling from
 conditional multivariate normal distributions. 
 
 # Inputs
-+ `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
-to mean 0 variance 1. 
-+ `method`: Either `:equi` (ref 1), `:sdp` (ref 1), `:mvr` (ref 2), or `:maxent` (ref 2)
-+ `μ`: A `p × 1` vector of (true) mean of `X`
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `method`: Can be one of the following
+    * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
+    * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
+    * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
++ `μ`: A `p × 1` vector of column mean of `X`
 + `Σ`: A `p × p` matrix of covariance of `X`
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
     Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
+3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 
 # todo: convert covariance matrix to correlation matrix
 """
@@ -63,8 +73,10 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
         s = solve_MVR(Σ)
     elseif method == :maxent
         s = solve_max_entropy(Σ)
+    elseif method == :sdp_fast
+        s = solve_sdp_fast(Σ)
     else
-        error("modelX_gaussian: method can only be :equi, :sdp, :mvr, or :maxent")
+        error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
     return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
