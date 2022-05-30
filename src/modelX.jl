@@ -13,6 +13,8 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
     * `:equi`: Equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
++ `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
+    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
@@ -26,12 +28,12 @@ is recommended for p>n case. We do not simply use `cov(X)` since `isposdef(cov(X
 is typically false. For reference, see 
 https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
 """
-function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
+function modelX_gaussian_knockoffs(X::Matrix, method::Symbol; kwargs...)
     # approximate Σ by Ledoit-Wolf optimal shrinkage
     Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_knockoffs(X, method, μ, Σapprox)
+    return modelX_gaussian_knockoffs(X, method, μ, Σapprox; kwargs...)
 end
 
 """
@@ -50,6 +52,8 @@ conditional multivariate normal distributions.
     * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 + `μ`: A `p × 1` vector of column mean of `X`
 + `Σ`: A `p × p` matrix of covariance of `X`
++ `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
+    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
@@ -59,22 +63,21 @@ conditional multivariate normal distributions.
 
 # todo: convert covariance matrix to correlation matrix
 """
-function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix)
+function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix; kwargs...)
     n, p = size(X)
     # center/scale Xj to mean 0 var 1
     X = zscore(X, mean(X, dims=1), std(X, dims=1)) 
     # compute s vector using the specified method
     if method == :equi
-        λmin = minimum(svdvals(X))^2
-        s = min(1, 2λmin) .* ones(p)
+        s = min(1, 2*eigmin(X)) .* ones(p)
     elseif method == :sdp
         s = solve_SDP(Σ)
     elseif method == :mvr
-        s = solve_MVR(Σ)
+        s = solve_MVR(Σ; kwargs...)
     elseif method == :maxent
-        s = solve_max_entropy(Σ)
+        s = solve_max_entropy(Σ; kwargs...)
     elseif method == :sdp_fast
-        s = solve_sdp_fast(Σ)
+        s = solve_sdp_fast(Σ; kwargs...)
     else
         error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end

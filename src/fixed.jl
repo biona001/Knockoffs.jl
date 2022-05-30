@@ -11,6 +11,8 @@ Creates fixed knockoffs.
     * `:equi`: Equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
++ `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
+    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Output
 + `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, in addition to other variables (e.g. `s`)
@@ -20,7 +22,7 @@ Creates fixed knockoffs.
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
+function fixed_knockoffs(X::Matrix{T}, method::Symbol; kwargs...) where T <: AbstractFloat
     n, p = size(X)
     n ≥ 2p || error("fixed_knockoffs: currently only works for n ≥ 2p case! sorry!")
     # use column-normalized X 
@@ -39,11 +41,11 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol) where T <: AbstractFloat
     elseif method == :sdp
         s = solve_SDP(Σ)
     elseif method == :mvr
-        s = solve_MVR(Σ, λmin=λmin)
+        s = solve_MVR(Σ, λmin=λmin; kwargs...)
     elseif method == :maxent
-        s = solve_max_entropy(Σ, λmin=λmin)
+        s = solve_max_entropy(Σ, λmin=λmin; kwargs...)
     elseif method == :sdp_fast
-        s = solve_sdp_fast(Σ)
+        s = solve_sdp_fast(Σ; kwargs...)
     else
         error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
