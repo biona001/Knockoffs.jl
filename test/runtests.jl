@@ -272,3 +272,95 @@ end
         @test isapprox(r1, r2, atol=1e-2)
     end
 end
+
+@testset "SDP vs MVR vs ME knockoffs" begin
+    # This is example 1 from https://amspector100.github.io/knockpy/mrcknock.html 
+    # SDP knockoffs are provably powerless in this situation, while MVR and ME knockoffs have high power
+
+    seed = 2022
+
+    # simulate X
+    Random.seed!(seed)
+    n = 600
+    p = 300
+    ρ = 0.5
+    Σ = (1-ρ) * I + ρ * ones(p, p)
+    μ = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    # simulate y
+    Random.seed!(seed)
+    k = Int(0.2p)
+    βtrue = zeros(p)
+    βtrue[1:k] .= rand(-1:2:1, k) .* rand(Uniform(0.5, 1), k)
+    shuffle!(βtrue)
+    correct_position = findall(!iszero, βtrue)
+    y = X * βtrue + randn(n)
+
+    # solve s vector
+    @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
+    @time Xko_maxent = modelX_gaussian_knockoffs(X, :maxent, μ, Σ)
+    @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
+
+    # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
+    @time sdp_filter = fit_lasso(y, Xko_sdp.X, Xko_sdp.X̃, debias=false)
+    @time mvr_filter = fit_lasso(y, Xko_mvr.X, Xko_mvr.X̃, debias=false)
+    @time me_filter = fit_lasso(y, Xko_maxent.X, Xko_maxent.X̃, debias=false)
+
+    sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
+    for i in eachindex(sdp_filter.fdr_target)
+        # extract beta for current fdr
+        βsdp = sdp_filter.βs[i]
+        βmvr = mvr_filter.βs[i]
+        βme = me_filter.βs[i]
+        
+        # compute power and false discovery proportion
+        push!(sdp_power, length(findall(!iszero, βsdp) ∩ correct_position) / k)
+        push!(mvr_power, length(findall(!iszero, βmvr) ∩ correct_position) / k)
+        push!(me_power, length(findall(!iszero, βme) ∩ correct_position) / k)
+        # fdp = length(setdiff(findall(!iszero, βsdp), correct_position)) / max(count(!iszero, βsdp), 1)
+        # push!(empirical_fdr, fdp)
+    end
+
+    @test all(mvr_power .> sdp_power)
+    @test all(me_power .> sdp_power)
+end
+
+@testset "SDP vs SDP fast" begin
+    seed = 2022
+
+    # simulate X
+    Random.seed!(seed)
+    n = 400
+    p = 300
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    mu = zeros(p)
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, mu, Sigma);
+    @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma)
+
+    @test all(isapprox.(Xko_sdp.s, Xko_sdp_fast.s, atol=0.1))
+end
+
+@testset "keyword arguments" begin
+    seed = 2022
+
+    # simulate X
+    Random.seed!(seed)
+    n = 400
+    p = 300
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    mu = zeros(p)
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    # try supplying arguments to modelX_gaussian_knockoffs and fixed_knockoffs
+    @time Xko_sdp_fast1 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.7, μ = 0.7)
+    @time Xko_sdp_fast2 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.9, μ = 0.9)
+    @test all(isapprox.(Xko_sdp_fast1.s, Xko_sdp_fast2.s, atol=0.05))
+end
