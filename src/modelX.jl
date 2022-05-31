@@ -60,27 +60,27 @@ conditional multivariate normal distributions.
     Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
-
-# todo: convert covariance matrix to correlation matrix
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix; kwargs...)
     n, p = size(X)
-    # center/scale Xj to mean 0 var 1
-    X = zscore(X, mean(X, dims=1), std(X, dims=1)) 
+    # create correlation matrix
+    σs = sqrt.(diag(Σ))
+    Σcor = StatsBase.cov2cor!(Matrix(Σ), σs)
     # compute s vector using the specified method
     if method == :equi
-        s = min(1, 2*eigmin(X)) .* ones(p)
+        s = min(1, 2*eigmin(Σcor)) .* ones(p)
     elseif method == :sdp
-        s = solve_SDP(Σ)
+        s = solve_SDP(Σcor)
     elseif method == :mvr
-        s = solve_MVR(Σ; kwargs...)
+        s = solve_MVR(Σcor; kwargs...)
     elseif method == :maxent
-        s = solve_max_entropy(Σ; kwargs...)
+        s = solve_max_entropy(Σcor; kwargs...)
     elseif method == :sdp_fast
-        s = solve_sdp_fast(Σ; kwargs...)
+        s = solve_sdp_fast(Σcor; kwargs...)
     else
         error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
+    s .*= σs # rescale s back to covariance matrix
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
     return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end

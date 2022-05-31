@@ -19,7 +19,7 @@ function fit_lasso(
     ) where T <: AbstractFloat
     # fit lasso (note: need to interleaves X with X̃)
     XX̃, original, knockoff = merge_knockoffs_with_original(X, X̃)
-    knockoff_cv = glmnetcv(XX̃, y, d, kwargs...)
+    knockoff_cv = glmnetcv(XX̃, y, d; kwargs...)
     βestim = GLMNet.coef(knockoff_cv)
     a0 = knockoff_cv.path.a0[argmin(knockoff_cv.meanloss)]
     # compute feature importance statistics and allocate necessary knockoff-filter variables
@@ -52,7 +52,7 @@ function debias!(
     penalty_factor = ones(T, length(β̂))
     @view(penalty_factor[zero_idx]) .= typemax(T)
     # run cross validated lasso
-    cv = glmnetcv(x, y, penalty_factor=penalty_factor, kwargs...)
+    cv = glmnetcv(x, y, penalty_factor=penalty_factor; kwargs...)
     # refit lasso on best performing lambda and extract resulting beta/intercept
     λbest = cv.lambda[argmin(cv.meanloss)]
     best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)

@@ -1,7 +1,7 @@
 """
     fixed_knockoffs(X::Matrix{T}; method=:sdp)
 
-Creates fixed knockoffs. 
+Creates fixed-X knockoffs. 
 
 # Inputs
 + `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
@@ -15,7 +15,8 @@ Creates fixed knockoffs.
     [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Output
-+ `Knockoff`: A struct containing the original `X` and its knockoff `X̃`, in addition to other variables (e.g. `s`)
++ `Knockoff`: A struct containing the original (column-normalized) `X` and its knockoff `X̃`, 
+    in addition to other variables (e.g. `s`)
 
 # Reference
 1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
