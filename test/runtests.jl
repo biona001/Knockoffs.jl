@@ -356,3 +356,39 @@ end
     @time Xko_sdp_fast2 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.9, μ = 0.9)
     @test all(isapprox.(Xko_sdp_fast1.s, Xko_sdp_fast2.s, atol=0.05))
 end
+
+@testset "debiasing" begin
+    seed = 2022
+
+    # simulate x
+    n = 1000
+    p = 500
+    Random.seed!(seed)
+    ρ = 0.4
+    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    μ = zeros(p) # true mean parameters
+    L = cholesky(Σ).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    # X = zscore(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
+
+    # simulate y
+    Random.seed!(seed)
+    k = 50
+    ϵ = Normal(0, 1)
+    d = Normal(0, 1)
+    β = zeros(p)
+    β[1:k] .= rand(d, k)
+    shuffle!(β)
+    y = X * β + rand(ϵ, n) |> Vector{eltype(X)}
+
+    # generate knockoffs
+    @time Xko = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
+
+    # run lasso, followed up by debiasing
+    @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=false)
+    @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=true)
+
+    for i in eachindex(nodebias.fdr_target)
+        @test issubset(findall(!iszero, yesdebias.βs[i]), findall(!iszero, nodebias.βs[i]))
+    end
+end

@@ -56,10 +56,8 @@ function debias!(
     # refit lasso on best performing lambda and extract resulting beta/intercept
     λbest = cv.lambda[argmin(cv.meanloss)]
     best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
-    β̂ .= best_fit.betas
+    copyto!(β̂, best_fit.betas)
     intercept = best_fit.a0[1]
-    # β̂ .= cv.path.betas[:, argmin(cv.meanloss)]
-    # intercept = cv.path.a0[argmin(cv.meanloss)]
     sum(@view(β̂[zero_idx])) ≈ zero(T) || 
         error("Debiasing error: a zero index has non-zero coefficient")
     return intercept
