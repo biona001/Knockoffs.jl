@@ -208,6 +208,7 @@ function solve_sdp_fast(
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     for l in 1:niter
+        verbose && println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
         for j in 1:p
             for i in 1:p
                 ỹ[i] = 2Σ[i, j]
@@ -220,7 +221,7 @@ function solve_sdp_fast(
             ζ = 2Σ[j, j] - s[j]
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # 1st order optimality condition
-            sj_new = min(1, max(2Σ[j, j] - c - λ, 0))
+            sj_new = clamp(2Σ[j, j] - c - λ, 0, 1)
             δ = s[j] - sj_new
             s[j] = sj_new
             # rank 1 update to cholesky factor
@@ -230,11 +231,15 @@ function solve_sdp_fast(
         end
         # check convergence 
         λ *= μ
-        verbose && println("Iter $l: λ = $λ")
         λ < tol && break
     end
     return s
 end
+# using Random, Knockoffs, BenchmarkTools, ToeplitzMatrices, ProfileView
+# ρ = 0.4
+# p = 100
+# Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+# @profview Knockoffs.solve_sdp_fast(Σ);
 
 """
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)

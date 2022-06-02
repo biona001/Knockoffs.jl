@@ -126,7 +126,6 @@ end
     X̃ = knockoff.X̃
     s = knockoff.s
     Σ = knockoff.Σ
-    # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -140,8 +139,12 @@ end
     # histogram(vec(X_ko))
     # histogram(vec(X̃))
 
-    # test properties (todo: add more properties here)
+    # test properties
     @test all(s .≥ 0)
+    @test all(1 .≥ s) # this is true since Σ has diagonal entries 1
+    @test isposdef(Σ)
+    λmin = eigmin(2Σ - Diagonal(s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
 @testset "model X 2nd order Knockoffs" begin
@@ -163,7 +166,6 @@ end
     X̃ = knockoff.X̃
     s = knockoff.s
     Σ = knockoff.Σ
-    # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -177,8 +179,11 @@ end
     # histogram(vec(X_ko))
     # histogram(vec(X̃))
 
-    # test properties (todo: add more properties here)
+    # test properties
     @test all(s .≥ 0)
+    @test isposdef(Σ)
+    λmin = eigmin(2Σ - Diagonal(s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
 @testset "threshold functions" begin
@@ -357,7 +362,7 @@ end
     @test all(isapprox.(Xko_sdp_fast1.s, Xko_sdp_fast2.s, atol=0.05))
 end
 
-@testset "debiasing" begin
+@testset "debiasing preserves sparsity pattern" begin
     seed = 2022
 
     # simulate x
@@ -388,6 +393,7 @@ end
     @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=false)
     @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=true)
 
+    # check that debiased result have same support as not debiasing
     for i in eachindex(nodebias.fdr_target)
         @test issubset(findall(!iszero, yesdebias.βs[i]), findall(!iszero, nodebias.βs[i]))
     end

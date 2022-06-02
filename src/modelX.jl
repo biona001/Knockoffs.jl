@@ -80,7 +80,7 @@ function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector
     else
         error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
-    s .*= σs # rescale s back to covariance matrix
+    s .*= σs.^2 # rescale s back to the result for a covariance matrix
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
     return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end
