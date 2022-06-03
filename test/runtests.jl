@@ -340,7 +340,7 @@ end
     @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, mu, Sigma);
     @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma)
 
-    @test all(isapprox.(Xko_sdp.s, Xko_sdp_fast.s, atol=0.1))
+    @test all(isapprox.(Xko_sdp.s, Xko_sdp_fast.s, atol=0.05))
 end
 
 @testset "keyword arguments" begin

@@ -46,7 +46,8 @@ function solve_MVR(
             # compute cn and cd as detailed in eq 72
             solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
             cn = -sum(abs2, vn)
-            ldiv!(vd, L.L, ej) # find vd as the solution to L*vd = ej
+            # find vd as the solution to L*vd = ej
+            ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j])
@@ -65,16 +66,8 @@ function solve_MVR(
 end
 
 function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
-    # if applicable(adjoint, L)
-    #     # 4x faster and much more memory efficient but doesn't work on Julia 1.6
-    #     ldiv!(storage, L, ej)
-    #     ldiv!(vn, L', storage)
-    # else
-    #     ldiv!(storage, L.L, ej)
-    #     ldiv!(vn, L.U, storage)
-    # end
-    ldiv!(storage, L.L, ej)
-    ldiv!(vn, L.U, storage)
+    ldiv!(storage, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(storage, L.L, ej)
+    ldiv!(vn, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(vn, L.U, storage)
 end
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
@@ -127,7 +120,7 @@ function solve_max_entropy(
             end
             ỹ[j] = 0
             # compute x as the solution to L*x = ỹ
-            ldiv!(x, L.L, ỹ)
+            ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
             ζ = 2Σ[j, j] - s[j]
@@ -170,7 +163,7 @@ end
 #             end
 #             u[j] = 0
 #             # compute vm as the solution to L*vm = u, and use it to compute cm
-#             ldiv!(vm, L.L, u)
+#             ldiv!(vm, UpperTriangular(L.factors)', u) # non-allocating version of ldiv!(vm, L.L, u)
 #             cm = sum(abs2, vm)
 #             # solve optimality condition in eq 75
 #             sj_new = (2Σ[j, j] - cm) / 2
@@ -221,7 +214,7 @@ function solve_sdp_fast(
             end
             ỹ[j] = 0
             # compute c as the solution to L*x = ỹ
-            ldiv!(x, L.L, ỹ)
+            ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
             ζ = 2Σ[j, j] - s[j]
@@ -241,11 +234,6 @@ function solve_sdp_fast(
     end
     return s
 end
-# using Random, Knockoffs, BenchmarkTools, ToeplitzMatrices, ProfileView
-# ρ = 0.4
-# p = 100
-# Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
-# @profview Knockoffs.solve_sdp_fast(Σ);
 
 """
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
