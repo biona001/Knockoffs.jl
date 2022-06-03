@@ -23,6 +23,7 @@ for fixed-X and model-X knockoffs.
 
 See algorithm 1 of "Powerful knockoffs via minimizing 
 reconstructability" by Spector, Asher, and Lucas Janson (2020)
+https://arxiv.org/pdf/2011.14625.pdf
 """
 function solve_MVR(
     Σ::AbstractMatrix{T};
@@ -45,7 +46,7 @@ function solve_MVR(
             # compute cn and cd as detailed in eq 72
             solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
             cn = -sum(abs2, vn)
-            ldiv!(vd, L, ej) # find vd as the solution to L*vd = ej
+            ldiv!(vd, L.L, ej) # find vd as the solution to L*vd = ej
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j])
@@ -64,14 +65,16 @@ function solve_MVR(
 end
 
 function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
-    if applicable(adjoint, L)
-        # 4x faster and much more memory efficient but doesn't work on Julia 1.6
-        ldiv!(storage, L, ej)
-        ldiv!(vn, L', storage)
-    else
-        ldiv!(storage, L.L, ej)
-        ldiv!(vn, L.U, storage)
-    end
+    # if applicable(adjoint, L)
+    #     # 4x faster and much more memory efficient but doesn't work on Julia 1.6
+    #     ldiv!(storage, L, ej)
+    #     ldiv!(vn, L', storage)
+    # else
+    #     ldiv!(storage, L.L, ej)
+    #     ldiv!(vn, L.U, storage)
+    # end
+    ldiv!(storage, L.L, ej)
+    ldiv!(vn, L.U, storage)
 end
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
@@ -88,6 +91,9 @@ end
     solve_max_entropy(Σ::AbstractMatrix)
 
 Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs.
+
+# Reference
+Algorithm 2.2 from Powerful Knockoffs via Minimizing Reconstructability: https://arxiv.org/pdf/2011.14625.pdf
 
 # Note
 The commented out code of `solve_max_entropy`` faithfully implements alg 2 of
@@ -120,14 +126,14 @@ function solve_max_entropy(
                 ỹ[i] = 2Σ[i, j]
             end
             ỹ[j] = 0
-            # compute c as the solution to L*vm = u, and use it to compute cm
-            ldiv!(x, L, ỹ)
+            # compute x as the solution to L*x = ỹ
+            ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
             ζ = 2Σ[j, j] - s[j]
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # solve optimality condition in eq 75 of spector et al 2020
-            sj_new = (2Σ[j, j] - c) / 2 # sj_new = min(1, max(2Σ[j, j] - c - λ, 0)) for SDP
+            sj_new = (2Σ[j, j] - c) / 2
             δ = s[j] - sj_new
             s[j] = sj_new
             # rank 1 update to cholesky factor
@@ -164,7 +170,7 @@ end
 #             end
 #             u[j] = 0
 #             # compute vm as the solution to L*vm = u, and use it to compute cm
-#             ldiv!(vm, L, u)
+#             ldiv!(vm, L.L, u)
 #             cm = sum(abs2, vm)
 #             # solve optimality condition in eq 75
 #             sj_new = (2Σ[j, j] - cm) / 2
@@ -214,8 +220,8 @@ function solve_sdp_fast(
                 ỹ[i] = 2Σ[i, j]
             end
             ỹ[j] = 0
-            # compute c as the solution to L*vm = u, and use it to compute cm
-            ldiv!(x, L, ỹ)
+            # compute c as the solution to L*x = ỹ
+            ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
             ζ = 2Σ[j, j] - s[j]
