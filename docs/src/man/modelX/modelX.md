@@ -1,4 +1,3 @@
-
 # Model-X knockoffs
 
 This tutorial generates model-X knockoffs, which handles the cases where covariates outnumber sample size ($p > n$). The methodology is described in the following paper
@@ -34,8 +33,8 @@ where
 \Sigma = 
 \begin{pmatrix}
     1 & \rho & \rho^2 & ... & \rho^p\\
-    \rho & \rho^2 & & ... & \rho^{p-1}\\
-    \vdots & & & \rho^2 & \vdots \\
+    \rho & 1 & & ... & \rho^{p-1}\\
+    \vdots & & & 1 & \vdots \\
     \rho^p & \cdots & & & 1
 \end{pmatrix}
 \end{aligned}
@@ -99,16 +98,14 @@ X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
 
 
 
-To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument can be ither `:equi`, `:sdp`, or `:asdp`. The SDP construction will yield more powerful knockoffs, but is more computationally expensive. 
+To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument specifies the method to generate knockoffs. We generally recommend `:mvr` or `:max_ent` because they are more efficient to compute and tend to be more powerful than the SDP construction. The 3rd and 4th argument supplies the true mean and covariance of features.
 
 
 ```julia
-@time Xko_equi = modelX_gaussian_knockoffs(X, :equi, μ, Σ)
-@time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ);
+@time mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ);
 ```
 
-     29.307847 seconds (78.55 M allocations: 4.653 GiB, 5.12% gc time, 99.96% compilation time)
-     27.398426 seconds (46.74 M allocations: 2.986 GiB, 4.20% gc time, 87.65% compilation time)
+      0.165289 seconds (67 allocations: 4.155 MiB)
 
 
 The return type is a `GaussianKnockoff` struct, which contains the following fields
@@ -127,39 +124,39 @@ Thus, to access these fields, one can do e.g.
 
 
 ```julia
-s = Xko_sdp.s
+s = mvr.s
 ```
 
 
 
 
     200-element Vector{Float64}:
-     0.9999999975421989
-     0.9714285562750639
-     0.8114286000388236
-     0.8754285608972914
-     0.8498285802412486
-     0.8600685709048966
-     0.8559725752335535
-     0.8576109732729927
-     0.856955614169666
-     0.8572177577255956
-     0.8571129003675105
-     0.8571548432807583
-     0.8571380661077549
+     0.7055837242693089
+     0.5505996431366521
+     0.5579633308254486
+     0.557899045980435
+     0.5578830358791945
+     0.5578842779693275
+     0.5578842391928599
+     0.5578842383675712
+     0.5578842385288638
+     0.5578842385203893
+     0.5578842385205114
+     0.5578842385205273
+     0.5578842385205252
      ⋮
-     0.8571548433098494
-     0.8571129003234808
-     0.8572177577571737
-     0.8569556141700471
-     0.8576109732517373
-     0.8559725752488924
-     0.860068570920087
-     0.8498285802136867
-     0.8754285609148045
-     0.8114286000369729
-     0.9714285562700409
-     0.9999999975421956
+     0.557884236911004
+     0.5578842349014485
+     0.5578842398885223
+     0.5578842817239912
+     0.5578843495456599
+     0.557884207142242
+     0.5578843562350674
+     0.5578830621813481
+     0.5578990896763761
+     0.5579633702735614
+     0.5505996786150729
+     0.7055838005026087
 
 
 
@@ -170,12 +167,10 @@ The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoff
 
 ```julia
 # make equi-correlated and SDP knockoffs
-@time equi = modelX_gaussian_knockoffs(X, :equi)
-@time sdp = modelX_gaussian_knockoffs(X, :sdp);
+@time mvr_approx = modelX_gaussian_knockoffs(X, :mvr);
 ```
 
-      1.740616 seconds (4.75 M allocations: 299.641 MiB, 2.51% gc time, 99.25% compilation time)
-      2.039740 seconds (497.05 k allocations: 401.086 MiB, 3.26% gc time, 0.01% compilation time)
+      0.120288 seconds (110 allocations: 5.845 MiB)
 
 
 ## LASSO example
@@ -227,7 +222,7 @@ y = X * βtrue + randn(n)
        1.2234714855972766
        7.365843466230051
        5.712252157755721
-      11.53507487010848
+      11.535074870108481
        ⋮
       -4.081805640484018
       -2.0995751341031137
@@ -240,7 +235,7 @@ y = X * βtrue + randn(n)
      -10.607174668930146
        2.3073770740226824
       11.22462350764645
-      -4.172212046930051
+      -4.1722120469300545
 
 
 
@@ -257,25 +252,18 @@ lasso_cv = glmnetcv(X, y)
 λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
 
 # use λbest to fit LASSO on full data
-@time βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
+βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
 
 # check power and false discovery rate
 power = length(findall(!iszero, βlasso) ∩ correct_position) / k
 FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
-power, FDR
+println("Lasso power = $power, FDR = $FDR")
 ```
 
-      0.103309 seconds (244.18 k allocations: 13.559 MiB, 93.99% compilation time)
+    Lasso power = 0.66, FDR = 0.5875
 
 
-
-
-
-    (0.66, 0.5875)
-
-
-
-It seems LASSO have power 96% (it missed only 2/50 predictors), but the false discovery rate is 54%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. 
+Although LASSO have pretty high power, more than half of all discoveries are false positives. 
 
 ### Knockoff+LASSO
 
@@ -291,12 +279,14 @@ $$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j �
     
     In step 1, $[\mathbf{X} \mathbf{\tilde{X}}]$ is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. 
 
+Run Lasso on $[\mathbf{X} \mathbf{\tilde{X}}]$ and apply knockoff filter:
+
 
 ```julia
-@time knockoff_filter = fit_lasso(y, sdp.X, sdp.X̃);
+@time knockoff_filter = fit_lasso(y, X, sdp.X̃);
 ```
 
-      2.686089 seconds (7.02 M allocations: 421.260 MiB, 1.67% gc time, 93.93% compilation time)
+      4.293816 seconds (6.77 M allocations: 408.806 MiB, 1.83% gc time, 92.28% compilation time)
 
 
 The return type is now a `KnockoffFilter`, which contains the following information
@@ -343,8 +333,15 @@ plot(power_plot, fdr_plot)
 
 
 
-![png](output_18_0.png)
+    
+![png](output_19_0.png)
+    
 
 
 
-**Conclusion:** Compared to LASSO, knockoff's empirical FDR is controlled below the target FDR (dashed line). Controlled FDR is compensated by a small price in power. If this experiment is repeated multiple times, we expected the empirical FDR to hug the target (dashed) line more closely. 
+**Conclusion:** 
+
++ LASSO + knockoffs controls the false discovery rate at below the target (dashed line). Thus, one trade power for FDR control. 
++ The power of standard LASSO is better, but it comes with high empirical FDR that one cannot control via cross validation. 
+
+If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.
