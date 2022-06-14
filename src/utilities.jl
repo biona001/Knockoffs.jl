@@ -1,9 +1,55 @@
 """
+    solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
+
+Solves the vector `s` for generating knockoffs. `Σ` can be a general 
+covariance matrix. 
+
+# Inputs
++ `Σ`: A covariance matrix (in general, it is better to supply `Symmetric(Σ)` explicitly)
++ `method`: Can be one of the following
+    * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
+    * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
+    * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
+    + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
+    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+
+# Reference
+1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
+2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
+3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
+"""
+function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
+    # create correlation matrix
+    σs = sqrt.(diag(Σ))
+    Σcor = StatsBase.cov2cor!(Matrix(Σ), σs)
+    # solve optimization problem
+    if method == :equi
+        s = solve_equi(Σcor)
+    elseif method == :sdp
+        s = solve_SDP(Σcor)
+    elseif method == :mvr
+        s = solve_MVR(Σcor; kwargs...)
+    elseif method == :maxent
+        s = solve_max_entropy(Σcor; kwargs...)
+    elseif method == :sdp_fast
+        s = solve_sdp_fast(Σcor; kwargs...)
+    else
+        error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
+    end
+    # rescale s back to the result for a covariance matrix   
+    s .*= σs.^2
+    return s
+end
+
+"""
     solve_SDP(Σ::AbstractMatrix)
 
-Solves the SDP problem for fixed-X and model-X knockoffs. The optimization problem
-is stated in equation 3.13 of "Panning for Gold: Model-X Knocko s for High-dimensional
-Controlled Variable Selection" by Candes et al. 
+Solves the SDP problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
+
+The optimization problem is stated in equation 3.13 of
+https://arxiv.org/pdf/1610.02351.pdf
 """
 function solve_SDP(Σ::AbstractMatrix)
     svar = Variable(size(Σ, 1), Convex.Positive())
@@ -16,10 +62,24 @@ function solve_SDP(Σ::AbstractMatrix)
 end
 
 """
+    solve_equi(Σ::AbstractMatrix)
+
+Solves the equicorrelated problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
+"""
+function solve_equi(
+    Σ::AbstractMatrix{T},
+    λmin::Union{Nothing, T} = nothing
+    ) where T
+    isnothing(λmin) && (λmin = eigmin(Σ))
+    s = min(1, 2*λmin) .* ones(size(Σ, 1))
+    return s
+end
+
+"""
     solve_MVR(Σ::AbstractMatrix)
 
-Solves the minimum variance-based reconstructability problem LMVR(S) = tr(inv(Gₛ))
-for fixed-X and model-X knockoffs.
+Solves the minimum variance-based reconstructability problem for fixed-X
+and model-X knockoffs given correlation matrix Σ.
 
 See algorithm 1 of "Powerful knockoffs via minimizing 
 reconstructability" by Spector, Asher, and Lucas Janson (2020)
@@ -83,7 +143,8 @@ end
 """
     solve_max_entropy(Σ::AbstractMatrix)
 
-Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs.
+Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs
+given correlation matrix Σ.
 
 # Reference
 Algorithm 2.2 from Powerful Knockoffs via Minimizing Reconstructability: https://arxiv.org/pdf/2011.14625.pdf
@@ -185,7 +246,8 @@ end
 """
     solve_sdp_fast(Σ::AbstractMatrix)
 
-Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent. 
+Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent, 
+given correlation matrix Σ. 
 
 # Reference
 Algorithm 2.2 from "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
@@ -234,6 +296,11 @@ function solve_sdp_fast(
     end
     return s
 end
+# using Random, Knockoffs, BenchmarkTools, ToeplitzMatrices, ProfileView
+# ρ = 0.4
+# p = 100
+# Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+# @profview Knockoffs.solve_sdp_fast(Σ);
 
 """
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)

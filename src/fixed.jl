@@ -32,24 +32,12 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol; kwargs...) where T <: Abs
     U, σ, V = svd(X, full=true)
     Σ = V * Diagonal(σ)^2 * V'
     Σinv = V * inv(Diagonal(σ)^2) * V'
-    λmin = typemax(T)
-    for σi in σ
-        σi^2 < λmin && (λmin = σi^2)
-    end
+    # λmin = typemax(T)
+    # for σi in σ
+    #     σi^2 < λmin && (λmin = σi^2)
+    # end
     # compute s vector using the specified method
-    if method == :equi
-        s = min(1, 2λmin) .* ones(size(Σ, 1))
-    elseif method == :sdp
-        s = solve_SDP(Σ)
-    elseif method == :mvr
-        s = solve_MVR(Σ, λmin=λmin; kwargs...)
-    elseif method == :maxent
-        s = solve_max_entropy(Σ, λmin=λmin; kwargs...)
-    elseif method == :sdp_fast
-        s = solve_sdp_fast(Σ; kwargs...)
-    else
-        error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
-    end
+    s = solve_s(Σ, method; kwargs...)
     # compute Ũ such that Ũ'X = 0
     Ũ = @view(U[:, p+1:2p])
     # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
