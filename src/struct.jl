@@ -3,11 +3,11 @@ A `Knockoff` holds the original design matrix `X`, along with its knockoff `X̃`
 """
 abstract type Knockoff end
 
-struct GaussianKnockoff{T} <: Knockoff
+struct GaussianKnockoff{T <: AbstractFloat, M <: AbstractMatrix} <: Knockoff
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
+    Σ::M         # p × p covariance matrix. The type could be any AbstractMatrix e.g. Symmetric, BlockDiagonal...etc
     method::Symbol # method for solving s
 end
 

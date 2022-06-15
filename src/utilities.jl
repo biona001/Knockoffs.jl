@@ -23,7 +23,8 @@ covariance matrix.
 function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
-    Σcor = StatsBase.cov2cor!(Matrix(Σ), σs)
+    iscor = all(x -> x ≈ 1, σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
     # solve optimization problem
     if method == :equi
         s = solve_equi(Σcor)
@@ -39,7 +40,7 @@ function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
         error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
     # rescale s back to the result for a covariance matrix   
-    s .*= σs.^2
+    iscor || (s .*= σs.^2)
     return s
 end
 

@@ -17,14 +17,15 @@ using PositiveFactorizations
 using CovarianceEstimation
 using StatsBase
 using GLMNet
-
-import Base: eltype, getindex, size
+using BlockDiagonals
+using Roots
 
 export knockoff_filter, fit_lasso, 
     fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
     coefficient_diff, threshold, extract_beta,
     partition, rapid, snpknock2, decorrelate_knockoffs,
     process_fastphase_output, fastphase, 
+    approx_modelX_gaussian_knockoffs,
     # constructors
     knockoff,
     # functions for hmm
@@ -54,6 +55,7 @@ include("hmm.jl")
 include("utilities.jl")
 include("knockoffscreen.jl")
 include("fit_lasso.jl")
+include("approx.jl")
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    
