@@ -14,6 +14,7 @@ Pages = ["api.md"]
 ```@docs
   fixed_knockoffs
   modelX_gaussian_knockoffs
+  approx_modelX_gaussian_knockoffs
   hmm_knockoff
   full_knockoffscreen
   solve_s

@@ -18,7 +18,7 @@ using CovarianceEstimation
 using StatsBase
 using GLMNet
 using BlockDiagonals
-using Roots
+using Roots: fzero
 
 export knockoff_filter, fit_lasso, 
     fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
