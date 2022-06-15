@@ -17,7 +17,7 @@ Each block contains `windowsize` consecutive features.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
-# Multithreading
+# Multithreading (todo)
 To enable multiple threads, simply start Julia with >1 threads and this routine
 will run with all available threads. 
 """
@@ -32,7 +32,7 @@ function approx_modelX_gaussian_knockoffs(
     block_covariances = Vector{Matrix{T}}(undef, windows)
     block_s = Vector{Vector{T}}(undef, windows)
     # solve for s in each block of Σ
-    Threads.@threads for window in 1:windows
+    for window in 1:windows
         cur_range = window == windows ? 
             ((windows - 1)*windowsize + 1:p) : 
             ((window - 1)*windowsize + 1:window * windowsize)
