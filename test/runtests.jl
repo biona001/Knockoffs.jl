@@ -398,3 +398,25 @@ end
         @test issubset(findall(!iszero, yesdebias.βs[i]), findall(!iszero, nodebias.βs[i]))
     end
 end
+
+@testset "approximate constructions" begin
+    # simulate data
+    Random.seed!(2022)
+    n = 100
+    p = 500
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    true_mu = zeros(p)
+
+    # ASDP
+    @time asdp = approx_modelX_gaussian_knockoffs(X, :sdp, windowsize = 99)
+    λmin = eigmin(2*asdp.Σ - Diagonal(asdp.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+
+    # AMVR
+    @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, windowsize = 100);
+    λmin = eigmin(2*amvr.Σ - Diagonal(amvr.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+end

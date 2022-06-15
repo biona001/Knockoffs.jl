@@ -2,7 +2,7 @@
     approx_modelX_gaussian_knockoffs(X, method; windowsize = 500, kwargs...)
 
 Generates Gaussian knockoffs by approximating the covariance as a block diagonal matrix. 
-The 
+Each block contains `windowsize` consecutive features. 
 
 # Inputs
 + `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
@@ -16,6 +16,10 @@ The
     adjacent variables. The last block could contain less than `windowsize` variables. 
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+
+# Multithreading
+To enable multiple threads, simply start Julia with >1 threads and this routine
+will run with all available threads. 
 """
 function approx_modelX_gaussian_knockoffs(
     X::AbstractMatrix{T}, 
@@ -25,25 +29,22 @@ function approx_modelX_gaussian_knockoffs(
     ) where T
     p = size(X, 2)
     windows = ceil(Int, p / windowsize)
-    block_covariances = Matrix{T}[]
-    block_s = Vector{T}[]
+    block_covariances = Vector{Matrix{T}}(undef, windows)
+    block_s = Vector{Vector{T}}(undef, windows)
     # solve for s in each block of Σ
-    for window in 1:windows-1
-        Xcur = @view(X[:, (window - 1)*windowsize + 1:window * windowsize])
+    Threads.@threads for window in 1:windows
+        cur_range = window == windows ? 
+            ((windows - 1)*windowsize + 1:p) : 
+            ((window - 1)*windowsize + 1:window * windowsize)
+        Xcur = @view(X[:, cur_range])
         # approximate a block of Σ by Ledoit-Wolf optimal shrinkage
         Σcur = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), Xcur)
         # solve for s vector
         scur = solve_s(Σcur, method; kwargs...)
         # save result
-        push!(block_covariances, Σcur)
-        push!(block_s, scur)
+        block_covariances[window] = Σcur
+        block_s[window] = scur
     end
-    # solve s in last window
-    Xcur = @view(X[:, (windows - 1)*windowsize + 1:p])
-    Σlast = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), Xcur)
-    slast = solve_s(Σlast, method; kwargs...)
-    push!(block_covariances, Σlast)
-    push!(block_s, slast)
     # assemble block Σ, s, and mean components
     Σ = BlockDiagonal(block_covariances)
     μ = vec(mean(X, dims=1))
