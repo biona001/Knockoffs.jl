@@ -25,6 +25,7 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 fastPHASE = "c92b9ef3-c483-4111-80ad-75972133fafc"
 
 [compat]
+BlockDiagonals = "0.1"
 CSV = "0.10"
 Convex = "0.14, 0.15"
 DataFrames = "1"
