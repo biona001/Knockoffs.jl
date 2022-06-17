@@ -3,20 +3,28 @@ A `Knockoff` holds the original design matrix `X`, along with its knockoff `X̃`
 """
 abstract type Knockoff end
 
-struct GaussianKnockoff{T <: AbstractFloat, M <: AbstractMatrix} <: Knockoff
-    X::Matrix{T} # n × p design matrix
+struct GaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S <: Symmetric} <: Knockoff
+    X::M # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::M         # p × p covariance matrix. The type could be any AbstractMatrix e.g. Symmetric, BlockDiagonal...etc
+    Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
 end
 
 function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, method::Symbol) where T
-    GaussianKnockoff(X, X̃, T[], Matrix{T}(undef, 0, 0), method)
+    GaussianKnockoff(X, X̃, T[], Symmetric(Matrix{T}(undef, 0, 0)), method)
 end
 
 function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, s::AbstractVector{T}, method::Symbol) where T
-    GaussianKnockoff(X, X̃, s, Matrix{T}(undef, 0, 0), method)
+    GaussianKnockoff(X, X̃, s, Symmetric(Matrix{T}(undef, 0, 0)), method)
+end
+
+struct ApproxGaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S<:Symmetric} <: Knockoff
+    X::M # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
+    Σ::BlockDiagonal{T, S} # p × p block-diagonal covariance matrix. 
+    method::Symbol # method for solving s
 end
 
 # 1 state of a markov chain

@@ -25,14 +25,15 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 
-# Note: 
-The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which
-is recommended for p>n case. We do not simply use `cov(X)` since `isposdef(cov(X))`
-is typically false. For reference, see 
-https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
+# Covariance Approximation: 
+The covariance is approximated by a linear shrinkage estimator using 
+Ledoit-Wolf with `DiagonalUnequalVariance` target, 
+which seems to perform well for `p>n` cases. We do not simply use `cov(X)`
+since `isposdef(cov(X))` is typically false. For comparison of various estimators, see:
+https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol; kwargs...)
-    # approximate Σ by Ledoit-Wolf optimal shrinkage
+    # approximate Σ
     Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))

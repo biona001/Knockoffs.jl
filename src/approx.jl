@@ -5,7 +5,7 @@ Generates Gaussian knockoffs by approximating the covariance as a block diagonal
 Each block contains `windowsize` consecutive features. 
 
 # Inputs
-+ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `X`: A `n × p` numeric matrix or `SnpArray`. Each row is a sample, and each column is covariate.
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
@@ -20,24 +20,33 @@ Each block contains `windowsize` consecutive features.
 # Multithreading (todo)
 To enable multiple threads, simply start Julia with >1 threads and this routine
 will run with all available threads. 
+
+# Covariance Approximation: 
+The covariance is approximated by a LinearShrinkageEstimator` using 
+Ledoit-Wolf shrinkage with `DiagonalUnequalVariance` target, 
+which seems to perform well for `p>n` cases. We do not simply use `cov(X)` since `isposdef(cov(X))`
+is typically false. For comparison of different estimators, see:
+https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
 function approx_modelX_gaussian_knockoffs(
-    X::AbstractMatrix{T}, 
+    X::AbstractMatrix, 
     method::Symbol; 
     windowsize::Int = 500,
     kwargs...
-    ) where T
+    )
     p = size(X, 2)
     windows = ceil(Int, p / windowsize)
-    block_covariances = Vector{Matrix{T}}(undef, windows)
-    block_s = Vector{Vector{T}}(undef, windows)
+    block_covariances = Vector{Matrix{Float64}}(undef, windows)
+    block_s = Vector{Vector{Float64}}(undef, windows)
+    storage = typeof(X) <: AbstractSnpArray ? zeros(size(X, 1), windowsize) : nothing
     # solve for s in each block of Σ
     for window in 1:windows
+        # grab current window of X
         cur_range = window == windows ? 
             ((windows - 1)*windowsize + 1:p) : 
             ((window - 1)*windowsize + 1:window * windowsize)
-        Xcur = @view(X[:, cur_range])
-        # approximate a block of Σ by Ledoit-Wolf optimal shrinkage
+        Xcur = get_X_subset(X, cur_range, storage)
+        # approximate a block of Σ
         Σcur = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), Xcur)
         # solve for s vector
         scur = solve_s(Σcur, method; kwargs...)
@@ -54,7 +63,7 @@ function approx_modelX_gaussian_knockoffs(
     s .*= γ
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
-    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
+    return ApproxGaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end
 
 # for bisection search
@@ -62,4 +71,13 @@ function f(γ, s, Σ)
     D = Diagonal(γ .* s)
     λ = eigmin(2Σ - D) # can this be more efficient?
     return λ > 0 ? 1 - γ : -Inf
+end
+
+function get_X_subset(X::AbstractMatrix, cur_range, storage)
+    return @view(X[:, cur_range])
+end
+
+function get_X_subset(X::AbstractSnpArray, cur_range, storage)
+    copyto!(storage, @view(X[:, cur_range]), impute=true, center=true, scale=true)
+    return storage
 end
