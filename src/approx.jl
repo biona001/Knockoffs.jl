@@ -14,6 +14,8 @@ Each block contains `windowsize` consecutive features.
     * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 + `windowsize`: Number of covariates to be included in a block. Each block consists of
     adjacent variables. The last block could contain less than `windowsize` variables. 
++ `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`.
+    See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
@@ -22,7 +24,7 @@ To enable multiple threads, simply start Julia with >1 threads and this routine
 will run with all available threads. 
 
 # Covariance Approximation: 
-The covariance is approximated by a LinearShrinkageEstimator` using 
+The covariance is approximated by a `LinearShrinkageEstimator` using 
 Ledoit-Wolf shrinkage with `DiagonalUnequalVariance` target, 
 which seems to perform well for `p>n` cases. We do not simply use `cov(X)` since `isposdef(cov(X))`
 is typically false. For comparison of different estimators, see:
@@ -32,13 +34,16 @@ function approx_modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
     method::Symbol; 
     windowsize::Int = 500,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
+    windowsize > 1 || error("windowsize should be > 1 but was $windowsize")
     p = size(X, 2)
     windows = ceil(Int, p / windowsize)
     block_covariances = Vector{Matrix{Float64}}(undef, windows)
     block_s = Vector{Vector{Float64}}(undef, windows)
     storage = typeof(X) <: AbstractSnpArray ? zeros(size(X, 1), windowsize) : nothing
+    pmeter = Progress(windows, 1, "Approximating covariance by blocks...")
     # solve for s in each block of Σ
     for window in 1:windows
         # grab current window of X
@@ -47,12 +52,13 @@ function approx_modelX_gaussian_knockoffs(
             ((window - 1)*windowsize + 1:window * windowsize)
         Xcur = get_X_subset(X, cur_range, storage)
         # approximate a block of Σ
-        Σcur = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), Xcur)
+        Σcur = cov(covariance_approximator, Xcur)
         # solve for s vector
         scur = solve_s(Σcur, method; kwargs...)
         # save result
         block_covariances[window] = Σcur
         block_s[window] = scur
+        next!(pmeter)
     end
     # assemble block Σ, s, and mean components
     Σ = BlockDiagonal(block_covariances)
@@ -79,5 +85,5 @@ end
 
 function get_X_subset(X::AbstractSnpArray, cur_range, storage)
     copyto!(storage, @view(X[:, cur_range]), impute=true, center=true, scale=true)
-    return storage
+    return @view(storage[:, 1:length(cur_range)])
 end
