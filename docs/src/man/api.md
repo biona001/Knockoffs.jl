@@ -14,8 +14,14 @@ Pages = ["api.md"]
 ```@docs
   fixed_knockoffs
   modelX_gaussian_knockoffs
+  approx_modelX_gaussian_knockoffs
   hmm_knockoff
   full_knockoffscreen
+  solve_s
+  solve_MVR
+  solve_max_entropy
+  solve_sdp_fast
+  solve_SDP
 ```
 
 ## Regular functions
@@ -27,7 +33,11 @@ Pages = ["api.md"]
   compare_correlation
   compare_pairwise_correlation
   merge_knockoffs_with_original
-  standardize!
+  simulate_AR1
+  shift_until_PSD!
+  normalize_col!
+  decorrelate_knockoffs
+  sample_DMC
 ```
 
 ## Wrapper functions for SHAPEIT HMM knockoffs

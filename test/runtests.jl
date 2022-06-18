@@ -22,7 +22,6 @@ using ToeplitzMatrices
     X̃ = knockoff.X̃
     s = knockoff.s
     Σ = knockoff.Σ
-    Σinv = knockoff.Σinv
 
     @test all(isapprox.(X' * X, Σ, atol=1e-10))
     @test all(isapprox.(X̃' * X̃, Σ, atol=5e-2)) # numerical accuracy not good?
@@ -59,7 +58,6 @@ end
     X̃ = knockoff.X̃
     s = knockoff.s
     Σ = knockoff.Σ
-    Σinv = knockoff.Σinv
 
     # compare with Matteo's result
     # @rput X
@@ -109,43 +107,6 @@ end
     end
 end
 
-@testset "Knockoff data structure" begin
-    Random.seed!(2021)
-
-    # simulate matrix and normalize columns
-    n = 1000
-    p = 100
-    X = randn(n, p)
-    zscore!(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
-
-    # construct knockoff struct and the real [A Ã]
-    @time A = fixed_knockoffs(X, :sdp)
-    Atrue = [A.X A.X̃]
-
-    # array operations
-    @test size(Atrue) == size(A)
-    @test eltype(Atrue) == eltype(A)
-    @test getindex(Atrue, 127) == getindex(A, 127)
-    @test getindex(Atrue, 2, 19) == getindex(A, 2, 19)
-    @test getindex(Atrue, 900, 110) == getindex(A, 900, 110)
-    @test all(@view(Atrue[:, 1]) .== @view(A[:, 1]))
-    @test all(@view(Atrue[1:2:end, 1:5:end]) .== @view(A[1:2:end, 1:5:end]))
-
-    # matrix-vector multiplication
-    b = randn(2p)
-    ctrue, c = zeros(n), zeros(n)
-    mul!(ctrue, Atrue, b)
-    mul!(c, A, b)
-    @test all(ctrue .≈ c)
-
-    # matrix-matrix multiplication 
-    B = randn(2p, n)
-    Ctrue, C = zeros(n, n), zeros(n, n)
-    mul!(Ctrue, Atrue, B)
-    mul!(C, A, B)
-    @test all(Ctrue .≈ C)
-end
-
 @testset "model X Guassian Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
 
@@ -164,7 +125,7 @@ end
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
-    # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
+    Σ = knockoff.Σ
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -180,11 +141,11 @@ end
 
     # test properties
     @test all(s .≥ 0)
-    @test all(1 .≥ s)
-    @test all(isapprox.(mean(X, dims=1), 0, atol=1e-8))
-    @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
+    @test all(1 .≥ s) # this is true since Σ has diagonal entries 1
+    @test isposdef(Σ)
+    λmin = eigmin(2Σ - Diagonal(s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
-
 
 @testset "model X 2nd order Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
@@ -204,7 +165,7 @@ end
     X = knockoff.X
     X̃ = knockoff.X̃
     s = knockoff.s
-    # dot(X[:, i], X̃[:, i]), Sigma[i, i] - s[i]
+    Σ = knockoff.Σ
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -220,9 +181,9 @@ end
 
     # test properties
     @test all(s .≥ 0)
-    @test all(1 .≥ s)
-    @test all(isapprox.(mean(X, dims=1), 0, atol=1e-8))
-    @test all(isapprox.(std(X, dims=1), 1, atol=1e-8))
+    @test isposdef(Σ)
+    λmin = eigmin(2Σ - Diagonal(s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
 @testset "threshold functions" begin
@@ -261,20 +222,6 @@ end
     @test w[2] ≈ 1.0 - 0.2
 end
 
-function sample_DMC(q, Q; n=1)
-    p = size(Q, 3)
-    d = Categorical(q)
-    X = zeros(Int, n, p)
-    for i in 1:n
-        X[i, 1] = rand(d)
-        for j in 2:p
-            d.p .= @view(Q[X[i, j-1], :, j])
-            X[i, j] = rand(d)
-        end
-    end
-    return X
-end
-
 # from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
 @testset "Markov chain knockoffs have the right correlation structure" begin
     p = 20 # Number of states in markov chain
@@ -291,7 +238,7 @@ end
     fill!(@view(Q[:, :, 1]), NaN)
 
     # sample a bunch of markov chains
-    X = sample_DMC(q, Q, n=samples)
+    X = Knockoffs.sample_DMC(q, Q, n=samples)
 
     # sample knockoff of the markov chains
     X̃ = zeros(Int, samples, p)
@@ -321,4 +268,155 @@ end
         r2 = cor(@view(X[:, i]), @view(X̃[:, i+1]))
         @test isapprox(r1, r2, atol=1e-2)
     end
+end
+
+@testset "SDP vs MVR vs ME knockoffs" begin
+    # This is example 1 from https://amspector100.github.io/knockpy/mrcknock.html 
+    # SDP knockoffs are provably powerless in this situation, while MVR and ME knockoffs have high power
+
+    seed = 2022
+
+    # simulate X
+    Random.seed!(seed)
+    n = 600
+    p = 300
+    ρ = 0.5
+    Σ = (1-ρ) * I + ρ * ones(p, p)
+    μ = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    # simulate y
+    Random.seed!(seed)
+    k = Int(0.2p)
+    βtrue = zeros(p)
+    βtrue[1:k] .= rand(-1:2:1, k) .* rand(Uniform(0.5, 1), k)
+    shuffle!(βtrue)
+    correct_position = findall(!iszero, βtrue)
+    y = X * βtrue + randn(n)
+
+    # solve s vector
+    @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
+    @time Xko_maxent = modelX_gaussian_knockoffs(X, :maxent, μ, Σ)
+    @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
+
+    # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
+    @time sdp_filter = fit_lasso(y, Xko_sdp.X, Xko_sdp.X̃, debias=false)
+    @time mvr_filter = fit_lasso(y, Xko_mvr.X, Xko_mvr.X̃, debias=false)
+    @time me_filter = fit_lasso(y, Xko_maxent.X, Xko_maxent.X̃, debias=false)
+
+    sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
+    for i in eachindex(sdp_filter.fdr_target)
+        # extract beta for current fdr
+        βsdp = sdp_filter.βs[i]
+        βmvr = mvr_filter.βs[i]
+        βme = me_filter.βs[i]
+        
+        # compute power and false discovery proportion
+        push!(sdp_power, length(findall(!iszero, βsdp) ∩ correct_position) / k)
+        push!(mvr_power, length(findall(!iszero, βmvr) ∩ correct_position) / k)
+        push!(me_power, length(findall(!iszero, βme) ∩ correct_position) / k)
+        # fdp = length(setdiff(findall(!iszero, βsdp), correct_position)) / max(count(!iszero, βsdp), 1)
+        # push!(empirical_fdr, fdp)
+    end
+
+    @test all(mvr_power .> sdp_power)
+    @test all(me_power .> sdp_power)
+end
+
+@testset "SDP vs SDP fast" begin
+    seed = 2022
+
+    # simulate X
+    Random.seed!(seed)
+    n = 400
+    p = 300
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    mu = zeros(p)
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, mu, Sigma);
+    @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma)
+
+    @test all(isapprox.(Xko_sdp.s, Xko_sdp_fast.s, atol=0.05))
+end
+
+@testset "keyword arguments" begin
+    seed = 2022
+
+    # simulate X
+    Random.seed!(seed)
+    n = 400
+    p = 300
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    mu = zeros(p)
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+
+    # try supplying arguments to modelX_gaussian_knockoffs and fixed_knockoffs
+    @time Xko_sdp_fast1 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.7, μ = 0.7)
+    @time Xko_sdp_fast2 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.9, μ = 0.9)
+    @test all(isapprox.(Xko_sdp_fast1.s, Xko_sdp_fast2.s, atol=0.05))
+end
+
+@testset "debiasing preserves sparsity pattern" begin
+    seed = 2022
+
+    # simulate x
+    n = 1000
+    p = 500
+    Random.seed!(seed)
+    ρ = 0.4
+    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    μ = zeros(p) # true mean parameters
+    L = cholesky(Σ).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    # X = zscore(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
+
+    # simulate y
+    Random.seed!(seed)
+    k = 50
+    ϵ = Normal(0, 1)
+    d = Normal(0, 1)
+    β = zeros(p)
+    β[1:k] .= rand(d, k)
+    shuffle!(β)
+    y = X * β + rand(ϵ, n) |> Vector{eltype(X)}
+
+    # generate knockoffs
+    @time Xko = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
+
+    # run lasso, followed up by debiasing
+    @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=false)
+    @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=true)
+
+    # check that debiased result have same support as not debiasing
+    for i in eachindex(nodebias.fdr_target)
+        @test issubset(findall(!iszero, yesdebias.βs[i]), findall(!iszero, nodebias.βs[i]))
+    end
+end
+
+@testset "approximate constructions" begin
+    # simulate data
+    Random.seed!(2022)
+    n = 100
+    p = 500
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    L = cholesky(Sigma).L
+    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    true_mu = zeros(p)
+
+    # ASDP
+    @time asdp = approx_modelX_gaussian_knockoffs(X, :sdp, windowsize = 99)
+    λmin = eigmin(2*asdp.Σ - Diagonal(asdp.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+
+    # AMVR
+    @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, windowsize = 100);
+    λmin = eigmin(2*amvr.Σ - Diagonal(amvr.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
