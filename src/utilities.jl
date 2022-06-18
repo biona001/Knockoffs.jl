@@ -1,9 +1,56 @@
 """
+    solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
+
+Solves the vector `s` for generating knockoffs. `Σ` can be a general 
+covariance matrix. 
+
+# Inputs
++ `Σ`: A covariance matrix (in general, it is better to supply `Symmetric(Σ)` explicitly)
++ `method`: Can be one of the following
+    * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
+    * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
+    * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
+    + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
+    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+
+# Reference
+1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
+2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
+3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
+"""
+function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
+    # create correlation matrix
+    σs = sqrt.(diag(Σ))
+    iscor = all(x -> x ≈ 1, σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
+    # solve optimization problem
+    if method == :equi
+        s = solve_equi(Σcor)
+    elseif method == :sdp
+        s = solve_SDP(Σcor)
+    elseif method == :mvr
+        s = solve_MVR(Σcor; kwargs...)
+    elseif method == :maxent
+        s = solve_max_entropy(Σcor; kwargs...)
+    elseif method == :sdp_fast
+        s = solve_sdp_fast(Σcor; kwargs...)
+    else
+        error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
+    end
+    # rescale s back to the result for a covariance matrix   
+    iscor || (s .*= σs.^2)
+    return s
+end
+
+"""
     solve_SDP(Σ::AbstractMatrix)
 
-Solves the SDP problem for fixed-X and model-X knockoffs. The optimization problem
-is stated in equation 3.13 of "Panning for Gold: Model-X Knocko s for High-dimensional
-Controlled Variable Selection" by Candes et al. 
+Solves the SDP problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
+
+The optimization problem is stated in equation 3.13 of
+https://arxiv.org/pdf/1610.02351.pdf
 """
 function solve_SDP(Σ::AbstractMatrix)
     svar = Variable(size(Σ, 1), Convex.Positive())
@@ -14,6 +61,301 @@ function solve_SDP(Σ::AbstractMatrix)
     s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
     return s
 end
+
+"""
+    solve_equi(Σ::AbstractMatrix)
+
+Solves the equicorrelated problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
+"""
+function solve_equi(
+    Σ::AbstractMatrix{T},
+    λmin::Union{Nothing, T} = nothing
+    ) where T
+    isnothing(λmin) && (λmin = eigmin(Σ))
+    s = min(1, 2*λmin) .* ones(size(Σ, 1))
+    return s
+end
+
+"""
+    solve_MVR(Σ::AbstractMatrix)
+
+Solves the minimum variance-based reconstructability problem for fixed-X
+and model-X knockoffs given correlation matrix Σ.
+
+See algorithm 1 of "Powerful knockoffs via minimizing 
+reconstructability" by Spector, Asher, and Lucas Janson (2020)
+https://arxiv.org/pdf/2011.14625.pdf
+"""
+function solve_MVR(
+    Σ::AbstractMatrix{T};
+    λmin::T = eigmin(Σ),
+    niter::Int = 100,
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # initialize s vector and compute initial cholesky factor
+    s = fill(λmin, p)
+    L = cholesky(Symmetric(2Σ - Diagonal(s)))
+    # preallocated vectors for efficiency
+    vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        for j in 1:p
+            fill!(ej, 0)
+            ej[j] = 1
+            # compute cn and cd as detailed in eq 72
+            solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
+            cn = -sum(abs2, vn)
+            # find vd as the solution to L*vd = ej
+            ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
+            cd = sum(abs2, vd)
+            # solve quadratic optimality condition in eq 71
+            δj = solve_quadratic(cn, cd, s[j])
+            s[j] += δj
+            # rank 1 update to cholesky factor
+            ej[j] = sqrt(abs(δj))
+            δj > 0 ? lowrankdowndate!(L, ej) : lowrankupdate!(L, ej)
+            # update convergence tol
+            abs(δj) > max_delta && (max_delta = abs(δj))
+        end
+        verbose && println("Iter $l: δ = $max_delta")
+        # declare convergence if changes in s are all smaller than tol
+        max_delta < tol && break
+    end
+    return s
+end
+
+function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
+    ldiv!(storage, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(storage, L.L, ej)
+    ldiv!(vn, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(vn, L.U, storage)
+end
+
+function solve_quadratic(cn, cd, Sjj, verbose=false)
+    a = -cn - cd^2
+    b = 2*(-cn*Sjj + cd)
+    c = -cn*Sjj^2 - 1
+    a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
+    x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
+    x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
+    δj = -Sjj < x1 < inv(cd) ? x1 : x2
+    isinf(δj) && error("δj is Inf, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
+    isnan(δj) && error("δj is NaN, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
+    verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
+    return δj
+end
+
+"""
+    solve_max_entropy(Σ::AbstractMatrix)
+
+Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs
+given correlation matrix Σ.
+
+# Reference
+Algorithm 2.2 from Powerful Knockoffs via Minimizing Reconstructability: https://arxiv.org/pdf/2011.14625.pdf
+
+# Note
+The commented out code of `solve_max_entropy`` faithfully implements alg 2 of
+"Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and 
+Lucas Janson (2020). While I may have a bug there, the resulting `s` vector from
+the algorithm have strange behaviors. On the other hand, it seems knockpy code at
+https://github.com/amspector100/knockpy/blob/c4980ebd506c110473babd85836dbd8ae1d548b7/knockpy/mrc.py#L1045
+is somehow mixing in parts of algorithm 2.2 from
+"FANOK: KNOCKOFFS IN LINEAR TIME" by Askari et al. (2020), and this confuses me.
+I have replicated the implementation in knockpy here but in the future, it may
+be worth it to check which version is correct.
+"""
+function solve_max_entropy(
+    Σ::AbstractMatrix{T};
+    λmin::T = eigmin(Σ),
+    niter::Int = 100,
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # initialize s vector and compute initial cholesky factor
+    s = fill(λmin, p)
+    L = cholesky(Symmetric(2Σ - Diagonal(s)))
+    # preallocated vectors for efficiency
+    x, ỹ = zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        for j in 1:p
+            for i in 1:p
+                ỹ[i] = 2Σ[i, j]
+            end
+            ỹ[j] = 0
+            # compute x as the solution to L*x = ỹ
+            ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
+            x_l2sum = sum(abs2, x)
+            # compute zeta and c as in alg 2.2 of askari et al
+            ζ = 2Σ[j, j] - s[j]
+            c = (ζ * x_l2sum) / (ζ + x_l2sum)
+            # solve optimality condition in eq 75 of spector et al 2020
+            sj_new = (2Σ[j, j] - c) / 2
+            δ = s[j] - sj_new
+            s[j] = sj_new
+            # rank 1 update to cholesky factor
+            fill!(x, 0)
+            x[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+            # update convergence tol
+            abs(δ) > max_delta && (max_delta = abs(δ))
+        end
+        # declare convergence if changes in s are all smaller than tol
+        verbose && println("Iter $l: δ = $max_delta")
+        max_delta < tol && break 
+    end
+    return s
+end
+
+# function solve_max_entropy(
+#     Σ::AbstractMatrix{T};
+#     λmin::T = eigmin(Σ),
+#     niter::Int = 100,
+#     tol=1e-6 # converges when changes in s are all smaller than tol
+#     ) where T
+#     p = size(Σ, 1)
+#     # initialize s vector and compute initial cholesky factor
+#     s = fill(λmin, p)
+#     L = cholesky(Symmetric(2Σ - Diagonal(s)))
+#     # preallocated vectors for efficiency
+#     vm, u = zeros(p), zeros(p)
+#     for l in 1:niter
+#         max_delta = zero(T)
+#         for j in 1:p
+#             for i in 1:p
+#                 u[i] = 2Σ[i, j]
+#             end
+#             u[j] = 0
+#             # compute vm as the solution to L*vm = u, and use it to compute cm
+#             ldiv!(vm, UpperTriangular(L.factors)', u) # non-allocating version of ldiv!(vm, L.L, u)
+#             cm = sum(abs2, vm)
+#             # solve optimality condition in eq 75
+#             sj_new = (2Σ[j, j] - cm) / 2
+#             δ = s[j] - sj_new
+#             s[j] = sj_new
+#             # rank 1 update to cholesky factor
+#             fill!(u, 0)
+#             u[j] = sqrt(abs(δ))
+#             δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+#             # update convergence tol
+#             abs(δ) > max_delta && (max_delta = abs(δ))
+#         end
+#         # declare convergence if changes in s are all smaller than tol
+#         max_delta < tol && break 
+#     end
+#     return s
+# end
+
+"""
+    solve_sdp_fast(Σ::AbstractMatrix)
+
+Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent, 
+given correlation matrix Σ. 
+
+# Reference
+Algorithm 2.2 from "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
+"""
+function solve_sdp_fast(
+    Σ::AbstractMatrix{T};
+    λ::T = 0.5, # barrier coefficient
+    μ::T = 0.8, # decay parameter
+    niter::Int = 100,
+    tol=1e-6, # converges when lambda < tol?
+    verbose::Bool = false
+    ) where T
+    0 ≤ μ ≤ 1 || error("Decay parameter μ must be in [0, 1] but was $μ")
+    0 < λ || error("Barrier coefficient λ must be > 0 but was $λ")
+    # initialize s vector and compute initial cholesky factor
+    p = size(Σ, 1)
+    s = zeros(T, p)
+    L = cholesky(Symmetric(2Σ))
+    # preallocated vectors for efficiency
+    x, ỹ = zeros(p), zeros(p)
+    for l in 1:niter
+        verbose && println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
+        for j in 1:p
+            for i in 1:p
+                ỹ[i] = 2Σ[i, j]
+            end
+            ỹ[j] = 0
+            # compute c as the solution to L*x = ỹ
+            ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
+            x_l2sum = sum(abs2, x)
+            # compute zeta and c as in alg 2.2 of askari et al
+            ζ = 2Σ[j, j] - s[j]
+            c = (ζ * x_l2sum) / (ζ + x_l2sum)
+            # 1st order optimality condition
+            sj_new = clamp(2Σ[j, j] - c - λ, 0, 1)
+            δ = s[j] - sj_new
+            s[j] = sj_new
+            # rank 1 update to cholesky factor
+            fill!(x, 0)
+            x[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+        end
+        # check convergence 
+        λ *= μ
+        λ < tol && break
+    end
+    return s
+end
+# using Random, Knockoffs, BenchmarkTools, ToeplitzMatrices, ProfileView
+# ρ = 0.4
+# p = 100
+# Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+# @profview Knockoffs.solve_sdp_fast(Σ);
+
+"""
+    simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
+
+Generates `p`-dimensional correlation matrix for
+AR(1) Gaussian process, where successive correlations
+are drawn from Beta(`a`,`b`) independently. If `rho` is
+specified, then the process is stationary with correlation
+`rho`.
+
+# Source
+https://github.com/amspector100/knockpy/blob/20eddb3eb60e0e82b206ec989cb936e3c3ee7939/knockpy/dgp.py#L61
+"""
+function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
+    # Generate rhos, take log to make multiplication easier
+    d = Beta(a, b)
+    if isnothing(rho)
+        rhos = log.(clamp!(rand(d, p), 0, max_corr))
+    else
+        abs(rho) > 1 || error("rho $rho must be a correlation between -1 and 1")
+        rhos = log.([rho for _ in 1:p])
+    end
+    rhos[1] = 0
+
+    # Log correlations between x_1 and x_i for each i
+    cumrhos = cumsum(rhos)
+
+    # Use cumsum tricks to calculate all correlations
+    log_corrs = -1 * abs.(cumrhos .- cumrhos')
+    corr_matrix = exp.(log_corrs)
+
+    # Ensure PSD-ness
+    corr_matrix = cov2cor(shift_until_PSD(corr_matrix, tol))
+
+    return corr_matrix
+end
+
+"""
+    shift_until_PSD!(Σ::AbstractMatrix)
+
+Keeps adding λI to Σ until the minimum eigenvalue > tol
+"""
+function shift_until_PSD!(Σ::AbstractMatrix, tol=1e-4)
+    while eigmin(Σ) ≤ tol
+        Σ += tol*I
+    end
+    return Σ
+end
+
+cov2cor(C) = StatsBase.cov2cor(C, sqrt.(diag(C)))
 
 """
     compare_correlation()
@@ -249,3 +591,17 @@ function maf_noflip!(out::AbstractVector{T}, s::AbstractSnpArray) where T <: Abs
     out
 end
 maf_noflip(s::AbstractSnpArray) = maf_noflip!(Vector{Float64}(undef, size(s, 2)), s)
+
+function sample_DMC(q, Q; n=1)
+    p = size(Q, 3)
+    d = Categorical(q)
+    X = zeros(Int, n, p)
+    for i in 1:n
+        X[i, 1] = rand(d)
+        for j in 2:p
+            d.p .= @view(Q[X[i, j-1], :, j])
+            X[i, j] = rand(d)
+        end
+    end
+    return X
+end

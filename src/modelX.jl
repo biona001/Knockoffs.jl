@@ -1,69 +1,58 @@
 """
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol; [covariance_approximator], [kwargs...])
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix; [kwargs...])
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions. The true mean `μ` and covariance
-`Σ` is estimated from data. 
+`Σ` is estimated from data if not supplied. 
 
 # Inputs
-+ `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
-to mean 0 variance 1. 
-+ `method`: Either `:equi`, `:sdp`, or `:asdp`
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `method`: Can be one of the following
+    * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
+    * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
+    * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
++ `μ`: A `p × 1` vector of column mean of `X`
++ `Σ`: A `p × p` matrix of covariance of `X`
++ `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`.
+    See CovarianceEstimation.jl for more options.
++ `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
+    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Reference: 
-"Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
-Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
+    Variable Selection" by Candes, Fan, Janson, and Lv (2018)
+2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
+3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 
-# Note: 
-The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which
-is recommended for p>n case. We do not simply use `cov(X)` since `isposdef(cov(X))`
-is typically false. For reference, see 
-https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
+# Covariance Approximation: 
+The covariance is approximated by a linear shrinkage estimator using 
+Ledoit-Wolf with `DiagonalUnequalVariance` target, 
+which seems to perform well for `p>n` cases. We do not simply use `cov(X)`
+since `isposdef(cov(X))` is typically false. For comparison of various estimators, see:
+https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
-function modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
-    Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
+function modelX_gaussian_knockoffs(
+    X::Matrix, 
+    method::Symbol;
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs...
+    )
+    # approximate Σ
+    Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_knockoffs(X, method, μ, Σapprox)
+    return modelX_gaussian_knockoffs(X, method, μ, Σapprox; kwargs...)
 end
 
-"""
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix)
-
-Creates model-free multivariate normal knockoffs by sequentially sampling from 
-conditional multivariate normal distributions. 
-
-# Inputs
-+ `X`: A `n × p` numeric matrix. Each row is a sample, and each column is standardized
-to mean 0 variance 1. 
-+ `method`: Either `:equi`, `:sdp`, or `:asdp`
-+ `μ`: A `p × 1` vector of (true) mean of `X`
-+ `Σ`: A `p × p` matrix of covariance of `X`
-
-# Reference: 
-"Panning for Gold: Model-X Knockoffs for High-dimensional Controlled
-Variable Selection" by Candes, Fan, Janson, and Lv (2018)
-
-# todo: convert covariance matrix to correlation matrix
-"""
-function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix)
-    n, p = size(X)
-    # center/scale Xj to mean 0 var 1
-    X = zscore(X, mean(X, dims=1), std(X, dims=1)) 
+function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix; kwargs...)
     # compute s vector using the specified method
-    if method == :equi
-        λmin = minimum(svdvals(X))^2
-        s = min(1, 2λmin) .* ones(p)
-    elseif method == :sdp
-        s = solve_SDP(Σ)
-    elseif method==:asdp
-        # todo
-        error("ASDP not supported yet! sorry!")
-    else
-        error("modelX_gaussian: method can only be :equi, or :sdp, or :asdp")
-    end
+    s = solve_s(Σ, method; kwargs...)
+    # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
-    return knockoff(X, X̃, s)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end
 
 """

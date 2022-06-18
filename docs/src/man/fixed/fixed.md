@@ -1,4 +1,3 @@
-
 # Fixed-X knockoffs
 
 This tutorial generates fixed-X knockoffs and checks some of its basic properties. The methodology is described in the following paper
@@ -18,43 +17,39 @@ using Plots
 using Random
 using GLMNet
 using LinearAlgebra
+using Distributions
 gr(fmt=:png);
 ```
-
-    ┌ Info: Precompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
-    └ @ Base loading.jl:1423
-
 
 ## Generate knockoffs
 
 We will
 
 1. Simulate Gaussian design matrix
-2. Standardize the columns to mean 0 variance 1
-3. Generate knockoffs
-
-Both equi-correlated and SDP knockoffs are supported. 
+2. Generate knockoffs. Here we generate minimum variance-based reconstructability (MVR) knockoffs as described in [this paper](https://arxiv.org/abs/2011.14625). MVR and maximum entropy (ME) knockoffs tend to have higher power over SDP or equi-correlated knockoffs. For more options, see the [fixed_knockoffs API](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.fixed_knockoffs).
 
 
 ```julia
 Random.seed!(2022)   # set random seed for reproducibility
 X = randn(1000, 200) # simulate Gaussian matrix
-standardize!(X)      # normalize columns
+normalize_col!(X)    # normalize columns of X
 
-# make equi-correlated and SDP knockoffs
-Aequi = fixed_knockoffs(X, :equi)
-Asdp = fixed_knockoffs(X, :sdp);
+# make MVR knockoffs
+@time mvr = fixed_knockoffs(X, :mvr);
 ```
+
+      0.787978 seconds (91 allocations: 21.617 MiB, 34.92% gc time)
+
 
 The return type is a `Knockoff` struct, which contains the following fields
 
 ```julia
-struct Knockoff{T}
-    X::Matrix{T}    # n × p original design matrix
-    X̃::Matrix{T}    # n × p knockoff of X
-    s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::Matrix{T}    # p × p gram matrix X'X
-    Σinv::Matrix{T} # p × p inv(X'X)
+struct GaussianKnockoff{T} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
+    Σ::Symmetric{T, Matrix{T}} # p × p covariance matrix
+    method::Symbol # method for solving s
 end
 ```
 
@@ -62,10 +57,9 @@ Thus, to access these fields, one can do
 
 
 ```julia
-X̃ = Asdp.X̃
-s = Asdp.s
-Σ = Asdp.Σ
-Σinv = Asdp.Σinv;
+X̃ = mvr.X̃  # type X̃ by X\tilde<tab>
+s = mvr.s
+Σ = mvr.Σ; # type Σ by \Sigma<tab>
 ```
 
 We can check some knockoff properties. For instance, is it true that $X'\tilde{X} \approx \Sigma - diag(s)$?
@@ -80,38 +74,38 @@ We can check some knockoff properties. For instance, is it true that $X'\tilde{X
 
 
     40000×2 Matrix{Float64}:
-     998.0      998.0
-     -18.5421   -18.5421
-     -25.4908   -25.4908
-     -34.946    -34.946
-      20.1673    20.1673
-      51.0641    51.0641
-      14.7028    14.7028
-     -24.1644   -24.1644
-     -46.411    -46.411
-     -33.7503   -33.7503
-      -4.25934   -4.25934
-     -24.1531   -24.1531
-      13.1971    13.1971
-       ⋮        
-      20.4727    20.4727
-     -13.4668   -13.4668
-     -13.3521   -13.3521
-      33.889     33.889
-      30.8905    30.8905
-     -30.8344   -30.8344
-      42.4959    42.4959
-       4.39748    4.39748
-       2.57332    2.57332
-      -7.19466   -7.19466
-       9.84951    9.84951
-     998.0      998.0
+      0.479139     0.479139
+     -0.0184072   -0.0184072
+     -0.0274339   -0.0274339
+     -0.0359705   -0.0359705
+      0.0202419    0.0202419
+      0.0514162    0.0514162
+      0.0154546    0.0154546
+     -0.0250518   -0.0250518
+     -0.0468651   -0.0468651
+     -0.0358149   -0.0358149
+     -0.00507354  -0.00507354
+     -0.0238295   -0.0238295
+      0.0140797    0.0140797
+      ⋮           
+      0.0192772    0.0192772
+     -0.0157356   -0.0157356
+     -0.0116071   -0.0116071
+      0.0338745    0.0338745
+      0.029913     0.029913
+     -0.03115     -0.03115
+      0.0437582    0.0437582
+      0.00350153   0.00350153
+      0.00382205   0.00382205
+     -0.0072671   -0.0072671
+      0.00966888   0.00966888
+      0.493225     0.493225
 
 
 
 ## LASSO example
 
-Let us apply the generated knockoffs to the model selection problem. In layman's term, it can be stated as
+Let us apply the generated knockoffs to the model selection problem
 
 > Given response $\mathbf{y}_{n \times 1}$, design matrix $\mathbf{X}_{n \times p}$, we want to select a subset $S \subset \{1,...,p\}$ of variables that are truly causal for $\mathbf{y}$. 
 
@@ -119,32 +113,32 @@ Let us apply the generated knockoffs to the model selection problem. In layman's
 
 We will simulate 
 
-$$\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)$$
+$$\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 0.5)$$
 
 where $k=50$ positions of $\mathbf{\beta}$ is non-zero with effect size $\beta_j \sim N(0, 1)$. The goal is to recover those 50 positions using LASSO.
 
 
 ```julia
 # set seed for reproducibility
-Random.seed!(100)
+Random.seed!(2022)
 
 # simulate true beta
 n, p = size(X)
 k = 50
 βtrue = zeros(p)
-βtrue[1:k] .= randn(50)
+βtrue[1:k] .= 3randn(50)
 shuffle!(βtrue)
 
 # find true causal variables
 correct_position = findall(!iszero, βtrue)
 
-# simulate y
-y = X * βtrue + randn(n);
+# simulate y using normalized X
+y = X * βtrue + rand(Normal(0, 0.5), n);
 ```
 
 ### Standard LASSO
 
-Lets try running standard LASSO, which will produce $\hat{\mathbf{\beta}}_{p \times 1}$ where we typically declare SNP $j$ to be selected if $\hat{\beta}_j \ne 0$. We use LASSO solver in [GLMNet.jl](https://github.com/JuliaStats/GLMNet.jl) package, which is just a Julia wrapper for the GLMnet Fortran code. 
+Lets try running standard LASSO, which will produce $\hat{\mathbf{\beta}}_{p \times 1}$ where we typically declare variable $j$ to be selected if $\hat{\beta}_j \ne 0$. We use LASSO solver in [GLMNet.jl](https://github.com/JuliaStats/GLMNet.jl) package, which is just a Julia wrapper for the GLMnet Fortran code. 
 
 How well does LASSO perform in terms of power and FDR?
 
@@ -160,26 +154,22 @@ lasso_cv = glmnetcv(X, y)
 # check power and false discovery rate
 power = length(findall(!iszero, βlasso) ∩ correct_position) / k
 FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
-power, FDR
+println("Lasso power = $power, FDR = $FDR")
 ```
 
+    Lasso power = 0.86, FDR = 0.5222222222222223
 
 
-
-    (1.0, 0.5370370370370371)
-
-
-
-It seems LASSO have power 96% (it missed only 2/50 predictors), but the false discovery rate is 54%. This means that although LASSO finds almost every predictor, more than half of all discoveries are false positives. 
+Although LASSO have pretty high power, about half of all discoveries are false positives. 
 
 ### Knockoff+LASSO
 
 Now lets try applying the knockoff methodology. Recall that consists of a few steps 
 
 1. Run LASSO on $[\mathbf{X} \mathbf{\tilde{X}}]$
-2. Compare coefficient difference statistic $W_j$ for each $j = 1,...,p$. Here we use $W_j = |\beta_j| - |\beta_{j, knockoff}|$
-3. Choose target FDR $0 \le q \le 1$ and compute 
-$$\tau = min_{t}\left\{t > 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}$$
+2. Compare feature importance score $W_j = \text{score}(x_j) - \text{score}(\tilde{x}_j)$ for each $j = 1,...,p$. Here we use $W_j = |\beta_j| - |\tilde{\beta}_{j}|$
+3. Choose target FDR $q \in [0, 1]$ and compute 
+$$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j ≥ t}\})} \le q\right\}$$
 
 !!! note
     
@@ -187,19 +177,39 @@ $$\tau = min_{t}\left\{t > 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\r
 
 
 ```julia
-# step 1
-Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
-knockoff_cv = glmnetcv(Xfull, y)
-λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]
+@time knockoff_filter = fit_lasso(y, X, mvr.X̃);
+```
 
-# target FDR is 0.05, 0.1, ..., 0.5
-FDR = collect(0.05:0.05:0.5)
+      6.628466 seconds (6.79 M allocations: 526.499 MiB, 3.44% gc time, 59.50% compilation time)
+
+
+The return type is now a `KnockoffFilter`, which contains the following information
+
+```julia
+struct KnockoffFilter{T}
+    XX̃ :: Matrix{T} # n × 2p matrix of original X and its knockoff interleaved randomly
+    original :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X
+    knockoff :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X̃
+    W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
+    βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
+    a0 :: Vector{T}   # intercepts for each model in βs
+    τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    debiased :: Bool # whether βs and a0 have been debiased
+end
+```
+
+Given these information, we can e.g. visualize power and FDR trade-off:
+
+
+```julia
+FDR = knockoff_filter.fdr_target
 empirical_power = Float64[]
 empirical_fdr = Float64[]
-for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
-
+for i in eachindex(FDR)
+    # extract beta for current fdr
+    βknockoff = knockoff_filter.βs[i]
+    
     # compute power and false discovery proportion
     power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
     fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
@@ -208,8 +218,8 @@ for fdr in FDR
 end
 
 # visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false)
-fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false)
+power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false, w=2)
+fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false, w=2)
 Plots.abline!(fdr_plot, 1, 0, line=:dash)
 plot(power_plot, fdr_plot)
 ```
@@ -217,13 +227,15 @@ plot(power_plot, fdr_plot)
 
 
 
-![png](output_13_0.png)
+    
+![png](output_15_0.png)
+    
 
 
 
-Observe that
+**Conclusion:** 
 
-+ LASSO + knockoffs controls the false discovery rate at below the target (dashed line)
-+ The power of LASSO + knockoffs is lower than standard LASSO
++ LASSO + knockoffs controls the false discovery rate at below the target (dashed line). Thus, one trade power for FDR control. 
++ The power of standard LASSO is better, but it comes with high empirical FDR that one cannot control via cross validation. 
 
 If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.

@@ -1,3 +1,9 @@
+# function extract_beta(β̂_knockoff::AbstractVector{T}, fdrs::::AbstractVector, 
+#     original::AbstractVector{Int}, knockoff::AbstractVector{Int},
+#     method::Symbol=:knockoff, debias::Bool = false) where T <: AbstractFloat
+
+# end
+
 """
     coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
 
@@ -55,36 +61,34 @@ original design matrix that controls the FDR.
 """
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
     original::AbstractVector{Int}, knockoff::AbstractVector{Int},
-    method::Symbol=:knockoff) where T <: AbstractFloat
+    method::Symbol=:knockoff, W::AbstractVector{T} = coefficient_diff(β̂_knockoff, original, knockoff)
+    ) where T <: AbstractFloat
     # first handle errors
     p = length(β̂_knockoff) >> 1
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    # find set of selected predictors
-    W = coefficient_diff(β̂_knockoff, original, knockoff)
+    # find knockoff-filter threshold
     τ = threshold(W, fdr, method)
-    detected = findall(W .≥ τ)
-    # construct final β
+    # construct the full β, thresholding indices that are not selected
     β = zeros(T, p)
-    for i in detected
-        β[i] = β̂_knockoff[original[i]]
+    for i in eachindex(W)
+        W[i] ≥ τ && (β[i] = β̂_knockoff[original[i]])
     end
-    return β
+    return β, W, τ
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff,
+    W::AbstractVector{T} = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     ) where T <: AbstractFloat
     # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    # find set of selected predictors
-    W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
+    # find knockoff-filter threshold
     τ = threshold(W, fdr, method)
-    detected_groups = findall(W .≥ τ)
-    # construct the full β
+    # construct the full β, thresholding indices that are not selected
     β = zeros(T, length(β̂_knockoff))
-    for g in detected_groups
+    for g in findall(W .≥ τ)
         group_idx = findall(x -> x == g, groups)
         β[group_idx] .= @view(β̂_knockoff[group_idx])
     end
-    return β[original]
+    return β[original], W, τ
 end

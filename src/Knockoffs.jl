@@ -16,13 +16,17 @@ using Random
 using PositiveFactorizations
 using CovarianceEstimation
 using StatsBase
+using GLMNet
+using BlockDiagonals
+using Roots: fzero
 
-import Base: eltype, getindex, size
-
-export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
+export knockoff_filter, fit_lasso, 
+    fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
     coefficient_diff, threshold, extract_beta,
     partition, rapid, snpknock2, decorrelate_knockoffs,
     process_fastphase_output, fastphase, 
+    approx_modelX_gaussian_knockoffs,
+    solve_s,
     # constructors
     knockoff,
     # functions for hmm
@@ -39,7 +43,7 @@ export fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!
     # diagnostics
     compare_correlation, compare_pairwise_correlation,
     # utilities
-    merge_knockoffs_with_original
+    merge_knockoffs_with_original, simulate_AR1
 
 include("struct.jl")
 include("fixed.jl")
@@ -51,6 +55,8 @@ include("hmm_wrapper.jl")
 include("hmm.jl")
 include("utilities.jl")
 include("knockoffscreen.jl")
+include("fit_lasso.jl")
+include("approx.jl")
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    
