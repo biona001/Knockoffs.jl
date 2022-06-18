@@ -1,6 +1,6 @@
 """
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol)
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix)
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol; [covariance_approximator], [kwargs...])
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix; [kwargs...])
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions. The true mean `μ` and covariance
@@ -16,6 +16,8 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
     * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 + `μ`: A `p × 1` vector of column mean of `X`
 + `Σ`: A `p × p` matrix of covariance of `X`
++ `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`.
+    See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
@@ -25,15 +27,21 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 
-# Note: 
-The covariance is approximated by the Ledoit-Wolf optimal shrinkage, which
-is recommended for p>n case. We do not simply use `cov(X)` since `isposdef(cov(X))`
-is typically false. For reference, see 
-https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/methods/
+# Covariance Approximation: 
+The covariance is approximated by a linear shrinkage estimator using 
+Ledoit-Wolf with `DiagonalUnequalVariance` target, 
+which seems to perform well for `p>n` cases. We do not simply use `cov(X)`
+since `isposdef(cov(X))` is typically false. For comparison of various estimators, see:
+https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
-function modelX_gaussian_knockoffs(X::Matrix, method::Symbol; kwargs...)
-    # approximate Σ by Ledoit-Wolf optimal shrinkage
-    Σapprox = cov(LinearShrinkage(DiagonalUnequalVariance(), :lw), X)
+function modelX_gaussian_knockoffs(
+    X::Matrix, 
+    method::Symbol;
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs...
+    )
+    # approximate Σ
+    Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
     return modelX_gaussian_knockoffs(X, method, μ, Σapprox; kwargs...)

@@ -135,10 +135,14 @@ function solve_quadratic(cn, cd, Sjj, verbose=false)
     a = -cn - cd^2
     b = 2*(-cn*Sjj + cd)
     c = -cn*Sjj^2 - 1
+    a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
     x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
+    δj = -Sjj < x1 < inv(cd) ? x1 : x2
+    isinf(δj) && error("δj is Inf, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
+    isnan(δj) && error("δj is NaN, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
-    return -Sjj < x1 < inv(cd) ? x1 : x2
+    return δj
 end
 
 """
