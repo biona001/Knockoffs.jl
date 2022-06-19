@@ -19,6 +19,7 @@ using StatsBase
 using GLMNet
 using BlockDiagonals
 using Roots: fzero
+using Downloads
 
 export knockoff_filter, fit_lasso, 
     fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
@@ -43,7 +44,8 @@ export knockoff_filter, fit_lasso,
     # diagnostics
     compare_correlation, compare_pairwise_correlation,
     # utilities
-    merge_knockoffs_with_original, simulate_AR1
+    merge_knockoffs_with_original, simulate_AR1,
+    download_1000genomes
 
 include("struct.jl")
 include("fixed.jl")
