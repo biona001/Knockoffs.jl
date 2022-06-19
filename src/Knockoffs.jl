@@ -59,6 +59,7 @@ include("utilities.jl")
 include("knockoffscreen.jl")
 include("fit_lasso.jl")
 include("approx.jl")
+include("ghost.jl")
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    
