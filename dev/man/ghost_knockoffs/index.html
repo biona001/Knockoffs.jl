@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Ghost Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.044/juliamono.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.11/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../fixed/fixed/">Fixed-X Knockoffs</a></li><li><a class="tocitem" href="../modelX/modelX/">Model-X Knockoffs</a></li><li><a class="tocitem" href="../fastphase_hmm/fastphase_hmm/">fastPHASE HMM Knockoffs</a></li><li><a class="tocitem" href="../shapeit_hmm/">SHAPEIT HMM Knockoffs</a></li><li><a class="tocitem" href="../knockoffscreen/knockoffscreen/">KnockoffScreen Knockoffs</a></li><li class="is-active"><a class="tocitem" href>Ghost Knockoffs</a><ul class="internal"><li><a class="tocitem" href="#Estimate-correlation-matrix-\\mathbf{\\Sigma}"><span>Estimate correlation matrix <span>$\mathbf{\Sigma}$</span></span></a></li><li><a class="tocitem" href="#Obtain-reference-panel"><span>Obtain reference panel</span></a></li><li><a class="tocitem" href="#Simulated-Example"><span>Simulated Example</span></a></li></ul></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Ghost Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Ghost Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/ghost_knockoffs.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Ghost-Knockoffs"><a class="docs-heading-anchor" href="#Ghost-Knockoffs">Ghost Knockoffs</a><a id="Ghost-Knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Ghost-Knockoffs" title="Permalink"></a></h1><p>This tutorial is for generating Ghost (summary statistics) Knockoffs for analyzing genome-wide association studies (GWAS). The methodology is described in </p><blockquote><p>He, Z., Liu, L., Belloy, M. E., Le Guen, Y., Sossin, A., Liu, X., ... &amp; Ionita-Laza, I. (2021). Summary statistics knockoff inference empowers identification of putative causal variants in genome-wide association studies. bioRxiv.</p></blockquote><p>It is assumed we do not have access to individual level genotype data <span>$\mathbf{G}$</span>. Rather, for each SNP, we have the z-scores <span>$Z_j$</span> with respect to a phenotype <span>$\mathbf{Y}$</span> from a GWAS. Then we sample the knockoff z-scores as </p><p class="math-container">\[\begin{aligned}
+\mathbf{\tilde{Z}} | \mathbf{G}, \mathbf{Y} \sim N(\mathbf{P}\mathbf{Z}, \mathbf{V}),
+\end{aligned}\]</p><p class="math-container">\[\begin{aligned}
+\mathbf{P} = \mathbf{I} - \mathbf{D}\mathbf{\Sigma}^{-1}, \quad \mathbf{V} = 2\mathbf{D} - \mathbf{D}\mathbf{\Sigma}^{-1}\mathbf{D},
+\end{aligned}\]</p><p>where <span>$\mathbf{I}$</span> is a <span>$p \times p$</span> identity matrix, <span>$\mathbf{\Sigma}$</span> is the correlation matrix among genotypes (characterizing linkage disequilibrium), and <span>$\mathbf{D} = diag(s_1, ..., s_p)$</span> is a diagonal matrix given by solving the following convex optimization problem</p><p class="math-container">\[\begin{aligned}
+\text{minimize } &amp; \sum_j | 1 - s_j |\\
+\text{subject to } &amp; 2\mathbf{\Sigma} - \mathbf{D} \succeq 0\\
+                   &amp; s_j \ge 0.
+\end{aligned}\]</p><p>In summary, we need to</p><ol><li>Estimate the correlation matrix <span>$\mathbf{\Sigma}$</span>, and </li><li>Solve for the vector <span>$\mathbf{s}$</span>.</li></ol><p>These operations define <span>$\mathbf{P}$</span> and <span>$\mathbf{V}$</span> which can be used to sample the knockoffs <span>$\mathbf{\tilde{Z}}$</span>. We describe step 1 in detail below. Step 2 can be accomplished via standard SDP or MVR solvers.</p><pre><code class="language-julia hljs"># load package needed for this tutorial
+using Knockoffs
+using VCFTools
+using StatsBase
+using LinearAlgebra
+using SnpArrays
+using Random</code></pre><h2 id="Estimate-correlation-matrix-\\mathbf{\\Sigma}"><a class="docs-heading-anchor" href="#Estimate-correlation-matrix-\\mathbf{\\Sigma}">Estimate correlation matrix <span>$\mathbf{\Sigma}$</span></a><a id="Estimate-correlation-matrix-\\mathbf{\\Sigma}-1"></a><a class="docs-heading-anchor-permalink" href="#Estimate-correlation-matrix-\\mathbf{\\Sigma}" title="Permalink"></a></h2><p>Recall the only data we have is the score statistic <span>$\mathbf{Z}$</span> for each SNP (i.e. we do not have individual level data <span>$\mathbf{G}$</span>). To obtain an estimate of <span>$\mathbf{\Sigma}$</span>, one way is to leverage a reference haplotype panel, which we denote by <span>$\mathbf{H}$</span>. For instance, the <a href="https://bochet.gcc.biostat.washington.edu/beagle/1000_Genomes_phase3_v5a/b37.vcf">1000 genomes phase 3 panel</a> is freely availble to the public and contains 2504 samples of diverse ancestry and ~50 million SNPs. Since <span>$\mathbf{H}$</span> is very dense, each SNP in <span>$\mathbf{Z}$</span> either exist in <span>$\mathbf{H}$</span>, or is close to one that is typed in <span>$\mathbf{H}$</span>. Over 90% of SNPs in the UK Biobank can be mapped to this panel. Thus, we can roughly estimate <span>$\mathbf{\Sigma}$</span>. </p><p>Of course, population structure may skew the estimation. If the GWAS samples are rather homogeneous, one may want include only ancestrally similar samples in the reference panel. Of course, using denser and larger reference panels such as the <a href="https://www.nature.com/articles/ng.3679">HRC</a> or <a href="https://www.nature.com/articles/s41586-021-03205-y">TOPMed</a> will also improve approximation, but those panels has restricted public access. </p><h2 id="Obtain-reference-panel"><a class="docs-heading-anchor" href="#Obtain-reference-panel">Obtain reference panel</a><a id="Obtain-reference-panel-1"></a><a class="docs-heading-anchor-permalink" href="#Obtain-reference-panel" title="Permalink"></a></h2><p>First download the <a href="https://bochet.gcc.biostat.washington.edu/beagle/1000_Genomes_phase3_v5a/b37.vcf">1000 genomes reference panel</a> in standard VCF format (warning: requires <span>$\sim 9.4$</span> GB):</p><pre><code class="language-julia hljs">download_1000genomes(outdir = &quot;/scratch/users/bbchu&quot;)</code></pre><p>Import chr22 data</p><pre><code class="language-julia hljs">vcffile = &quot;/scratch/users/bbchu/1000genomes/chr22.1kg.phase3.v5a.vcf.gz&quot;
+H, H_sampleID, H_chr, H_pos, H_ids, H_ref, H_alt = convert_gt(Float32, 
+    vcffile, save_snp_info=true, msg=&quot;importing&quot;);</code></pre><pre><code class="nohighlight hljs">[32mimporting 100%|██████████████████████████████████████████| Time: 0:02:36[39m</code></pre><p>Here <code>H</code> is the reference panel, each row is a sample and each column is a SNP. The type of H is <code>Union{Missing, Float32}</code>, which potentially allows for missing data. To conserve memory, one could specify <code>UInt8</code> instead of <code>Float32</code>. Of course, a good reference panel such as the 1000 genomes featured here will have no missing data. </p><pre><code class="language-julia hljs">H</code></pre><pre><code class="nohighlight hljs">2504×424147 Matrix{Union{Missing, Float32}}:
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0  …  0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0  …  0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0  …  0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  1.0  0.0  0.0
+ ⋮                        ⋮              ⋱  ⋮                        ⋮    
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0  …  0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     1.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  1.0  1.0  0.0  1.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0  …  1.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0
+ 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0     0.0  0.0  0.0  0.0  0.0  0.0  0.0</code></pre><p>Here <code>H_pos</code> contains the position for all SNPs present on chromosome 22 on the reference panel. </p><pre><code class="language-julia hljs">H_pos</code></pre><pre><code class="nohighlight hljs">424147-element Vector{Int64}:
+ 16050115
+ 16050213
+ 16050607
+ 16050739
+ 16050783
+ 16050840
+ 16050847
+ 16050922
+ 16050984
+ 16051075
+ 16051249
+ 16051453
+ 16051722
+        ⋮
+ 51239651
+ 51239652
+ 51239678
+ 51239794
+ 51240084
+ 51240820
+ 51241101
+ 51241102
+ 51241285
+ 51241386
+ 51244163
+ 51244237</code></pre><p>On the UK Biobank, 9359 / 9537 SNPs can be mapped to the 1000 genomes on chromosome 22. Note when this number is low, check if the human genome build for the reference panel (here build 37) matches with the GWAS data.</p><pre><code class="language-julia hljs">xdata = SnpData(&quot;/scratch/users/bbchu/ukb_fastPHASE/subset/ukb.10k.chr22&quot;)
+xdata.snp_info[!, &quot;position&quot;] ∩ H_pos</code></pre><pre><code class="nohighlight hljs">9359-element Vector{Int64}:
+ 16495833
+ 16870425
+ 16888577
+ 16952830
+ 17054795
+ 17056415
+ 17057597
+ 17068748
+ 17070109
+ 17072347
+ 17079911
+ 17080190
+ 17091201
+        ⋮
+ 51162059
+ 51162850
+ 51163138
+ 51163910
+ 51165664
+ 51171497
+ 51173542
+ 51174939
+ 51175626
+ 51183255
+ 51185848
+ 51193629</code></pre><h2 id="Simulated-Example"><a class="docs-heading-anchor" href="#Simulated-Example">Simulated Example</a><a id="Simulated-Example-1"></a><a class="docs-heading-anchor-permalink" href="#Simulated-Example" title="Permalink"></a></h2><p>Now suppose we were given the z-scores for 10000 SNPs and their position. Note that a GWAS summary stats file may not contain z-scores, but rather effect sizes, odds-ratios, or p-values. To convert different measures to the standard z-score, I found <a href="https://huwenboshi.github.io/data%20management/2017/11/23/tips-for-formatting-gwas-summary-stats.html">this reference</a> to be very useful.  </p><pre><code class="language-julia hljs">Random.seed!(2022)
+p = 10000 # number of SNPs
+Z = randn(p) # simulated z-scores
+Z_pos = sort!(rand(16050000:51244000, p)) # simulated position for each SNP</code></pre><pre><code class="nohighlight hljs">10000-element Vector{Int64}:
+ 16051161
+ 16051964
+ 16058006
+ 16061965
+ 16062797
+ 16066970
+ 16070158
+ 16071335
+ 16076125
+ 16078197
+ 16078220
+ 16080831
+ 16082209
+        ⋮
+ 51197030
+ 51203484
+ 51209420
+ 51211742
+ 51211790
+ 51215620
+ 51222784
+ 51227760
+ 51227831
+ 51231582
+ 51235924
+ 51238476</code></pre><p>Generating ghost knockoffs is accomplished via the <a href="https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.ghost_knockoffs">ghost_knockoffs</a> function. Here we employ the MVR construction (which tends to have the highest power) with a moderate window size:</p><pre><code class="language-julia hljs">Z̃ = ghost_knockoffs(Z, Z_pos, H_pos, H, :mvr, windowsize=500)</code></pre><pre><code class="nohighlight hljs">[32mApproximating covariance by blocks... 100%|██████████████| Time: 0:00:32[39m
+
+
+
+
+
+10000-element Vector{Float64}:
+  0.5410315696729918
+ -0.4246081059629637
+ -0.04956798334091112
+ -1.5764005812497706
+  0.5281884350544112
+ -0.02190687576925561
+  0.5249259412485039
+  1.0111906565388558
+ -1.4466613758239868
+  0.2581548620476279
+  0.09210845466626205
+ -0.4317124835746688
+  1.0672703288267222
+  ⋮
+  0.45921376701255845
+  1.202714589200995
+  0.6726136982607442
+ -0.22241142386162988
+ -0.05067713325684163
+ -0.6315313886344935
+ -0.20778832692909632
+  0.12586124372837243
+  0.37169961989672984
+ -0.1551860169036035
+  1.7102480919504381
+ -0.03192549553328507</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../knockoffscreen/knockoffscreen/">« KnockoffScreen Knockoffs</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.19 on <span class="colophon-date" title="Monday 20 June 2022 18:00">Monday 20 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
