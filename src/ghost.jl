@@ -34,6 +34,7 @@ function ghost_knockoffs(
     # first match SNPs in Z to those in H
     Z2H_idx = match_Z_to_H(Z_pos, H_pos)
     # preallocated variables
+    p = length(Z_pos)
     windows = ceil(Int, p / windowsize)
     block_covariances = Vector{Matrix{Float64}}(undef, windows)
     block_s = Vector{Vector{Float64}}(undef, windows)

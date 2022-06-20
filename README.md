@@ -22,17 +22,10 @@ This package supports Julia `v1.6`+.
 
 **fastPHASE.jl supports only mac and linux systems.** We are also experiencing some comptability issues with mac's M1 CPUs. Please file an issue if installation is a problem. 
 
-## Features
-
-+ Fixed equi-correlated knockoffs
-+ Fixed SDP knockoffs
-+ Multivariate normal knockoffs based on conditional formulas
-+ Discrete Markov chain knockoffs
-
 ## Development Roadmap
 
++ [Ghost knockoffs](https://www.biorxiv.org/content/10.1101/2021.12.06.471440v1.full) (in progress)
++ SDP/MVR/...etc constructions for [group knockoffs](https://proceedings.mlr.press/v48/daia16.html)
 + fastPHASE HMM knockoffs (in progress) (note: this is a native Julia implementation)
-+ SHAPEIT HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (in progress)
-+ MRC minimizing knockoffs ([ref](https://arxiv.org/abs/2011.14625))
-+ Parallelized ASDP knockoffs
 + [KnockoffScreen](https://www.nature.com/articles/s41467-021-22889-4) knockoffs (in progress)
++ SHAPEIT HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (in progress)

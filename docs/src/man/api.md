@@ -17,6 +17,7 @@ Pages = ["api.md"]
   approx_modelX_gaussian_knockoffs
   hmm_knockoff
   full_knockoffscreen
+  ghost_knockoffs
   solve_s
   solve_MVR
   solve_max_entropy
