@@ -62,10 +62,11 @@ function ghost_knockoffs(
     D = Diagonal(s)
     DΣinv = D * Σinv
     P = I - DΣinv
+    μ = P * Zscores
+    V = Symmetric(Matrix(2D - DΣinv * D)) # do not wrap Matrix after this is resolved https://github.com/invenia/BlockDiagonals.jl/issues/102
     # generate ghost knockoffs
-    V = 2D - DΣinv * D
-    μ = P * zscores
     Z̃ = rand(MvNormal(μ, V))
+    return Z̃
 end
 
 function match_Z_to_H(Z_pos::AbstractVector{Int}, H_pos::AbstractVector{Int})
@@ -91,5 +92,3 @@ function searchsortednearest(reference::Vector{Int}, x::Int)
     reference[idx]==x && return idx
     return abs(reference[idx]-x) < abs(reference[idx-1]-x) ? idx : idx - 1
 end
-# reference = [1, 5, 12, 23]
-# searchsortednearest(reference, 4)
