@@ -27,6 +27,7 @@ export knockoff_filter, fit_lasso,
     partition, rapid, snpknock2, decorrelate_knockoffs,
     process_fastphase_output, fastphase, 
     approx_modelX_gaussian_knockoffs,
+    ghost_knockoffs,
     solve_s,
     # constructors
     knockoff,
