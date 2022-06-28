@@ -1,5 +1,6 @@
 """
-    approx_modelX_gaussian_knockoffs(X, method; windowsize = 500, kwargs...)
+    approx_modelX_gaussian_knockoffs(X, method; [windowsize = 500], [covariance_approximator], kwargs...)
+    approx_modelX_gaussian_knockoffs(X, method, window_ranges; [covariance_approximator], kwargs...)
 
 Generates Gaussian knockoffs by approximating the covariance as a block diagonal matrix. 
 Each block contains `windowsize` consecutive features. 
@@ -14,6 +15,7 @@ Each block contains `windowsize` consecutive features.
     * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 + `windowsize`: Number of covariates to be included in a block. Each block consists of
     adjacent variables. The last block could contain less than `windowsize` variables. 
++ `window_ranges`: Vector of ranges for each window. e.g. [1:97, 98:200, 201:500]
 + `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`.
     See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
@@ -40,16 +42,35 @@ function approx_modelX_gaussian_knockoffs(
     windowsize > 1 || error("windowsize should be > 1 but was $windowsize")
     p = size(X, 2)
     windows = ceil(Int, p / windowsize)
+    window_ranges = UnitRange{Int64}[]
+    # partition covariates into windows, each with `windowsize` covariates
+    for window in 1:windows
+        cur_range = window == windows ? 
+            ((windows - 1)*windowsize + 1:p) : 
+            ((window - 1)*windowsize + 1:window * windowsize)
+        push!(window_ranges, cur_range)
+    end
+    return approx_modelX_gaussian_knockoffs(X, method, window_ranges; 
+        covariance_approximator=covariance_approximator, kwargs...)
+end
+
+function approx_modelX_gaussian_knockoffs(
+    X::AbstractMatrix, 
+    method::Symbol,
+    window_ranges::Vector{UnitRange{Int64}};
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs...
+    )
+    covariates_by_windows = sum(length.(window_ranges))
+    covariates_by_windows == size(X, 2) || error("window_ranges have $covariates_by_windows dimensions but X has $(size(X, 2))")
+    windows = length(window_ranges)
     block_covariances = Vector{Matrix{Float64}}(undef, windows)
     block_s = Vector{Vector{Float64}}(undef, windows)
     storage = typeof(X) <: AbstractSnpArray ? zeros(size(X, 1), windowsize) : nothing
     pmeter = Progress(windows, 1, "Approximating covariance by blocks...")
     # solve for s in each block of Σ
-    for window in 1:windows
+    for (window, cur_range) in enumerate(window_ranges)
         # grab current window of X
-        cur_range = window == windows ? 
-            ((windows - 1)*windowsize + 1:p) : 
-            ((window - 1)*windowsize + 1:window * windowsize)
         Xcur = get_X_subset(X, cur_range, storage)
         # approximate a block of Σ
         Σcur = cov(covariance_approximator, Xcur)
