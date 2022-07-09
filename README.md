@@ -24,6 +24,8 @@ This package supports Julia `v1.6`+.
 
 ## Development Roadmap
 
++ Use Mosek for SDP problems by default
++ Docker
 + [Ghost knockoffs](https://www.biorxiv.org/content/10.1101/2021.12.06.471440v1.full) (in progress)
 + SDP/MVR/...etc constructions for [group knockoffs](https://proceedings.mlr.press/v48/daia16.html)
 + fastPHASE HMM knockoffs (in progress) (note: this is a native Julia implementation)

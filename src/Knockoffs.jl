@@ -20,8 +20,11 @@ using GLMNet
 using BlockDiagonals
 using Roots: fzero
 using Downloads
+using GLM
+using Reexport
+@reexport using GLM
 
-export knockoff_filter, fit_lasso, 
+export knockoff_filter, 
     fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
     coefficient_diff, threshold, extract_beta,
     partition, rapid, snpknock2, decorrelate_knockoffs,
@@ -31,6 +34,8 @@ export knockoff_filter, fit_lasso,
     solve_s,
     # constructors
     knockoff,
+    # functions related to fitting lasso
+    fit_lasso, debias!, predict, 
     # functions for hmm
     get_haplotype_transition_matrix, get_genotype_transition_matrix, 
     get_initial_probabilities, genotype_knockoffs,

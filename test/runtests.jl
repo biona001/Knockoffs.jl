@@ -301,9 +301,9 @@ end
     @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
 
     # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
-    @time sdp_filter = fit_lasso(y, Xko_sdp.X, Xko_sdp.X̃, debias=false)
-    @time mvr_filter = fit_lasso(y, Xko_mvr.X, Xko_mvr.X̃, debias=false)
-    @time me_filter = fit_lasso(y, Xko_maxent.X, Xko_maxent.X̃, debias=false)
+    @time sdp_filter = fit_lasso(y, Xko_sdp.X, Xko_sdp.X̃, debias=nothing)
+    @time mvr_filter = fit_lasso(y, Xko_mvr.X, Xko_mvr.X̃, debias=nothing)
+    @time me_filter = fit_lasso(y, Xko_maxent.X, Xko_maxent.X̃, debias=nothing)
 
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
     for i in eachindex(sdp_filter.fdr_target)
@@ -390,8 +390,8 @@ end
     @time Xko = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
 
     # run lasso, followed up by debiasing
-    @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=false)
-    @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=true)
+    @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=nothing)
+    @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=:ls)
 
     # check that debiased result have same support as not debiasing
     for i in eachindex(nodebias.fdr_target)
@@ -420,4 +420,78 @@ end
     @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, window_ranges);
     λmin = eigmin(2*amvr.Σ - Diagonal(amvr.s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+end
+
+@testset "fit lasso Gaussian" begin
+    # simulate data
+    Random.seed!(2022)
+    n = 100 # sample size
+    p = 500 # number of predictors
+    k = 10 # number of causal predictors
+    X = randn(n, p)
+    b = zeros(p)
+    b[1:k] .= randn(k)
+    shuffle!(b)
+    y = X * b
+
+    # debias with least squares
+    ko = fit_lasso(y, X, debias=:ls)
+    @test length(ko.βs) == length(ko.a0)
+    for i in 1:length(ko.βs)
+        @test norm(ko.βs[i] - b) < 1e-10
+    end
+    # idx = findall(!iszero, b)
+    # [ko.βs[5][idx] b[idx]]
+    
+    # debias with lasso
+    ko = fit_lasso(y, X, debias=:lasso)
+    @test length(ko.βs) == length(ko.a0)
+    for i in 1:length(ko.βs)
+        @test norm(ko.βs[i] - b) < 1e-4
+    end
+
+    # no debias
+    ko = fit_lasso(y, X, debias=nothing)
+    @test length(ko.βs) == length(ko.a0)
+    for i in 1:length(ko.βs)
+        @test norm(ko.βs[i] - b) > 0.01
+    end
+end
+
+@testset "fit lasso logistic" begin
+    # simulate data
+    Random.seed!(2022)
+    n = 1000 # sample size
+    p = 500 # number of predictors
+    k = 10 # number of causal predictors
+    X = randn(n, p)
+    b = zeros(p)
+    b[1:k] .= randn(k)
+    shuffle!(b)
+    μ = GLM.linkinv.(LogitLink(), X * b)
+    y = [rand(Bernoulli(μi)) for μi in μ] |> Vector{Float64}
+
+    # debias with least squares
+    ls_ko = fit_lasso(y, X, d = Binomial(), debias=:ls)
+    @test length(ls_ko.βs) == length(ls_ko.a0)
+    for i in 1:length(ls_ko.βs)
+        @test norm(ls_ko.βs[i] - b) < 1
+    end
+    
+    # debias with lasso
+    lasso_ko = fit_lasso(y, X, d = Binomial(), debias=:lasso)
+    @test length(lasso_ko.βs) == length(lasso_ko.a0)
+    for i in 1:length(lasso_ko.βs)
+        @test norm(lasso_ko.βs[i] - b) < 5
+    end
+
+    # no debias
+    nodebias_ko = fit_lasso(y, X, d = Binomial(), debias=nothing)
+    @test length(nodebias_ko.βs) == length(nodebias_ko.a0)
+    for i in 1:length(nodebias_ko.βs)
+        @test norm(nodebias_ko.βs[i] - b) < 5
+    end
+
+    idx = findall(!iszero, b)
+    [ls_ko.βs[5][idx] lasso_ko.βs[5][idx] nodebias_ko.βs[5][idx] b[idx]]
 end

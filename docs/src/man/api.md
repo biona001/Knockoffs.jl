@@ -39,6 +39,7 @@ Pages = ["api.md"]
   normalize_col!
   decorrelate_knockoffs
   sample_DMC
+  fit_lasso
 ```
 
 ## Wrapper functions for SHAPEIT HMM knockoffs

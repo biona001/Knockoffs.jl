@@ -1,11 +1,38 @@
 """
-    fit_lasso()
+    fit_lasso(y, X, method=:mvr, ...)
 
-Generates knockoffs, runs Lasso with GLMNet, then applies the knockoff-filter.
+Generates knockoffs with `method`, runs Lasso, then applies the knockoff-filter.
 
 # Inputs
-+ method: `:knockoff` or `:knockoff_plus`
++ `y`: Response vector
++ `X`: Design matrix
++ `method`: Method for knockoff generation (defaults to `:mvr`)
++ `d`: Distribution of response. Defaults `Normal()`, for binary use `Binomial()`
++ `fdrs`: Target FDRs, defaults to `[0.01, 0.05, 0.1, 0.25, 0.5]`
++ `filter_method`: Choices are `:knockoff` (default) or `:knockoff_plus`
++ `debias`: How the selected coefficients are debiased, specify `:ls` 
+    for least squares or `:lasso` for Lasso (only running on the support).
+    To not debias, specify `debias=nothing`
++ `kwargs`: Additional arguments to input into `glmnetcv` and `glmnet`
 """
+function fit_lasso(
+    y::AbstractVector{T},
+    X::AbstractMatrix{T};
+    method::Symbol = :mvr,
+    d::Distribution=Normal(),
+    fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
+    groups::Union{Nothing, AbstractVector{Int}} = nothing,
+    filter_method::Symbol = :knockoff,
+    debias::Union{Nothing, Symbol} = :ls,
+    kwargs..., # arguments for glmnetcv
+    ) where T
+    n, p = size(X)
+    # generate fixed-X knockoffs if n >> p, otherwise use model-X knockoffs
+    ko = n > 2p ? fixed_knockoffs(X, method) : modelX_gaussian_knockoffs(X, method)
+    return fit_lasso(y, X, ko.X̃, d=d, fdrs=fdrs, groups=groups, 
+        filter_method=filter_method, debias=debias; kwargs...)
+end
+
 function fit_lasso(
     y::AbstractVector{T},
     X::AbstractMatrix{T}, 
@@ -14,12 +41,14 @@ function fit_lasso(
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff, # `:knockoff` or `:knockoff_plus`
-    debias::Bool = true,
+    debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
+    isnothing(groups) || error("groups keyword not supported yet! Sorry!")
+    ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     # fit lasso (note: need to interleaves X with X̃)
     XX̃, original, knockoff = merge_knockoffs_with_original(X, X̃)
-    knockoff_cv = glmnetcv(XX̃, y, d; kwargs...)
+    knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
     βestim = GLMNet.coef(knockoff_cv)
     a0 = knockoff_cv.path.a0[argmin(knockoff_cv.meanloss)]
     # compute feature importance statistics and allocate necessary knockoff-filter variables
@@ -32,53 +61,70 @@ function fit_lasso(
             extract_beta(βestim, fdr, original, knockoff, filter_method, W) : 
             extract_beta(βestim, fdr, groups, original, knockoff, filter_method, W)
         # debias the estimates if requested
-        debias && (a0 = debias!(β_filtered, X, y))
+        isnothing(debias) || (a0 = debias!(β_filtered, X, y; method=debias, d=d, kwargs...))
         # save knockoff statistics
         push!(βs, β_filtered)
         push!(τs, τ)
         push!(a0s, a0)
     end
-    return KnockoffFilter(XX̃, original, knockoff, W, βs, a0s, τs, fdrs, debias)
+    return KnockoffFilter(X, X̃, W, βs, a0s, τs, fdrs, debias)
 end
 
 function debias!(
     β̂::AbstractVector{T},
-    x::AbstractMatrix,
-    y::AbstractVector;
+    x::AbstractMatrix{T},
+    y::AbstractVector{T};
+    method=:ls, # :ls or :lasso
+    d::Distribution=Normal(),
     kwargs... # extra arguments for glmnetcv
     ) where T
     # for debiasing, lasso can only have non-0 entries on the support of β̂
-    zero_idx = β̂ .== 0
-    penalty_factor = ones(T, length(β̂))
-    @view(penalty_factor[zero_idx]) .= typemax(T)
-    # run cross validated lasso
-    cv = glmnetcv(x, y, penalty_factor=penalty_factor; kwargs...)
-    # refit lasso on best performing lambda and extract resulting beta/intercept
-    λbest = cv.lambda[argmin(cv.meanloss)]
-    best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
-    copyto!(β̂, best_fit.betas)
-    intercept = best_fit.a0[1]
-    sum(@view(β̂[zero_idx])) ≈ zero(T) || 
-        error("Debiasing error: a zero index has non-zero coefficient")
+    if method == :lasso
+        zero_idx = β̂ .== 0
+        penalty_factor = ones(T, length(β̂))
+        @view(penalty_factor[zero_idx]) .= typemax(T)
+        # run cross validated lasso
+        cv = glmnetcv(x, y, penalty_factor=penalty_factor; kwargs...)
+        # refit lasso on best performing lambda and extract resulting beta/intercept
+        λbest = cv.lambda[argmin(cv.meanloss)]
+        best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
+        copyto!(β̂, best_fit.betas)
+        intercept = best_fit.a0[1]
+        sum(@view(β̂[zero_idx])) ≈ zero(T) || 
+            error("Debiasing error: a zero index has non-zero coefficient")
+    elseif method == :ls
+        nonzero_idx = findall(!iszero, β̂)
+        Xsubset = [ones(T, size(x, 1)) x[:, nonzero_idx]]
+        model = glm(Xsubset, y, d)
+        β_debiased = GLM.coef(model)
+        intercept = β_debiased[1]
+        β̂[nonzero_idx] .= @view(β_debiased[2:end])
+    else
+        error("method should be :ls or :lasso but was $method")
+    end
     return intercept
 end
 
-# function debias(x::AbstractMatrix, y::AbstractVector, method::Symbol=:ls)
-#     if method == :ls
-#         return x \ y # intercept must be in x already
-#     elseif method == :lasso
-#         cv = glmnetcv(x, y, alpha=1.0) # 0.0 = ridge regression, 1.0 = lasso, in between = elastic net
-#         β_lasso = copy(cv.path.betas[:, argmin(cv.meanloss)])
-#         lasso_intercept = cv.path.a0[argmin(cv.meanloss)]
-#     elseif method == :ridge
-#         cv = glmnetcv(x, y, alpha=0.0) # 0.0 = ridge regression, 1.0 = lasso, in between = elastic net
-#         β_ridge = copy(cv.path.betas[:, argmin(cv.meanloss)])
-#         ridge_intercept = cv.path.a0[argmin(cv.meanloss)]
-#     elseif method == :elastic_net
-#         cv = glmnetcv(x, y, alpha=0.5) # 0.0 = ridge regression, 1.0 = lasso, in between = elastic net
-#         β_elastic = copy(cv.path.betas[:, argmin(cv.meanloss)])
-#         elastic_intercept = cv.path.a0[argmin(cv.meanloss)]
-#     else
-#         error("method should be :ls, :lasso, :ridge, :elastic_net, but got $method")
-#     end
-# end
+function predict(model::KnockoffFilter; d::Distribution=Normal())
+    ŷs = Vector{T}[]
+    η = zeros(T, size(XX̃, 1))
+    link = canonicallink(d)
+    for i in 1:length(model.βs)
+        # compute mean: η = a0 .+ Xβ̂
+        fill!(η, model.a0[i])
+        BLAS.gemv!('N', one(T), model.X, model.βs[i], one(T), η)
+        # apply inverse logit link for logistic regression
+        μ = copy(η)
+        μ .= GLM.linkinv.(link, μ)
+        push!(ŷs, μ)
+    end
+    return ŷs
+end
+
+# According to GLMNet.jl documentation https://github.com/JuliaStats/GLMNet.jl
+# y needs to be a m by 2 matrix, where the first column is the count of negative responses for each row in X and the second column is the count of positive responses.
+function form_glmnet_logistic_y(y::AbstractVector{T}) where T
+    sort!(unique(y)) == [zero(T), one(T)] || error("y should have values 0 and 1 only")
+    glmnet_y = [y .== 0 y .== 1] |> Matrix{T}
+    return glmnet_y
+end
