@@ -1,18 +1,20 @@
 """
     fit_lasso(y, X, method=:mvr, ...)
 
-Generates knockoffs with `method`, runs Lasso, then applies the knockoff-filter.
+Generates model-X knockoffs with `method`, runs Lasso, 
+then applies the knockoff-filter.
 
 # Inputs
 + `y`: Response vector
 + `X`: Design matrix
 + `method`: Method for knockoff generation (defaults to `:mvr`)
-+ `d`: Distribution of response. Defaults `Normal()`, for binary use `Binomial()`
++ `d`: Distribution of response. Defaults `Normal()`, for binary response
+    (logistic regression) use `Binomial()`.
 + `fdrs`: Target FDRs, defaults to `[0.01, 0.05, 0.1, 0.25, 0.5]`
 + `filter_method`: Choices are `:knockoff` (default) or `:knockoff_plus`
-+ `debias`: How the selected coefficients are debiased, specify `:ls` 
-    for least squares or `:lasso` for Lasso (only running on the support).
-    To not debias, specify `debias=nothing`
++ `debias`: Defines how the selected coefficients are debiased. Specify `:ls` 
+    for least squares (default) or `:lasso` for Lasso (only running on the 
+    support). To not debias, specify `debias=nothing`
 + `kwargs`: Additional arguments to input into `glmnetcv` and `glmnet`
 """
 function fit_lasso(
@@ -26,9 +28,7 @@ function fit_lasso(
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
-    n, p = size(X)
-    # generate fixed-X knockoffs if n >> p, otherwise use model-X knockoffs
-    ko = n > 2p ? fixed_knockoffs(X, method) : modelX_gaussian_knockoffs(X, method)
+    ko = modelX_gaussian_knockoffs(X, method)
     return fit_lasso(y, X, ko.X̃, d=d, fdrs=fdrs, groups=groups, 
         filter_method=filter_method, debias=debias; kwargs...)
 end
@@ -67,7 +67,7 @@ function fit_lasso(
         push!(τs, τ)
         push!(a0s, a0)
     end
-    return KnockoffFilter(X, X̃, W, βs, a0s, τs, fdrs, debias)
+    return KnockoffFilter(y, X, X̃, W, βs, a0s, τs, fdrs, d, debias)
 end
 
 function debias!(
@@ -78,9 +78,9 @@ function debias!(
     d::Distribution=Normal(),
     kwargs... # extra arguments for glmnetcv
     ) where T
-    # for debiasing, lasso can only have non-0 entries on the support of β̂
+    zero_idx = β̂ .== 0
     if method == :lasso
-        zero_idx = β̂ .== 0
+        # Give infinite penalty to indices of zeros
         penalty_factor = ones(T, length(β̂))
         @view(penalty_factor[zero_idx]) .= typemax(T)
         # run cross validated lasso
@@ -90,8 +90,6 @@ function debias!(
         best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
         copyto!(β̂, best_fit.betas)
         intercept = best_fit.a0[1]
-        sum(@view(β̂[zero_idx])) ≈ zero(T) || 
-            error("Debiasing error: a zero index has non-zero coefficient")
     elseif method == :ls
         nonzero_idx = findall(!iszero, β̂)
         Xsubset = [ones(T, size(x, 1)) x[:, nonzero_idx]]
@@ -102,6 +100,8 @@ function debias!(
     else
         error("method should be :ls or :lasso but was $method")
     end
+    all(x -> x ≈ zero(T), @view(β̂[zero_idx])) ||
+        error("Debiasing error: a zero index has non-zero coefficient")
     return intercept
 end
 

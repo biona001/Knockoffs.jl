@@ -1,18 +1,16 @@
 function predict(
     model::KnockoffFilter{T},
-    xtest::AbstractMatrix{T};
-    d::Distribution=Normal()
+    xtest::AbstractMatrix{T}
     ) where T
     ŷs = Vector{T}[]
-    η = zeros(T, size(xtest, 1))
+    d = model.d
     link = canonicallink(d)
     for i in 1:length(model.βs)
         # compute mean: η = a0 .+ Xβ̂
-        fill!(η, model.a0[i])
+        η = fill(model.a0[i], size(xtest, 1))
         BLAS.gemv!('N', one(T), xtest, model.βs[i], one(T), η)
-        # apply inverse logit link for logistic regression
-        μ = copy(η)
-        μ .= GLM.linkinv.(link, μ)
+        # apply inverse link to get mean
+        μ = GLM.linkinv.(link, η)
         push!(ŷs, μ)
     end
     return ŷs

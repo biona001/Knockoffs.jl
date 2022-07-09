@@ -78,6 +78,7 @@ property. `τ` is the knockoff threshold, which controls the empirical FDR at
 level `q`
 """
 struct KnockoffFilter{T}
+    y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original X and its knockoff interleaved randomly
     X̃ :: Matrix{T} # n × p matrix of X knockoff
     W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
@@ -85,5 +86,6 @@ struct KnockoffFilter{T}
     a0 :: Vector{T}   # intercepts for each model in βs
     τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
     fdr_target :: Vector{T} # target FDR level for each τs and βs
+    d :: UnivariateDistribution # distribution of y
     debias :: Union{Nothing, Symbol} # how βs and a0 have been debiased (`nothing` for not debiased)
 end
