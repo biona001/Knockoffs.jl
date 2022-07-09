@@ -40,6 +40,7 @@ Pages = ["api.md"]
   decorrelate_knockoffs
   sample_DMC
   fit_lasso
+  predict
 ```
 
 ## Wrapper functions for SHAPEIT HMM knockoffs

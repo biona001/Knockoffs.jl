@@ -105,22 +105,6 @@ function debias!(
     return intercept
 end
 
-function predict(model::KnockoffFilter; d::Distribution=Normal())
-    ŷs = Vector{T}[]
-    η = zeros(T, size(XX̃, 1))
-    link = canonicallink(d)
-    for i in 1:length(model.βs)
-        # compute mean: η = a0 .+ Xβ̂
-        fill!(η, model.a0[i])
-        BLAS.gemv!('N', one(T), model.X, model.βs[i], one(T), η)
-        # apply inverse logit link for logistic regression
-        μ = copy(η)
-        μ .= GLM.linkinv.(link, μ)
-        push!(ŷs, μ)
-    end
-    return ŷs
-end
-
 # According to GLMNet.jl documentation https://github.com/JuliaStats/GLMNet.jl
 # y needs to be a m by 2 matrix, where the first column is the count of negative responses for each row in X and the second column is the count of positive responses.
 function form_glmnet_logistic_y(y::AbstractVector{T}) where T

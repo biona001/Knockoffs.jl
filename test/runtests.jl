@@ -432,13 +432,14 @@ end
     b = zeros(p)
     b[1:k] .= randn(k)
     shuffle!(b)
-    y = X * b
+    y = X * b + randn(n)
 
     # debias with least squares
     ko = fit_lasso(y, X, debias=:ls)
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
-        @test norm(ko.βs[i] - b) < 1e-10
+        # println(norm(ko.βs[i] - b))
+        @test norm(ko.βs[i] - b) < 1
     end
     # idx = findall(!iszero, b)
     # [ko.βs[5][idx] b[idx]]
@@ -447,14 +448,16 @@ end
     ko = fit_lasso(y, X, debias=:lasso)
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
-        @test norm(ko.βs[i] - b) < 1e-4
+        # println(norm(ko.βs[i] - b))
+        @test norm(ko.βs[i] - b) < 1
     end
 
     # no debias
     ko = fit_lasso(y, X, debias=nothing)
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
-        @test norm(ko.βs[i] - b) > 0.01
+        # println(norm(ko.βs[i] - b))
+        @test norm(ko.βs[i] - b) < 2
     end
 end
 
@@ -492,6 +495,44 @@ end
         @test norm(nodebias_ko.βs[i] - b) < 5
     end
 
-    idx = findall(!iszero, b)
-    [ls_ko.βs[5][idx] lasso_ko.βs[5][idx] nodebias_ko.βs[5][idx] b[idx]]
+    # visually compare estimated effect sizes (least squares > nodebias > lasso)
+    # idx = findall(!iszero, b)
+    # [ls_ko.βs[5][idx] lasso_ko.βs[5][idx] nodebias_ko.βs[5][idx] b[idx]]
+end
+
+@testset "predict via knockoff-filter" begin
+    # simulate data
+    Random.seed!(2022)
+    n = 200 # sample size
+    p = 500 # number of predictors
+    k = 10 # number of causal predictors
+    X = randn(n, p)
+    b = zeros(p)
+    b[1:k] .= randn(k)
+    shuffle!(b)
+    y = X * b + randn(n)
+    Xtest = randn(n, p)
+    ytest = Xtest * b + randn(n)
+
+    # generate knockoffs and predict with debiased beta for each target FDR
+    ko = fit_lasso(y, X, debias=:ls)
+    ŷs = Knockoffs.predict(ko, Xtest)
+    for i in 1:length(ko.βs)
+        # println("R2 = $(R2(ŷs[i], ytest))")
+        @test R2(ŷs[i], ytest) > 0.5
+    end
+
+    ko = fit_lasso(y, X, debias=:lasso)
+    ŷs = Knockoffs.predict(ko, Xtest)
+    for i in 1:length(ko.βs)
+        # println("R2 = $(R2(ŷs[i], ytest))")
+        @test R2(ŷs[i], ytest) > 0.5
+    end
+
+    ko = fit_lasso(y, X, debias=nothing)
+    ŷs = Knockoffs.predict(ko, Xtest)
+    for i in 1:length(ko.βs)
+        # println("R2 = $(R2(ŷs[i], ytest))")
+        @test R2(ŷs[i], ytest) > 0.5
+    end
 end

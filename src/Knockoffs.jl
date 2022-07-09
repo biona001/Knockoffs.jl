@@ -35,7 +35,9 @@ export knockoff_filter,
     # constructors
     knockoff,
     # functions related to fitting lasso
-    fit_lasso, debias!, predict, 
+    fit_lasso, debias!, 
+    # functions for prediction routine after lasso fit
+    predict, R2, auc, 
     # functions for hmm
     get_haplotype_transition_matrix, get_genotype_transition_matrix, 
     get_initial_probabilities, genotype_knockoffs,
@@ -66,6 +68,7 @@ include("knockoffscreen.jl")
 include("fit_lasso.jl")
 include("approx.jl")
 include("ghost.jl")
+include("predict.jl")
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    
