@@ -46,11 +46,13 @@ function fit_lasso(
     ) where T <: AbstractFloat
     isnothing(groups) || error("groups keyword not supported yet! Sorry!")
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
-    # fit lasso (note: need to interleaves X with X̃)
+    # cross validate for λ, then refit Lasso with best λ
     XX̃, original, knockoff = merge_knockoffs_with_original(X, X̃)
     knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
-    βestim = GLMNet.coef(knockoff_cv)
-    a0 = knockoff_cv.path.a0[argmin(knockoff_cv.meanloss)]
+    λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
+    best_fit = glmnet(XX̃, y, lambda=[λbest])
+    βestim = vec(best_fit.betas)
+    a0 = best_fit.a0[1]
     # compute feature importance statistics and allocate necessary knockoff-filter variables
     W = isnothing(groups) ? coefficient_diff(βestim, original, knockoff) : 
         coefficient_diff(βestim, groups, original, knockoff)
