@@ -536,3 +536,30 @@ end
         @test R2(ŷs[i], ytest) > 0.5
     end
 end
+
+@testset "groups" begin
+    # inverse_mat_sqrt is working
+    x = rand(10, 10)
+    A = Symmetric(x' * x)
+    Ainvsqrt = inverse_mat_sqrt(A)
+    @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
+
+    # simulate some data
+    Random.seed!(2022)
+    B = 100
+    Σ = simulate_block_covariance(B)
+
+    # solve_Sb_equi produces S blocks s.t. 2Sb - Σb is psd
+    Σb = Σ.blocks[1]
+    Sb = solve_Sb_equi(Σb)
+    @test isposdef(Matrix(2Σb - Sb))
+    @test length(Sb.blocks) == length(Σb.blocks)
+    @test all(size.(Sb.blocks) .== size.(Σb.blocks)) # each block size should be the same
+
+    # solve_s_group produces proper block diagonal S
+    @time S = solve_s_group(Σ)
+    @test isposdef(Matrix(2Σ - S))
+    @test typeof(S) <: BlockDiagonal
+    @test length(S.blocks) == length(Σ.blocks)
+    @test all(size.(S.blocks) .== size.(Σ.blocks)) # each block size should be the same
+end

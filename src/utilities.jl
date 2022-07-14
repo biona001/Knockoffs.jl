@@ -632,3 +632,24 @@ function download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
         Downloads.download(joinpath(link, tabixfile), joinpath(outpath, tabixfile))
     end
 end
+
+function simulate_block_covariance(
+    B::Int, # number of blocks
+    num_groups_per_block=2:10, # each block have 2-10 groups
+    num_vars_per_group=2:5, # each group have 2-5 variables
+    rho = Uniform(0, 1) # correlation for covariates each group
+    )
+    Σ = BlockDiagonal{Float64}[]
+    for b in 1:B
+        num_groups = rand(num_groups_per_block) 
+        Σb = Matrix{Float64}[]
+        for g in 1:num_groups
+            ρ = rand(rho)   
+            p = rand(num_vars_per_group) 
+            Σbi = (1-ρ) * Matrix(I, p, p) + ρ * ones(p, p)
+            push!(Σb, Σbi)
+        end
+        push!(Σ, BlockDiagonal(Σb))
+    end
+    return BlockDiagonal(Σ)
+end
