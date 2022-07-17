@@ -31,7 +31,8 @@ export knockoff_filter,
     process_fastphase_output, fastphase, 
     approx_modelX_gaussian_knockoffs,
     ghost_knockoffs,
-    solve_s,
+    modelX_gaussian_group_knockoffs,
+    solve_s, solve_s_group,
     # constructors
     knockoff,
     # functions related to fitting lasso
@@ -53,7 +54,8 @@ export knockoff_filter,
     compare_correlation, compare_pairwise_correlation,
     # utilities
     merge_knockoffs_with_original, simulate_AR1,
-    download_1000genomes
+    download_1000genomes,
+    simulate_block_covariance
 
 include("struct.jl")
 include("fixed.jl")
@@ -69,6 +71,7 @@ include("fit_lasso.jl")
 include("approx.jl")
 include("ghost.jl")
 include("predict.jl")
+include("group.jl")
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    

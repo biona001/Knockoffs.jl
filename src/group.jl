@@ -24,10 +24,10 @@ function solve_group_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
         push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
     end
     Db = BlockDiagonal(Db)
-    λmin = Symmetric(Db * Σ * Db) |> eigvals |> minimum
-    γb = min(1, 2λmin)
-    Sb = BlockDiagonal(γb .* Σblocks.blocks)
-    return Sb
+    λmin = Symmetric(Db * Σ * Db) |> eigmin
+    γ = min(1, 2λmin)
+    S = BlockDiagonal(γ .* Σblocks.blocks)
+    return S
 end
 
 # todo: cov2cor for Σ
@@ -37,7 +37,7 @@ function solve_s_group(
     method::Symbol=:equi;
     kwargs...)
     # define group-blocks
-    Σblocks = Matrix{eltype(X)}[]
+    Σblocks = Matrix{eltype(Σ)}[]
     for g in unique(groups)
         idx = findall(x -> x == g, groups)
         push!(Σblocks, Σ[idx, idx])
