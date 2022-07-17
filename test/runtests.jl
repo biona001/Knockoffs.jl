@@ -537,7 +537,7 @@ end
     end
 end
 
-@testset "groups" begin
+@testset "group knockoffs" begin
     # inverse_mat_sqrt is working
     x = rand(10, 10)
     A = Symmetric(x' * x)
@@ -545,21 +545,62 @@ end
     @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
 
     # simulate some data
+    m = 200 # number of groups
+    pi = 5  # features per group
+    k = 20  # number of causal groups
+    ρ = 0.4 # within group correlation
+    γ = 0.2 # between group correlation
+    p = m * pi # number of features
+    n = 1000 # sample size
+    groups = repeat(1:m, inner=5)
+    Σ = simulate_block_covariance(groups, ρ, γ)
+    true_mu = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L
+    zscore!(X, mean(X, dims=1), std(X, dims=1));
+    @time ko = modelX_gaussian_group_knockoffs(X, groups, :equi, true_mu, Σ)
+
+    # solve_S_equi produces block diagonal S s.t. 2S - Σ is psd
+    S = ko.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), blocksizes(S))
+end
+
+@testset "group fit_lasso" begin
+    # simulate some data
+    m = 200 # number of groups
+    pi = 5  # features per group
+    k = 20  # number of causal groups
+    ρ = 0.4 # within group correlation
+    γ = 0.2 # between group correlation
+    p = m * pi # number of features
+    n = 1000 # sample size
+
+    groups = repeat(1:m, inner=5)
+    Σ = simulate_block_covariance(groups, ρ, γ)
+    true_mu = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L
+    zscore!(X, mean(X, dims=1), std(X, dims=1));
+
+    βtrue = zeros(m*pi)
+    βtrue[1:k] .= rand(-1:2:1, k) .* 3.5
+    shuffle!(βtrue)
+    ϵ = randn(n)
+    y = X * βtrue + ϵ;
+
+    # no debias
     Random.seed!(2022)
-    B = 100
-    Σ = simulate_block_covariance(B)
+    @time ko_filter1 = fit_lasso(y, X, method=:equi, groups=groups, debias=nothing)
+    # debias with least squares (stringent)
+    Random.seed!(2022)
+    @time ko_filter2 = fit_lasso(y, X, method=:equi, groups=groups, debias=:ls, stringent=true)
+    # debias with lasso (not stringent
+    Random.seed!(2022)
+    @time ko_filter3 = fit_lasso(y, X, method=:equi, groups=groups, debias=:lasso, stringent=false)
 
-    # solve_Sb_equi produces S blocks s.t. 2Sb - Σb is psd
-    Σb = Σ.blocks[1]
-    Sb = solve_Sb_equi(Σb)
-    @test isposdef(Matrix(2Σb - Sb))
-    @test length(Sb.blocks) == length(Σb.blocks)
-    @test all(size.(Sb.blocks) .== size.(Σb.blocks)) # each block size should be the same
-
-    # solve_s_group produces proper block diagonal S
-    @time S = solve_s_group(Σ)
-    @test isposdef(Matrix(2Σ - S))
-    @test typeof(S) <: BlockDiagonal
-    @test length(S.blocks) == length(Σ.blocks)
-    @test all(size.(S.blocks) .== size.(Σ.blocks)) # each block size should be the same
+    nz_1 = count.(!iszero, ko_filter1.βs)
+    nz_2 = count.(!iszero, ko_filter2.βs)
+    nz_3 = count.(!iszero, ko_filter3.βs)
+    @test all(nz_1 .== nz_2 .≤ nz_3)
 end

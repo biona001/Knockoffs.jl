@@ -75,7 +75,7 @@ function modelX_gaussian_group_knockoffs(
     μ::AbstractVector, 
     Σ::AbstractMatrix; 
     kwargs...)
-    # compute s vector using the specified method
+    # compute block diagonal S matrix using the specified method
     S = solve_s_group(Σ, groups, method; kwargs...) :: BlockDiagonal
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), S)

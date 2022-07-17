@@ -674,22 +674,22 @@ function simulate_block_covariance(
     return Σ
 end
 
-function get_group_memberships(
-    Σ::BlockDiagonal{T, V}
-    ) where {T <: AbstractFloat, V<:AbstractMatrix{T}}
-    groups = 0
-    group_membership = Int[]
-    # loop over blocks
-    for Σb in Σ.blocks
-        # loop over all groups in current block
-        for i in 1:nblocks(Σb)
-            group_length = size(Σb.blocks[i], 1)
-            groups += 1
-            for _ in 1:group_length
-                push!(group_membership, groups)
-            end
-        end
-    end
-    @assert length(group_membership) == size(Σ, 1)
-    return group_membership
-end
+# function get_group_memberships(
+#     Σ::BlockDiagonal{T, V}
+#     ) where {T <: AbstractFloat, V<:AbstractMatrix{T}}
+#     groups = 0
+#     group_membership = Int[]
+#     # loop over blocks
+#     for Σb in Σ.blocks
+#         # loop over all groups in current block
+#         for i in 1:nblocks(Σb)
+#             group_length = size(Σb.blocks[i], 1)
+#             groups += 1
+#             for _ in 1:group_length
+#                 push!(group_membership, groups)
+#             end
+#         end
+#     end
+#     @assert length(group_membership) == size(Σ, 1)
+#     return group_membership
+# end
