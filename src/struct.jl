@@ -27,11 +27,11 @@ struct ApproxGaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S<:Symmetric}
     method::Symbol # method for solving s
 end
 
-struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:BlockDiagonal}
+struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:BlockDiagonal, S<:Symmetric} <: Knockoff
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
     S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
-    Σ::BD # p × p block-diagonal covariance matrix. 
+    Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
 end
 

@@ -10,27 +10,48 @@ function inverse_mat_sqrt(A::Symmetric; tol=1e-4)
 end
 
 """
-Solves the equi-correlated group knockoff problem, detailed in
+Solves the equi-correlated group knockoff problem. Here
+`Σ` is the true covariance matrix and `Σblocks` is the 
+block-diagonal covariance matrix where each block corresponds
+to groups.
+
+Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
 """
-function solve_Sb_equi(Σb::BlockDiagonal)
+function solve_group_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     Db = Matrix{eltype(Σ)}[]
-    for Σbi in Σb.blocks
+    for Σbi in Σblocks.blocks
         push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
     end
     Db = BlockDiagonal(Db)
-    λmin = Symmetric(Db * Σb * Db) |> eigvals |> minimum
+    λmin = Symmetric(Db * Σ * Db) |> eigvals |> minimum
     γb = min(1, 2λmin)
-    Sb = BlockDiagonal(γb .* Σb.blocks)
+    Sb = BlockDiagonal(γb .* Σblocks.blocks)
     return Sb
 end
 
-function solve_s_group(Σ::BlockDiagonal, method=:equi; kwargs...)
-    S = BlockDiagonal{eltype(Σ)}[]
-    for Σb in Σ.blocks
-        push!(S, solve_Sb_equi(Σb))
+# todo: cov2cor for Σ
+function solve_s_group(
+    Σ::AbstractMatrix, 
+    groups::Vector{Int},
+    method::Symbol=:equi;
+    kwargs...)
+    # define group-blocks
+    Σblocks = Matrix{eltype(X)}[]
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        push!(Σblocks, Σ[idx, idx])
     end
-    return BlockDiagonal(S)
+    Σblocks = BlockDiagonal(Σblocks)
+    # solve optimization problem
+    if method == :equi
+        S = solve_group_equi(Σ, Σblocks)
+    elseif method == :sdp
+        # todo
+    else
+        error("Method can only be :equi or :sdp, but was $method")
+    end
+    return S
 end
 
 function modelX_gaussian_group_knockoffs(
@@ -41,21 +62,22 @@ function modelX_gaussian_group_knockoffs(
     kwargs...
     )
     # approximate Σ
-    Σapprox = BlockDiagonal{eltype(X)}[]
-    for g in unique(groups)
-        idx = findall(x -> x == g, groups)
-        push!(Σapprox, cov(covariance_approximator, @view(X[:, idx])))
-    end
-    Σapprox = BlockDiagonal(BlockDiagonal)
+    Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, method, μ, Σapprox; kwargs...)
+    return modelX_gaussian_group_knockoffs(X, groups, method, μ, Σapprox; kwargs...)
 end
 
-function modelX_gaussian_group_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix; kwargs...)
+function modelX_gaussian_group_knockoffs(
+    X::Matrix, 
+    groups::AbstractVector{Int},
+    method::Symbol, 
+    μ::AbstractVector, 
+    Σ::AbstractMatrix; 
+    kwargs...)
     # compute s vector using the specified method
-    S = solve_s_group(Σ, method; kwargs...) :: BlockDiagonal
+    S = solve_s_group(Σ, groups, method; kwargs...) :: BlockDiagonal
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), S)
-    return GaussianGroupKnockoff(X, X̃, S, Σ, method)
+    return GaussianGroupKnockoff(X, X̃, S, Symmetric(Σ), method)
 end

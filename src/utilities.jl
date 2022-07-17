@@ -633,25 +633,45 @@ function download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
     end
 end
 
+# function simulate_block_covariance(
+#     B::Int, # number of blocks
+#     num_groups_per_block=2:10, # each block have 2-10 groups
+#     num_vars_per_group=2:5, # each group have 2-5 variables
+#     rho = Uniform(0, 1) # correlation for covariates each group
+#     )
+#     Σ = BlockDiagonal{Float64}[]
+#     for b in 1:B
+#         num_groups = rand(num_groups_per_block) 
+#         Σb = Matrix{Float64}[]
+#         for g in 1:num_groups
+#             ρ = rand(rho)   
+#             p = rand(num_vars_per_group) 
+#             Σbi = (1-ρ) * Matrix(I, p, p) + ρ * ones(p, p)
+#             push!(Σb, Σbi)
+#         end
+#         push!(Σ, BlockDiagonal(Σb))
+#     end
+#     return BlockDiagonal(Σ)
+# end
+
 function simulate_block_covariance(
-    B::Int, # number of blocks
-    num_groups_per_block=2:10, # each block have 2-10 groups
-    num_vars_per_group=2:5, # each group have 2-5 variables
-    rho = Uniform(0, 1) # correlation for covariates each group
-    )
-    Σ = BlockDiagonal{Float64}[]
-    for b in 1:B
-        num_groups = rand(num_groups_per_block) 
-        Σb = Matrix{Float64}[]
-        for g in 1:num_groups
-            ρ = rand(rho)   
-            p = rand(num_vars_per_group) 
-            Σbi = (1-ρ) * Matrix(I, p, p) + ρ * ones(p, p)
-            push!(Σb, Σbi)
-        end
-        push!(Σ, BlockDiagonal(Σb))
+    groups::Vector{Int},
+    ρ::T, # within group correlation 
+    γ::T # between group correlation
+    ) where T <: AbstractFloat
+    p = length(groups)
+    issorted(groups) || error("groups needs to be a sorted vector (i.e. continuous)")
+    # form block diagonals to handle within group correlation
+    Σ = Matrix{Float64}[]
+    for g in unique(groups)
+        cnt = count(x -> x == g, groups)
+        Σg = (1-ρ) * Matrix(I, cnt, cnt) + ρ * ones(cnt, cnt)
+        push!(Σ, Σg)
     end
-    return BlockDiagonal(Σ)
+    Σ = Matrix(BlockDiagonal(Σ))
+    # now add between group correlation
+    Σ[findall(iszero, Σ)] .= γ*ρ
+    return Σ
 end
 
 function get_group_memberships(
