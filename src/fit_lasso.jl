@@ -28,7 +28,8 @@ function fit_lasso(
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
-    ko = modelX_gaussian_knockoffs(X, method)
+    ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method) : 
+        modelX_gaussian_group_knockoffs(X, groups, method)
     return fit_lasso(y, X, ko.X̃, d=d, fdrs=fdrs, groups=groups, 
         filter_method=filter_method, debias=debias; kwargs...)
 end
@@ -42,28 +43,33 @@ function fit_lasso(
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff, # `:knockoff` or `:knockoff_plus`
     debias::Union{Nothing, Symbol} = :ls,
+    stringent::Bool = false,
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
-    isnothing(groups) || error("groups keyword not supported yet! Sorry!")
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     # cross validate for λ, then refit Lasso with best λ
     XX̃, original, knockoff = merge_knockoffs_with_original(X, X̃)
     knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
     λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
     best_fit = glmnet(XX̃, y, lambda=[λbest])
-    βestim = vec(best_fit.betas)
+    βestim = vec(best_fit.betas) |> Vector{T}
     a0 = best_fit.a0[1]
     # compute feature importance statistics and allocate necessary knockoff-filter variables
+    isnothing(groups) || (groups_2p = repeat(groups, inner=2)) # since X and X̃ is interleaved, each group length can simply be doubled
     W = isnothing(groups) ? coefficient_diff(βestim, original, knockoff) : 
-        coefficient_diff(βestim, groups, original, knockoff)
+        coefficient_diff(βestim, groups_2p, original, knockoff)
     βs, a0s, τs = Vector{T}[], T[], T[]
     for fdr in fdrs
         # apply knockoff-filter based on target fdr
         β_filtered, _, τ = isnothing(groups) ? 
             extract_beta(βestim, fdr, original, knockoff, filter_method, W) : 
-            extract_beta(βestim, fdr, groups, original, knockoff, filter_method, W)
+            extract_beta(βestim, fdr, groups_2p, original, knockoff, filter_method, W)
         # debias the estimates if requested
-        isnothing(debias) || (a0 = debias!(β_filtered, X, y; method=debias, d=d, kwargs...))
+        if !isnothing(debias)
+            a0 = isnothing(groups) ? 
+                debias!(β_filtered, X, y; method=debias, d=d, kwargs...) : 
+                debias!(β_filtered, X, y, groups; method=debias, d=d, stringent=stringent, kwargs...)
+        end
         # save knockoff statistics
         push!(βs, β_filtered)
         push!(τs, τ)
@@ -104,6 +110,60 @@ function debias!(
     end
     all(x -> x ≈ zero(T), @view(β̂[zero_idx])) ||
         error("Debiasing error: a zero index has non-zero coefficient")
+    return intercept
+end
+
+function debias!(
+    β̂::AbstractVector{T},
+    x::AbstractMatrix{T},
+    y::AbstractVector{T},
+    groups::AbstractVector{Int};
+    method=:ls, # :ls or :lasso
+    stringent::Bool=false,
+    d::Distribution=Normal(),
+    kwargs... # extra arguments for glmnetcv
+    ) where T
+    p = length(β̂)
+    p == length(groups) || error("check vector length") # note GLMNet.jl does not include intercept in β̂
+    # first find active groups
+    if stringent
+        # active variables can only be non-zero variables within active group
+        active_vars = findall(!iszero, β̂)
+    else
+        # active variables can be every variables within active group
+        active_vars = Int[]
+        active_groups = unique(groups[findall(!iszero, β̂)])
+        for g in active_groups
+            vars = findall(x -> x == g, groups)
+            for var in vars
+                push!(active_vars, var)
+            end
+        end
+    end
+    # now debias on the group level
+    zero_idx = setdiff(1:p, active_vars)
+    if method == :lasso
+        # Give infinite penalty to indices of zeros
+        penalty_factor = ones(T, p)
+        @view(penalty_factor[zero_idx]) .= typemax(T)
+        # run cross validated lasso
+        cv = glmnetcv(x, y, penalty_factor=penalty_factor; kwargs...)
+        # refit lasso on best performing lambda and extract resulting beta/intercept
+        λbest = cv.lambda[argmin(cv.meanloss)]
+        best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
+        copyto!(β̂, best_fit.betas)
+        intercept = best_fit.a0[1]
+    elseif method == :ls
+        Xsubset = [ones(T, size(x, 1)) x[:, active_vars]]
+        model = glm(Xsubset, y, d)
+        β_debiased = GLM.coef(model)
+        intercept = β_debiased[1]
+        β̂[active_vars] .= @view(β_debiased[2:end])
+    else
+        error("method should be :ls or :lasso but was $method")
+    end
+    all(x -> x ≈ zero(T), @view(β̂[zero_idx])) ||
+        error("Group debiasing error: a zero index has non-zero coefficient")
     return intercept
 end
 

@@ -28,13 +28,13 @@ W[G] = sum_{j in G} |β[j]| - sum_{j in G} |β[j + p]|.
 
 # Inputs
 + `β`: `2p × 1` vector of regression coefficients, including original and knockoff effect sizes
-+ `groups`: Vector storing group membership. `groups[i]` is the group of `β[i]`
++ `groups`: `2p × 1` vector storing group membership. `groups[i]` is the group of `β[i]`
 + `original`: The index of original variables in `β`
 + `knockoff`: The index of knockoff variables in `β`
 """
 function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
     original::AbstractVector{Int}, knockoff::AbstractVector{Int})
-    length(β) == length(groups) || error("coefficient_diff: length(β) does not equal length(groups)")
+    length(β) == length(groups) || error("coefficient_diff: length(β) = $(length(β)) does not equal length(groups) = $(length(groups))")
     unique_groups = unique(groups)
     β_groups = zeros(length(unique_groups))
     # find which variables are Knockoffs

@@ -56,8 +56,8 @@ end
 
 function modelX_gaussian_group_knockoffs(
     X::Matrix, 
-    groups::AbstractVector{Int};
-    method::Symbol,
+    groups::AbstractVector{Int},
+    method::Symbol;
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
