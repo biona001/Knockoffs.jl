@@ -30,12 +30,26 @@ function solve_group_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     return S
 end
 
+function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+    model = Model(() -> Hypatia.Optimizer(verbose=false))
+    n = nblocks(Σblocks)
+    @variable(model, 0 <= γ[1:n] <= 1)
+    blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
+    @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
+    JuMP.optimize!(model)
+    return clamp!(JuMP.value.(γ), 0, 1)
+end
+# Σ = 0.5 * Matrix(I, 100, 100) + 0.5 * ones(100, 100)
+# Σblocks = BlockDiagonal([0.5 * Matrix(I, 10, 10) + 0.5 * ones(10, 10) for _ in 1:10])
+# S = solve_group_SDP(Σ, Σblocks)
+
 # todo: cov2cor for Σ
 function solve_s_group(
     Σ::AbstractMatrix, 
     groups::Vector{Int},
     method::Symbol=:equi;
     kwargs...)
+    all(x -> x ≈ 1, diag(Σ)) || error("Currently, Σ much be scaled to a correlation matrix first.")
     # define group-blocks
     Σblocks = Matrix{eltype(Σ)}[]
     for g in unique(groups)
@@ -47,7 +61,7 @@ function solve_s_group(
     if method == :equi
         S = solve_group_equi(Σ, Σblocks)
     elseif method == :sdp
-        # todo
+        S = solve_group_SDP(Σ, Σblocks)
     else
         error("Method can only be :equi or :sdp, but was $method")
     end
