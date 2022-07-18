@@ -53,14 +53,29 @@ The optimization problem is stated in equation 3.13 of
 https://arxiv.org/pdf/1610.02351.pdf
 """
 function solve_SDP(Σ::AbstractMatrix)
-    svar = Variable(size(Σ, 1), Convex.Positive())
-    add_constraint!(svar, svar ≤ 1)
-    constraint = 2*Symmetric(Σ) - diagm(svar) in :SDP
-    problem = maximize(sum(svar), constraint)
-    solve!(problem, Hypatia.Optimizer; silent_solver=true)
-    s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
-    return s
+    # Build model via JuMP
+    model = Model(() -> Hypatia.Optimizer(verbose=false))
+    @variable(model, 0 ≤ s[i = 1:p] ≤ 1)
+    @objective(model, Max, sum(s))
+    @constraint(model, Symmetric(2*Σ - diagm(s[1:p])) in PSDCone());
+
+    # Solve optimization problem
+    JuMP.optimize!(model)
+
+    # Retrieve solution
+    return clamp.(JuMP.value.(s), 0, 1)
 end
+
+# this uses Convex.jl
+# function solve_SDP(Σ::AbstractMatrix)
+#     svar = Variable(size(Σ, 1), Convex.Positive())
+#     add_constraint!(svar, svar ≤ 1)
+#     constraint = 2*Symmetric(Σ) - diagm(svar) in :SDP
+#     problem = maximize(sum(svar), constraint)
+#     solve!(problem, Hypatia.Optimizer; silent_solver=true)
+#     s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
+#     return s
+# end
 
 """
     solve_equi(Σ::AbstractMatrix)

@@ -2,7 +2,7 @@ module Knockoffs
 
 using LinearAlgebra
 using Statistics
-using Convex
+using JuMP
 using Hypatia
 using SnpArrays
 using DelimitedFiles
