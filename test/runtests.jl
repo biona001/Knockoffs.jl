@@ -558,10 +558,16 @@ end
     L = cholesky(Σ).L
     X = randn(n, p) * L
     zscore!(X, mean(X, dims=1), std(X, dims=1));
-    @time ko = modelX_gaussian_group_knockoffs(X, groups, :equi, true_mu, Σ)
+
+    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, true_mu, Σ)
+    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, true_mu, Σ)
 
     # solve_S_equi produces block diagonal S s.t. 2S - Σ is psd
-    S = ko.S
+    S = ko_equi.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), blocksizes(S))
+
+    S = ko_sdp.S
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
     @test all(x -> x == (pi, pi), blocksizes(S))
 end

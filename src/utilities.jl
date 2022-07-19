@@ -54,16 +54,15 @@ https://arxiv.org/pdf/1610.02351.pdf
 """
 function solve_SDP(Σ::AbstractMatrix)
     # Build model via JuMP
+    p = size(Σ, 1)
     model = Model(() -> Hypatia.Optimizer(verbose=false))
     @variable(model, 0 ≤ s[i = 1:p] ≤ 1)
     @objective(model, Max, sum(s))
-    @constraint(model, Symmetric(2*Σ - diagm(s[1:p])) in PSDCone());
-
+    @constraint(model, Symmetric(2Σ - diagm(s[1:p])) in PSDCone())
     # Solve optimization problem
     JuMP.optimize!(model)
-
     # Retrieve solution
-    return clamp.(JuMP.value.(s), 0, 1)
+    return clamp!(JuMP.value.(s), 0, 1)
 end
 
 # this uses Convex.jl

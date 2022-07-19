@@ -37,34 +37,41 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
     @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
     JuMP.optimize!(model)
-    return clamp!(JuMP.value.(γ), 0, 1)
+    γs = clamp!(JuMP.value.(γ), 0, 1)
+    S = BlockDiagonal(γs .* Σblocks.blocks)
+    return S
 end
-# Σ = 0.5 * Matrix(I, 100, 100) + 0.5 * ones(100, 100)
+# Σ = 2 .* (0.5 * Matrix(I, 100, 100) + 0.5 * ones(100, 100))
 # Σblocks = BlockDiagonal([0.5 * Matrix(I, 10, 10) + 0.5 * ones(10, 10) for _ in 1:10])
-# S = solve_group_SDP(Σ, Σblocks)
+# Sequi = solve_group_equi(Σ, Σblocks)
+# Ssdp = solve_group_SDP(Σ, Σblocks)
 
-# todo: cov2cor for Σ
 function solve_s_group(
     Σ::AbstractMatrix, 
     groups::Vector{Int},
     method::Symbol=:equi;
     kwargs...)
-    all(x -> x ≈ 1, diag(Σ)) || error("Currently, Σ much be scaled to a correlation matrix first.")
+    # create correlation matrix
+    σs = sqrt.(diag(Σ))
+    iscor = all(x -> x ≈ 1, σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
     # define group-blocks
     Σblocks = Matrix{eltype(Σ)}[]
     for g in unique(groups)
         idx = findall(x -> x == g, groups)
-        push!(Σblocks, Σ[idx, idx])
+        push!(Σblocks, Σcor[idx, idx])
     end
     Σblocks = BlockDiagonal(Σblocks)
     # solve optimization problem
     if method == :equi
-        S = solve_group_equi(Σ, Σblocks)
+        S = solve_group_equi(Σcor, Σblocks)
     elseif method == :sdp
-        S = solve_group_SDP(Σ, Σblocks)
+        S = solve_group_SDP(Σcor, Σblocks)
     else
         error("Method can only be :equi or :sdp, but was $method")
     end
+    # rescale S back to the result for a covariance matrix   
+    iscor || StatsBase.cor2cov!(S, σs)
     return S
 end
 
