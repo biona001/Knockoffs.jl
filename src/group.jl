@@ -33,18 +33,28 @@ end
 function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     model = Model(() -> Hypatia.Optimizer(verbose=false))
     n = nblocks(Σblocks)
+    block_sizes = size.(Σblocks.blocks, 1)
     @variable(model, 0 <= γ[1:n] <= 1)
     blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
+    @objective(model, Max, block_sizes' * γ)
     @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
     JuMP.optimize!(model)
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks)
     return S
 end
+# using Knockoffs
+# using LinearAlgebra
+# using BlockDiagonals
+# using JuMP
+# using Hypatia
 # Σ = 2 .* (0.5 * Matrix(I, 100, 100) + 0.5 * ones(100, 100))
 # Σblocks = BlockDiagonal([0.5 * Matrix(I, 10, 10) + 0.5 * ones(10, 10) for _ in 1:10])
 # Sequi = solve_group_equi(Σ, Σblocks)
-# Ssdp = solve_group_SDP(Σ, Σblocks)
+# @time Ssdp = solve_group_SDP(Σ, Σblocks); # not specifying @objective and converting BlockDiagonal into Matrix{T}
+# @time Ssdp3 = solve_group_SDP3(Σ, Σblocks); # specifying @objective, and converting BlockDiagonal into Matrix{T}
+# @time Ssdp4 = solve_group_SDP4(Σ, Σblocks); # specifying @objective, and converting BlockDiagonal into Matrix{T}, and scaling γ by blocksizes
+# [vec(Ssdp) vec(Ssdp3) vec(Ssdp4) vec(Sequi)]
 
 function solve_s_group(
     Σ::AbstractMatrix, 
