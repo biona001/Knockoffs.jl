@@ -143,15 +143,13 @@ function debias!(
     # now debias on the group level
     zero_idx = setdiff(1:p, active_vars)
     if method == :lasso
-        # Give infinite penalty to indices of zeros
-        penalty_factor = ones(T, p)
-        @view(penalty_factor[zero_idx]) .= typemax(T)
+        Xsubset = x[:, active_vars]
         # run cross validated lasso
-        cv = glmnetcv(x, y, penalty_factor=penalty_factor; kwargs...)
+        cv = glmnetcv(Xsubset, y; kwargs...)
         # refit lasso on best performing lambda and extract resulting beta/intercept
         λbest = cv.lambda[argmin(cv.meanloss)]
-        best_fit = glmnet(x, y, lambda=[λbest], penalty_factor=penalty_factor)
-        copyto!(β̂, best_fit.betas)
+        best_fit = glmnet(Xsubset, y, lambda=[λbest])
+        β̂[active_vars] .= best_fit.betas[:]
         intercept = best_fit.a0[1]
     elseif method == :ls
         Xsubset = [ones(T, size(x, 1)) x[:, active_vars]]
