@@ -27,7 +27,7 @@ function solve_group_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     λmin = Symmetric(Db * Σ * Db) |> eigmin
     γ = min(1, 2λmin)
     S = BlockDiagonal(γ .* Σblocks.blocks)
-    return S
+    return S, [γ]
 end
 
 function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
@@ -41,23 +41,12 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     JuMP.optimize!(model)
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks)
-    return S
+    return S, γs
 end
-# using Knockoffs
-# using LinearAlgebra
-# using BlockDiagonals
-# using JuMP
-# using Hypatia
-# Σ = 2 .* (0.5 * Matrix(I, 100, 100) + 0.5 * ones(100, 100))
-# Σblocks = BlockDiagonal([0.5 * Matrix(I, 10, 10) + 0.5 * ones(10, 10) for _ in 1:10])
-# Sequi = solve_group_equi(Σ, Σblocks)
-# @time Ssdp = solve_group_SDP(Σ, Σblocks); # not specifying @objective and converting BlockDiagonal into Matrix{T}
-# @time Ssdp3 = solve_group_SDP3(Σ, Σblocks); # specifying @objective, and converting BlockDiagonal into Matrix{T}
-# @time Ssdp4 = solve_group_SDP4(Σ, Σblocks); # specifying @objective, and converting BlockDiagonal into Matrix{T}, and scaling γ by blocksizes
-# [vec(Ssdp) vec(Ssdp3) vec(Ssdp4) vec(Sequi)]
 
 function solve_s_group(
     Σ::AbstractMatrix, 
+    Sblocks::BlockDiagonal,
     groups::Vector{Int},
     method::Symbol=:equi;
     kwargs...)
@@ -65,24 +54,17 @@ function solve_s_group(
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
     Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
-    # define group-blocks
-    Σblocks = Matrix{eltype(Σ)}[]
-    for g in unique(groups)
-        idx = findall(x -> x == g, groups)
-        push!(Σblocks, Σcor[idx, idx])
-    end
-    Σblocks = BlockDiagonal(Σblocks)
     # solve optimization problem
     if method == :equi
-        S = solve_group_equi(Σcor, Σblocks)
+        S, γs = solve_group_equi(Σcor, Sblocks)
     elseif method == :sdp
-        S = solve_group_SDP(Σcor, Σblocks)
+        S, γs = solve_group_SDP(Σcor, Sblocks)
     else
         error("Method can only be :equi or :sdp, but was $method")
     end
     # rescale S back to the result for a covariance matrix   
     iscor || StatsBase.cor2cov!(S, σs)
-    return S
+    return S, γs
 end
 
 function modelX_gaussian_group_knockoffs(
@@ -92,11 +74,20 @@ function modelX_gaussian_group_knockoffs(
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
+    length(groups) == size(X, 2) || error("Each variable in X needs a group membership")
+    issorted(groups) || error("groups not sorted. Currently group memberships must be non-overlapping and contiguous")
     # approximate Σ
     Σapprox = cov(covariance_approximator, X)
+    # define group-blocks
+    Sblocks = Matrix{eltype(X)}[]
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        push!(Sblocks, cov(covariance_approximator, @view(X[:, idx])))
+    end
+    Sblocks = BlockDiagonal(Sblocks)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, groups, method, μ, Σapprox; kwargs...)
+    return modelX_gaussian_group_knockoffs(X, groups, method, μ, Σapprox, Sblocks; kwargs...)
 end
 
 function modelX_gaussian_group_knockoffs(
@@ -104,11 +95,12 @@ function modelX_gaussian_group_knockoffs(
     groups::AbstractVector{Int},
     method::Symbol, 
     μ::AbstractVector, 
-    Σ::AbstractMatrix; 
+    Σ::AbstractMatrix,
+    Sblocks::BlockDiagonal; 
     kwargs...)
     # compute block diagonal S matrix using the specified method
-    S = solve_s_group(Σ, groups, method; kwargs...) :: BlockDiagonal
+    S, γs = solve_s_group(Σ, Sblocks, groups, method; kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), S)
-    return GaussianGroupKnockoff(X, X̃, S, Symmetric(Σ), method)
+    return GaussianGroupKnockoff(X, X̃, S, γs, Symmetric(Σ), method)
 end
