@@ -17,6 +17,7 @@ This package supports Julia `v1.6`+.
 Pages = [
     "man/fixed/fixed.md",
     "man/modelX/modelX.md",
+    "man/group.md",
     "man/fastphase_hmm/fastphase_hmm.md",
     "man/shapeit_hmm.md",
     "man/knockoffscreen/knockoffscreen.md",
