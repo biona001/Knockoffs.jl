@@ -9,6 +9,7 @@ makedocs(
         "Home" => "index.md",
         "Fixed-X Knockoffs" => "man/fixed/fixed.md",
         "Model-X Knockoffs" => "man/modelX/modelX.md",
+        "Group Knockoffs" => "man/group.md",
         "fastPHASE HMM Knockoffs" => "man/fastphase_hmm/fastphase_hmm.md",
         "SHAPEIT HMM Knockoffs" => "man/shapeit_hmm.md",
         "KnockoffScreen Knockoffs" => "man/knockoffscreen/knockoffscreen.md",

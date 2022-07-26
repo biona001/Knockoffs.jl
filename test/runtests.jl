@@ -390,7 +390,9 @@ end
     @time Xko = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
 
     # run lasso, followed up by debiasing
+    Random.seed!(seed)
     @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=nothing)
+    Random.seed!(seed)
     @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=:ls)
 
     # check that debiased result have same support as not debiasing
@@ -439,7 +441,7 @@ end
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
         # println(norm(ko.βs[i] - b))
-        @test norm(ko.βs[i] - b) < 1
+        @test norm(ko.βs[i] - b) < 1.5
     end
     # idx = findall(!iszero, b)
     # [ko.βs[5][idx] b[idx]]
@@ -449,7 +451,7 @@ end
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
         # println(norm(ko.βs[i] - b))
-        @test norm(ko.βs[i] - b) < 1
+        @test norm(ko.βs[i] - b) < 1.1
     end
 
     # no debias
@@ -535,4 +537,88 @@ end
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
+end
+
+@testset "group knockoffs" begin
+    # test if inverse_mat_sqrt is working
+    x = rand(10, 10)
+    A = Symmetric(x' * x)
+    Ainvsqrt = Knockoffs.inverse_mat_sqrt(A)
+    @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
+
+    # simulate some data
+    m = 200 # number of groups
+    pi = 5  # features per group
+    k = 20  # number of causal groups
+    ρ = 0.4 # within group correlation
+    γ = 0.2 # between group correlation
+    p = m * pi # number of features
+    n = 1000 # sample size
+    groups = repeat(1:m, inner=5)
+    Σ = simulate_block_covariance(groups, ρ, γ)
+    true_mu = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L
+    zscore!(X, mean(X, dims=1), std(X, dims=1));
+
+    # exact group knockoffs
+    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, Σ, true_mu)
+    S = ko_equi.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
+
+    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, Σ, true_mu)
+    S = ko_sdp.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
+
+    # second order knockoffs
+    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi)
+    S = ko_equi.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
+
+    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp)
+    S = ko_sdp.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
+end
+
+@testset "group fit_lasso" begin
+    # simulate some data
+    m = 200 # number of groups
+    pi = 5  # features per group
+    k = 20  # number of causal groups
+    ρ = 0.4 # within group correlation
+    γ = 0.2 # between group correlation
+    p = m * pi # number of features
+    n = 1000 # sample size
+
+    groups = repeat(1:m, inner=5)
+    Σ = simulate_block_covariance(groups, ρ, γ)
+    true_mu = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L
+    zscore!(X, mean(X, dims=1), std(X, dims=1));
+
+    βtrue = zeros(m*pi)
+    βtrue[1:k] .= rand(-1:2:1, k) .* 3.5
+    shuffle!(βtrue)
+    ϵ = randn(n)
+    y = X * βtrue + ϵ;
+
+    # no debias
+    Random.seed!(2022)
+    @time ko_filter1 = fit_lasso(y, X, method=:equi, groups=groups, debias=nothing)
+    # debias with least squares (stringent)
+    Random.seed!(2022)
+    @time ko_filter2 = fit_lasso(y, X, method=:equi, groups=groups, debias=:ls, stringent=true)
+    # debias with lasso (not stringent
+    Random.seed!(2022)
+    @time ko_filter3 = fit_lasso(y, X, method=:equi, groups=groups, debias=:lasso, stringent=false)
+
+    nz_1 = count.(!iszero, ko_filter1.βs)
+    nz_2 = count.(!iszero, ko_filter2.βs)
+    nz_3 = count.(!iszero, ko_filter3.βs)
+    @test all(nz_1 .== nz_2 .≤ nz_3)
 end

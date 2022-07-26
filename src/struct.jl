@@ -27,6 +27,15 @@ struct ApproxGaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S<:Symmetric}
     method::Symbol # method for solving s
 end
 
+struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:BlockDiagonal, S<:Symmetric} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
+    γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
+    Σ::S # p × p symmetric covariance matrix. 
+    method::Symbol # method for solving s
+end
+
 # 1 state of a markov chain
 struct GenotypeState
     a::Int # int between 1 and K
