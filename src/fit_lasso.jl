@@ -16,6 +16,10 @@ then applies the knockoff-filter.
     for least squares (default) or `:lasso` for Lasso (only running on the 
     support). To not debias, specify `debias=nothing`
 + `kwargs`: Additional arguments to input into `glmnetcv` and `glmnet`
+
+# todo
+Allow knockoffs to be constructed based on true `Σ` and `μ`. Here
+we always use the second order construction which estimates `Σ` and `μ` from `X`. 
 """
 function fit_lasso(
     y::AbstractVector{T},

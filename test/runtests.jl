@@ -538,10 +538,10 @@ end
 end
 
 @testset "group knockoffs" begin
-    # inverse_mat_sqrt is working
+    # test if inverse_mat_sqrt is working
     x = rand(10, 10)
     A = Symmetric(x' * x)
-    Ainvsqrt = inverse_mat_sqrt(A)
+    Ainvsqrt = Knockoffs.inverse_mat_sqrt(A)
     @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
 
     # simulate some data
@@ -559,17 +559,27 @@ end
     X = randn(n, p) * L
     zscore!(X, mean(X, dims=1), std(X, dims=1));
 
-    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, true_mu, Σ)
-    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, true_mu, Σ)
-
-    # solve_S_equi produces block diagonal S s.t. 2S - Σ is psd
+    # exact group knockoffs
+    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, Σ, true_mu)
     S = ko_equi.S
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
-    @test all(x -> x == (pi, pi), blocksizes(S))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
 
+    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, Σ, true_mu)
     S = ko_sdp.S
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
-    @test all(x -> x == (pi, pi), blocksizes(S))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
+
+    # second order knockoffs
+    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi)
+    S = ko_equi.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
+
+    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp)
+    S = ko_sdp.S
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
+    @test all(x -> x == (pi, pi), size.(S.blocks))
 end
 
 @testset "group fit_lasso" begin

@@ -11,9 +11,9 @@ end
 
 """
 Solves the equi-correlated group knockoff problem. Here
-`Σ` is the true covariance matrix and `Σblocks` is the 
-block-diagonal covariance matrix where each block corresponds
-to groups.
+`Σ` is the true covariance matrix (scaled so that it has 1 on its diagonal)
+and `Σblocks` is the block-diagonal covariance matrix where each 
+block corresponds to groups.
 
 Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
@@ -30,6 +30,14 @@ function solve_group_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     return S, [γ]
 end
 
+"""
+Solves the SDP group knockoff problem using analogy to the equi-correlated
+group knockoffs. Basically, the idea is to optimize a vector `γ` where `γ[j]` 
+multiplies Σ_jj. In the equi-correlated setting, all `γ[j]` is forced to be equal.
+
+Details can be found in
+Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
+"""
 function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     model = Model(() -> Hypatia.Optimizer(verbose=false))
     n = nblocks(Σblocks)
@@ -44,29 +52,63 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     return S, γs
 end
 
+"""
+    solve_s_group(Σ, Sblocks, groups, [method=:equi]; kwargs...)
+
+Solves the group knockoff problem, returns block diagonal matrix S
+satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
+
+# Inputs 
++ `Σ`: A covariance matrix that has been scaled to a correlation matrix.
++ `Sblocks`: A `BlockDiagonal` matrix that approximates `Σ` using group
+    structure. Each block should be `pi × pi` where `pi` is number of variables
+    in group `i`
++ `groups`: Vector of group membership
++ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
+"""
 function solve_s_group(
     Σ::AbstractMatrix, 
-    Sblocks::BlockDiagonal,
+    Sblocks::BlockDiagonal, 
     groups::Vector{Int},
     method::Symbol=:equi;
     kwargs...)
-    # create correlation matrix
-    σs = sqrt.(diag(Σ))
-    iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
+    # check for error first
+    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    for block in Sblocks.blocks
+        all(x -> x ≈ 1, diag(block)) || 
+            error("Sblocks must be scaled to a correlation matrix first.")
+    end
     # solve optimization problem
     if method == :equi
-        S, γs = solve_group_equi(Σcor, Sblocks)
+        S, γs = solve_group_equi(Σ, Sblocks)
     elseif method == :sdp
-        S, γs = solve_group_SDP(Σcor, Sblocks)
+        S, γs = solve_group_SDP(Σ, Sblocks)
     else
         error("Method can only be :equi or :sdp, but was $method")
     end
-    # rescale S back to the result for a covariance matrix   
-    iscor || StatsBase.cor2cov!(S, σs)
     return S, γs
 end
 
+"""
+    modelX_gaussian_group_knockoffs(X, groups, method; [covariance_approximator])
+
+Constructs (second-order) Gaussian model-X group knockoffs by estimiating the covariance matrix
+based on data. The covariance matrix is then block-diagonalized according to group structure
+to solve a relaxed optimization problem. See reference paper for details (which describes only
+equi-correlated group knockoffs but the same construction can be used for group-SDP knockoffs, 
+which we also implement here). 
+
+# Inputs
++ `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
++ `groups`: Vector of group membership
++ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
++ `covariance_approximator`: A covariance estimator, defaults to 
+    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
+    for more options.
+
+# Reference
+Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
+"""
 function modelX_gaussian_group_knockoffs(
     X::Matrix, 
     groups::AbstractVector{Int},
@@ -74,32 +116,67 @@ function modelX_gaussian_group_knockoffs(
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
-    length(groups) == size(X, 2) || error("Each variable in X needs a group membership")
-    issorted(groups) || error("groups not sorted. Currently group memberships must be non-overlapping and contiguous")
-    # approximate Σ
+    # first check errors
+    length(groups) == size(X, 2) || 
+        error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
+    issorted(groups) || 
+        error("groups not sorted. Currently group memberships must be non-overlapping and contiguous")
+    # approximate covariance matrix and scale it to correlation matrix
     Σapprox = cov(covariance_approximator, X)
+    # mean component is just column means
+    μ = vec(mean(X, dims=1))
+    return modelX_gaussian_group_knockoffs(X, groups, method, Σapprox, μ)
+end
+
+"""
+    modelX_gaussian_group_knockoffs(X, groups, method; [covariance_approximator])
+
+Constructs Gaussian model-X group knockoffs. The true covariance matrix Σ is block-diagonalized 
+according to group structure to solve a relaxed optimization problem. See reference paper for 
+details (which describes only equi-correlated group knockoffs but the same construction can be 
+used for group-SDP knockoffs, which we also implement here). 
+
+# Inputs
++ `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
++ `groups`: Vector of group membership
++ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
++ `Σ`: A `p × p` covariance matrix for columns of `X`
++ `μ`: A length `p` vector storing the true column means of `X`
++ `covariance_approximator`: A covariance estimator, defaults to 
+    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
+    for more options.
+
+# Reference
+Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
+"""
+function modelX_gaussian_group_knockoffs(
+    X::Matrix, 
+    groups::AbstractVector{Int},
+    method::Symbol,
+    Σ::AbstractMatrix,
+    μ::AbstractVector;
+    kwargs...
+    )
+    # first check errors
+    length(groups) == size(X, 2) || 
+        error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
+    issorted(groups) || 
+        error("groups not sorted. Currently group memberships must be non-overlapping and contiguous")
+    # Scale covariance to correlation matrix
+    σs = sqrt.(diag(Σ))
+    iscor = all(x -> x ≈ 1, σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
     # define group-blocks
     Sblocks = Matrix{eltype(X)}[]
     for g in unique(groups)
         idx = findall(x -> x == g, groups)
-        push!(Sblocks, cov(covariance_approximator, @view(X[:, idx])))
+        push!(Sblocks, Σcor[idx, idx])
     end
     Sblocks = BlockDiagonal(Sblocks)
-    # mean component is just column means
-    μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, groups, method, μ, Σapprox, Sblocks; kwargs...)
-end
-
-function modelX_gaussian_group_knockoffs(
-    X::Matrix, 
-    groups::AbstractVector{Int},
-    method::Symbol, 
-    μ::AbstractVector, 
-    Σ::AbstractMatrix,
-    Sblocks::BlockDiagonal; 
-    kwargs...)
-    # compute block diagonal S matrix using the specified method
-    S, γs = solve_s_group(Σ, Sblocks, groups, method; kwargs...)
+    # compute block diagonal S matrix using the specified knockoff method
+    S, γs = solve_s_group(Σcor, Sblocks, groups, method; kwargs...)
+    # rescale S back to the result for a covariance matrix   
+    iscor || StatsBase.cor2cov!(S, σs)
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), S)
     return GaussianGroupKnockoff(X, X̃, S, γs, Symmetric(Σ), method)
