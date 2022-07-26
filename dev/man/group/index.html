@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Group Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.045/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.24/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../fixed/fixed/">Fixed-X Knockoffs</a></li><li><a class="tocitem" href="../modelX/modelX/">Model-X Knockoffs</a></li><li class="is-active"><a class="tocitem" href>Group Knockoffs</a><ul class="internal"><li class="toplevel"><a class="tocitem" href="#Equi-correlated-group-knockoffs"><span>Equi-correlated group knockoffs</span></a></li><li><a class="tocitem" href="#SDP-group-knockoffs"><span>SDP group knockoffs</span></a></li><li><a class="tocitem" href="#Second-order-group-knockoffs"><span>Second order group knockoffs</span></a></li><li><a class="tocitem" href="#Power-and-FDR-comparison"><span>Power and FDR comparison</span></a></li><li><a class="tocitem" href="#Conclusion"><span>Conclusion</span></a></li></ul></li><li><a class="tocitem" href="../fastphase_hmm/fastphase_hmm/">fastPHASE HMM Knockoffs</a></li><li><a class="tocitem" href="../shapeit_hmm/">SHAPEIT HMM Knockoffs</a></li><li><a class="tocitem" href="../knockoffscreen/knockoffscreen/">KnockoffScreen Knockoffs</a></li><li><a class="tocitem" href="../ghost_knockoffs/">Ghost Knockoffs</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Group Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Group Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/group.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Group-Knockoffs"><a class="docs-heading-anchor" href="#Group-Knockoffs">Group Knockoffs</a><a id="Group-Knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Group-Knockoffs" title="Permalink"></a></h1><p>This tutorial generates group (model-X) knockoffs, which is useful when predictors are highly correlated. The methodology is described in the following paper</p><blockquote><p>Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. InInternational conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.</p></blockquote><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In the original paper, Dai and Barber only describes how to construct equi-correlated group knockoffs, but the same idea can be generalized to SDP group knockoffs, which we also implement here. </p></div></div><pre><code class="language-julia hljs"># load packages for this tutorial
+using Knockoffs
+using LinearAlgebra
+using Random
+using StatsBase
+using Statistics
+using ToeplitzMatrices
+
+# some helper functions to compute power and empirical FDR
+function TP(correct_groups, signif_groups)
+    return length(signif_groups ∩ correct_groups) / length(correct_groups)
+end
+function TP(correct_groups, β̂, groups)
+    signif_groups = get_signif_groups(β̂, groups)
+    return TP(correct_groups, signif_groups)
+end
+function FDR(correct_groups, signif_groups)
+    FP = length(signif_groups) - length(signif_groups ∩ correct_groups) # number of false positives
+    FDR = FP / max(1, length(signif_groups))
+    return FDR
+end
+function FDR(correct_groups, β̂, groups)
+    signif_groups = get_signif_groups(β̂, groups)
+    return FDR(correct_groups, signif_groups)
+end
+function get_signif_groups(β, groups)
+    correct_groups = Int[]
+    for i in findall(!iszero, β)
+        g = groups[i]
+        g ∈ correct_groups || push!(correct_groups, g)
+    end
+    return correct_groups
+end</code></pre><pre><code class="nohighlight hljs">get_signif_groups (generic function with 1 method)</code></pre><h1 id="Equi-correlated-group-knockoffs"><a class="docs-heading-anchor" href="#Equi-correlated-group-knockoffs">Equi-correlated group knockoffs</a><a id="Equi-correlated-group-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Equi-correlated-group-knockoffs" title="Permalink"></a></h1><ul><li>Given <span>$p \times p$</span> positive definite matrix <span>$\Sigma$</span>, partition the <span>$p$</span> features into <span>$m$</span> groups <span>$G_1,...,G_m$</span>. We want to optimize the following problem</li></ul><p class="math-container">\[\begin{aligned}
+    \min_{S} &amp; \ Tr(|\Sigma - S|)\\
+    \text{such that } &amp; S \succeq 0 \text{ and } 2\Sigma - S \succeq 0.
+\end{aligned}\]</p><ul><li>Here <span>$S$</span> is a group-block-diagonal matrix of the form <span>$S = diag(S_1,...,S_G)$</span> where each <span>$S_j$</span> is a positive definite matrix that has dimension <span>$|G_j| \times |G_j|$</span></li><li>The equi-correlated idea proposed in <a href="https://proceedings.mlr.press/v48/daia16.html">Barber and Dai</a> is to let <span>$S_j = \gamma \Sigma_{(G_j, G_j)}$</span> where <span>$\Sigma_{(G_j, G_j)}$</span> is the block of <span>$\Sigma$</span> containing variables in the <span>$j$</span>th group. Thus, instead of optimizing over all variables in <span>$S$</span>, we optimize a scalar <span>$\gamma$</span>. Conveniently, there a simple closed form solution.</li></ul><p>First, let&#39;s simulate data and generate equi-correlated knockoffs. Our true covariance matrix looks like</p><p class="math-container">\[\begin{aligned}
+\Sigma = 
+\begin{pmatrix}
+    1 &amp; \rho &amp; \rho^2 &amp; ... &amp; \rho^p\\
+    \rho &amp; 1 &amp; &amp; ... &amp; \rho^{p-1}\\
+    \vdots &amp; &amp; &amp; 1 &amp; \vdots \\
+    \rho^p &amp; \cdots &amp; &amp; &amp; 1
+\end{pmatrix}, \quad \rho = 0.9
+\end{aligned}\]</p><p>Because variables are highly correlated with its neighbors (<span>$\rho = 0.9$</span>), it becomes difficult to distinguish which variables among a group are truly causal. Thus, group knockoffs which test whether a <em>group</em> of variables have any signal should have better power than standard (single-variable) knockoffs. </p><p>For simplicity, let simulate data where every 5 variables form a group:</p><pre><code class="language-julia hljs"># simulate data
+Random.seed!(2022)
+n = 1000 # sample size
+p = 100  # number of covariates
+k = 10   # number of true predictors
+Σ = Matrix(SymmetricToeplitz(0.9.^(0:(p-1)))) # true covariance matrix
+groupsizes = [5 for i in 1:20] # each group has 5 variables
+groups = vcat([i*ones(g) for (i, g) in enumerate(groupsizes)]...) |&gt; Vector{Int}
+true_mu = zeros(p)
+L = cholesky(Σ).L
+X = randn(n, p) * L
+zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X</code></pre><p>Generate group knockoffs as such:</p><pre><code class="language-julia hljs">ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, Σ, true_mu);</code></pre><p>Lets do a sanity check: is <span>$2\Sigma - S$</span> positive semi-definite?</p><pre><code class="language-julia hljs"># compute minimum eigenvalues of 2Σ - S
+eigmin(2ko_equi.Σ - ko_equi.S)</code></pre><pre><code class="nohighlight hljs">6.152687425537049e-16</code></pre><p>The min eigenvalue is <span>$\approx 0$</span> up to numerical precision, so the knockoff structure indeed satisfies the PSD constraint. </p><h2 id="SDP-group-knockoffs"><a class="docs-heading-anchor" href="#SDP-group-knockoffs">SDP group knockoffs</a><a id="SDP-group-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#SDP-group-knockoffs" title="Permalink"></a></h2><ul><li>This extends the equi-correlated construction of <a href="https://proceedings.mlr.press/v48/daia16.html">Barber and Dai</a></li><li>The idea is to choose <span>$S_j = \gamma_j \Sigma_{(G_j, G_j)}$</span>. Note that the difference with the equi-correlated construction is that <span>$\gamma$</span> is potentially allowed to vary in each group. If <span>$\Sigma$</span> has unit variance, we optimize the following problem</li></ul><p class="math-container">\[\begin{aligned}
+    \min_{\gamma_1,...,\gamma_m} &amp; Tr(|\Sigma - S|)\\
+    \text{such that } &amp; 0 \le \gamma_j \le 1 \text{ for all } j \text{ and }\\
+    &amp; 2\Sigma - 
+    \begin{pmatrix}
+        \gamma_1\Sigma_{(G_1, G_1)} &amp; &amp; 0\\
+        &amp; \ddots &amp; \\
+        0 &amp; &amp; \gamma_m \Sigma_{(G_m, G_m)}
+    \end{pmatrix} \succeq 0
+\end{aligned}\]</p><p>Now lets generate SDP group knockoffs</p><pre><code class="language-julia hljs">@time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, Σ, true_mu);</code></pre><pre><code class="nohighlight hljs">  0.379894 seconds (96.31 k allocations: 18.528 MiB)</code></pre><p>We can also do a sanity check to see if the SDP knockoffs satisfy the PSD constraint</p><pre><code class="language-julia hljs"># compute minimum eigenvalues of 2Σ - S
+eigmin(2ko_sdp.Σ - ko_sdp.S)</code></pre><pre><code class="nohighlight hljs">-6.413307528979749e-8</code></pre><h2 id="Second-order-group-knockoffs"><a class="docs-heading-anchor" href="#Second-order-group-knockoffs">Second order group knockoffs</a><a id="Second-order-group-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Second-order-group-knockoffs" title="Permalink"></a></h2><p>In practice, we often do not have the true covariance matrix <span>$\Sigma$</span> and the true means <span>$\mu$</span>. In that case, we can generate second order group knockoffs via the 3 argument function</p><pre><code class="language-julia hljs">ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi);</code></pre><p>This will estimate the covariance matrix, see documentation API for more details. </p><h2 id="Power-and-FDR-comparison"><a class="docs-heading-anchor" href="#Power-and-FDR-comparison">Power and FDR comparison</a><a id="Power-and-FDR-comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Power-and-FDR-comparison" title="Permalink"></a></h2><p>Lets compare empirical power and FDR for equi and SDP group knockoffs when the targer FDR is 10%.</p><pre><code class="language-julia hljs">target_fdr = 0.1
+equi_powers, equi_fdrs, equi_times = Float64[], Float64[], Float64[]
+sdp_powers, sdp_fdrs, sdp_times = Float64[], Float64[], Float64[]
+
+Random.seed!(2022)
+for sim in 1:10
+    # simulate y
+    βtrue = zeros(p)
+    βtrue[1:k] .= rand(-1:2:1, k) .* 0.1
+    shuffle!(βtrue)
+    correct_groups = get_signif_groups(βtrue, groups)
+    ϵ = randn(n)
+    y = X * βtrue + ϵ;
+
+    # equi-group knockoffs
+    t = @elapsed ko_filter = fit_lasso(y, X, method=:equi, groups=groups)
+    idx = findfirst(x -&gt; x == target_fdr, ko_filter.fdr_target)
+    power = round(TP(correct_groups, ko_filter.βs[idx], groups), digits=3)
+    fdr = round(FDR(correct_groups, ko_filter.βs[idx], groups), digits=3)
+    println(&quot;Simulation $sim equi-group knockoffs power = $power, FDR = $fdr, time=$t&quot;)
+    push!(equi_powers, power)
+    push!(equi_fdrs, fdr)
+    push!(equi_times, t)
+    
+    # SDP-group knockoffs
+    t = @elapsed ko_filter = fit_lasso(y, X, method=:sdp, groups=groups)
+    power = round(TP(correct_groups, ko_filter.βs[idx], groups), digits=3)
+    fdr = round(FDR(correct_groups, ko_filter.βs[idx], groups), digits=3)
+    println(&quot;Simulation $sim SDP-group knockoffs power = $power, FDR = $fdr, time=$t&quot;)
+    push!(sdp_powers, power)
+    push!(sdp_fdrs, fdr)
+    push!(sdp_times, t)
+end
+
+println(&quot;\nEqui-correlated group knockoffs have average group power $(mean(equi_powers))&quot;)
+println(&quot;Equi-correlated group knockoffs have average group FDR $(mean(equi_fdrs))&quot;);
+println(&quot;Equi-correlated group knockoffs took average $(mean(equi_times)) seconds&quot;);
+
+println(&quot;\nSDP group knockoffs have average group power $(mean(sdp_powers))&quot;)
+println(&quot;SDP group knockoffs have average group FDR $(mean(sdp_fdrs))&quot;);
+println(&quot;SDP group knockoffs took average $(mean(sdp_times)) seconds&quot;);</code></pre><pre><code class="nohighlight hljs">Simulation 1 equi-group knockoffs power = 0.125, FDR = 0.0, time=2.053749326
+Simulation 1 SDP-group knockoffs power = 0.0, FDR = 0.0, time=6.45688248
+Simulation 2 equi-group knockoffs power = 0.0, FDR = 0.0, time=1.777067223
+Simulation 2 SDP-group knockoffs power = 0.125, FDR = 0.5, time=2.843801253
+Simulation 3 equi-group knockoffs power = 0.333, FDR = 0.0, time=3.566960454
+Simulation 3 SDP-group knockoffs power = 0.0, FDR = 0.0, time=2.373457417
+Simulation 4 equi-group knockoffs power = 0.333, FDR = 0.0, time=1.670845043
+Simulation 4 SDP-group knockoffs power = 0.333, FDR = 0.0, time=2.79045689
+Simulation 5 equi-group knockoffs power = 0.25, FDR = 0.0, time=1.317231961
+Simulation 5 SDP-group knockoffs power = 0.375, FDR = 0.0, time=6.14065572
+Simulation 6 equi-group knockoffs power = 0.333, FDR = 0.0, time=1.737344252
+Simulation 6 SDP-group knockoffs power = 0.667, FDR = 0.333, time=3.045115028
+Simulation 7 equi-group knockoffs power = 0.125, FDR = 0.0, time=1.873825217
+Simulation 7 SDP-group knockoffs power = 0.5, FDR = 0.0, time=4.890016678
+Simulation 8 equi-group knockoffs power = 0.111, FDR = 0.0, time=1.986784703
+Simulation 8 SDP-group knockoffs power = 0.667, FDR = 0.143, time=2.524734588
+Simulation 9 equi-group knockoffs power = 0.556, FDR = 0.0, time=1.600709261
+Simulation 9 SDP-group knockoffs power = 0.444, FDR = 0.0, time=2.742993123
+Simulation 10 equi-group knockoffs power = 0.5, FDR = 0.429, time=1.599380885
+Simulation 10 SDP-group knockoffs power = 0.25, FDR = 0.0, time=2.205388288
+
+Equi-correlated group knockoffs have average group power 0.2666
+Equi-correlated group knockoffs have average group FDR 0.0429
+Equi-correlated group knockoffs took average 1.9183898324999997 seconds
+
+SDP group knockoffs have average group power 0.33609999999999995
+SDP group knockoffs have average group FDR 0.09759999999999999
+SDP group knockoffs took average 3.6013501465000006 seconds</code></pre><h2 id="Conclusion"><a class="docs-heading-anchor" href="#Conclusion">Conclusion</a><a id="Conclusion-1"></a><a class="docs-heading-anchor-permalink" href="#Conclusion" title="Permalink"></a></h2><ul><li>Both equicorrelated and SDP group knockoffs control the group FDR to be below the target FDR level. </li><li>SDP group knockoffs have slightly better power than equi-correlated group knockoffs</li><li>Equi-correlated knockoffs are ~2x faster to construct than group-SDP (for <span>$p=100$</span> covariates and 20 groups). On a separate test with 200 groups and 5 features per group (<span>$p = 1000$</span>), SDP construction were ~45x slower. </li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../modelX/modelX/">« Model-X Knockoffs</a><a class="docs-footer-nextpage" href="../fastphase_hmm/fastphase_hmm/">fastPHASE HMM Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.22 on <span class="colophon-date" title="Tuesday 26 July 2022 07:54">Tuesday 26 July 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
