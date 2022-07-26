@@ -15,6 +15,7 @@ Pages = ["api.md"]
   fixed_knockoffs
   modelX_gaussian_knockoffs
   approx_modelX_gaussian_knockoffs
+  modelX_gaussian_group_knockoffs
   hmm_knockoff
   full_knockoffscreen
   ghost_knockoffs
@@ -23,6 +24,7 @@ Pages = ["api.md"]
   solve_max_entropy
   solve_sdp_fast
   solve_SDP
+  solve_s_group
 ```
 
 ## Regular functions

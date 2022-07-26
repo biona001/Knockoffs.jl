@@ -62,7 +62,7 @@ end
     \text{such that } & S \succeq 0 \text{ and } 2\Sigma - S \succeq 0.
 \end{aligned}
 ```
-+ Here $S$ is a group-block-diagonal matrix of the form $S = diag(S_1,...,S_G)$ where each $S_j$ is a positive definite matrix that has dimension $|G_j| \times |G_j|$
++ Here $S$ is a group-block-diagonal matrix of the form $S = diag(S_1,...,S_m)$ where each $S_j$ is a positive definite matrix that has dimension $|G_j| \times |G_j|$
 + The equi-correlated idea proposed in [Barber and Dai](https://proceedings.mlr.press/v48/daia16.html) is to let $S_j = \gamma \Sigma_{(G_j, G_j)}$ where $\Sigma_{(G_j, G_j)}$ is the block of $\Sigma$ containing variables in the $j$th group. Thus, instead of optimizing over all variables in $S$, we optimize a scalar $\gamma$. Conveniently, there a simple closed form solution.
 
 First, let's simulate data and generate equi-correlated knockoffs. Our true covariance matrix looks like

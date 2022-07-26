@@ -90,18 +90,21 @@ function solve_s_group(
 end
 
 """
+    modelX_gaussian_group_knockoffs(X, groups, method, Σ, μ)
     modelX_gaussian_group_knockoffs(X, groups, method; [covariance_approximator])
 
-Constructs (second-order) Gaussian model-X group knockoffs by estimiating the covariance matrix
-based on data. The covariance matrix is then block-diagonalized according to group structure
-to solve a relaxed optimization problem. See reference paper for details (which describes only
-equi-correlated group knockoffs but the same construction can be used for group-SDP knockoffs, 
-which we also implement here). 
+Constructs Gaussian model-X group knockoffs. If the covariance `Σ` and mean `μ` 
+are not specified, they will be estimated from data, i.e. we will make second-order
+group knockoffs. To incorporate group structure, the (true or estimated) covariance 
+matrix is block-diagonalized according to `groups` membership to solve a relaxed 
+optimization problem. See reference paper and Knockoffs.jl docs for more details. 
 
 # Inputs
 + `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
 + `groups`: Vector of group membership
 + `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
++ `Σ`: A `p × p` covariance matrix for columns of `X`
++ `μ`: A length `p` vector storing the true column means of `X`
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
@@ -128,27 +131,6 @@ function modelX_gaussian_group_knockoffs(
     return modelX_gaussian_group_knockoffs(X, groups, method, Σapprox, μ)
 end
 
-"""
-    modelX_gaussian_group_knockoffs(X, groups, method; [covariance_approximator])
-
-Constructs Gaussian model-X group knockoffs. The true covariance matrix Σ is block-diagonalized 
-according to group structure to solve a relaxed optimization problem. See reference paper for 
-details (which describes only equi-correlated group knockoffs but the same construction can be 
-used for group-SDP knockoffs, which we also implement here). 
-
-# Inputs
-+ `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
-+ `groups`: Vector of group membership
-+ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
-+ `Σ`: A `p × p` covariance matrix for columns of `X`
-+ `μ`: A length `p` vector storing the true column means of `X`
-+ `covariance_approximator`: A covariance estimator, defaults to 
-    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
-    for more options.
-
-# Reference
-Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
-"""
 function modelX_gaussian_group_knockoffs(
     X::Matrix, 
     groups::AbstractVector{Int},
