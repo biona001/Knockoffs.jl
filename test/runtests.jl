@@ -390,7 +390,9 @@ end
     @time Xko = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
 
     # run lasso, followed up by debiasing
+    Random.seed!(seed)
     @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=nothing)
+    Random.seed!(seed)
     @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=:ls)
 
     # check that debiased result have same support as not debiasing
@@ -439,7 +441,7 @@ end
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
         # println(norm(ko.βs[i] - b))
-        @test norm(ko.βs[i] - b) < 1
+        @test norm(ko.βs[i] - b) < 1.5
     end
     # idx = findall(!iszero, b)
     # [ko.βs[5][idx] b[idx]]
@@ -449,7 +451,7 @@ end
     @test length(ko.βs) == length(ko.a0)
     for i in 1:length(ko.βs)
         # println(norm(ko.βs[i] - b))
-        @test norm(ko.βs[i] - b) < 1
+        @test norm(ko.βs[i] - b) < 1.1
     end
 
     # no debias
