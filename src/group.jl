@@ -124,7 +124,7 @@ function modelX_gaussian_group_knockoffs(
         error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
     issorted(groups) || 
         error("groups not sorted. Currently group memberships must be non-overlapping and contiguous")
-    # approximate covariance matrix and scale it to correlation matrix
+    # approximate covariance matrix
     Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
@@ -162,4 +162,122 @@ function modelX_gaussian_group_knockoffs(
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), S)
     return GaussianGroupKnockoff(X, X̃, S, γs, Symmetric(Σ), method)
+end
+
+# every `windowsize` SNPs form a group
+function partition_group(snp_idx; windowsize=10)
+    p = length(snp_idx)
+    windows = floor(Int, p / windowsize)
+    remainder = p - windows * windowsize
+    groups = zeros(Int, p)
+    for window in 1:windows
+        groups[(window - 1)*windowsize + 1:window * windowsize] .= window
+    end
+    groups[p-remainder+1:p] .= windows + 1
+    return groups
+end
+
+function modelX_gaussian_group_knockoffs(
+    xdata::SnpData, 
+    method::Symbol;
+    T::Type{T} = Float32,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs...
+    )
+    # first check errors
+    n, p = size(xdata)
+    any(x -> iszero(x), maf(xdata.snparray)) || 
+        error("Detected monomorphic SNPs. Please make sure QC is done properly.")
+    # estimate rough memory requirement
+    chromosomes = xdata.snp_info[!, :chromosome]
+    unique_chr = unique(chromosomes)
+    chromosome_length = [count(x -> x == chr, chromosomes) for chr in unique_chr]
+    max_chr_len = maximum(chromosome_length)
+    @info "This routine requires roughly $((4max_chr_len^2 + 4n*max_chr_len) / 10^9) GB of RAM"
+    # preallocated arrays
+    Sblocks = Matrix{T}[]
+    Σapprox = Matrix{T}[]
+    genotype_storage = Matrix{T}(undef, n, max_chr_len)
+    # construct group knockoffs chromosome by chromosome
+    for chr in unique_chr
+        snp_idx = findall(x -> x == chr, chromosomes)
+        groups = get_group(snp_idx)
+        # copy genotypes to numeric matrix
+        copyto!(genotype_storage, @view(xdata.snparray[:, snp_idx]), impute=true)
+        X = @view(genotype_storage[:, 1:length(snp_idx)])
+        # approximate covariance matrix and scale it to correlation matrix
+        @time Σapprox = cov(covariance_approximator, X)
+        σs = sqrt.(diag(Σapprox))
+        Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
+        # define group-blocks
+        for g in unique(groups)
+            idx = findall(x -> x == g, groups)
+            push!(Sblocks, Symmetric(Σcor[idx, idx]))
+        end
+    end
+end
+
+"""
+    modelX_gaussian_group_knockoffs(xdata::SnpData, method)
+
+Generates (model-X Gaussian second-order) group knockoffs for
+a single chromosome stored in PLINK formatted data. 
+
+# todo 
+1. Use single precision for Σ and X, once this issue is resolved
+    https://github.com/mateuszbaran/CovarianceEstimation.jl/issues/82
+2. Handle PLINK files with multiple chromosomes and multiple plink
+    files each storing a chromosome
+"""
+function modelX_gaussian_group_knockoffs(
+    x::SnpArray, # assumes only have 1 chromosome, allows missing data
+    method::Symbol;
+    T::Type{T} = Float64,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    outfile = Union{String, UndefInitializer} = UndefInitializer
+    )
+    # estimate rough memory requirement (need Σ which is p*p and X which is n*p)
+    n, p = size(x)
+    @info "This routine requires at least $((T.size * p^2 + T.size * n*p) / 10^9) GB of RAM"
+    # import genotypes into numeric array
+    @time X = convert(Matrix{T}, x, impute=true)
+    any(x -> iszero(x), std(X, dims=1)) || 
+        error("Detected monomorphic SNPs. Please make sure QC is done properly.")
+    #
+    #### todo: need to split large chromosomes into blocks, and redefine groups accordingly
+    #
+    # approximate covariance matrix and scale it to correlation matrix
+    @time Σapprox = cov(covariance_approximator, X) # ~2 min
+    σs = sqrt.(diag(Σapprox))
+    Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
+    # define group-blocks
+    groups = partition_group(1:p; windowsize=10) # todo: redefine groups if chr is split into blocks
+    group_ranges = Vector{Vector{Int}}[]
+    Sblocks = Matrix{T}[]
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        push!(Sblocks, @view(Σcor[idx, idx]))
+        push!(group_ranges, idx)
+    end
+    Sblocks = BlockDiagonal(Sblocks)
+    # compute block diagonal S matrix using the specified knockoff method
+    @time S, γs = solve_s_group(Σcor, Sblocks, groups, method) # 1061.229520 seconds (this step requires more memory allocation, need to analyze)
+    # rescale S back to the result for a covariance matrix   
+    for (i, idx) in enumerate(group_ranges)
+        StatsBase.cor2cov!(S.blocks[i], @view(σs[idx]))
+    end
+    # generate knockoffs
+    μ = vec(mean(X, dims=1))
+    @time invΣ = inv(Σapprox) # 
+    @time X̃ = condition(X, μ, invΣ, S) # 
+    # finally, round values of X̃ to integers
+    round.(X̃)
+    clamp!.(X̃, 0, 2)
+    # copy result into SnpArray before returning
+    X̃snparray = SnpArray(outfile, n, p)
+    for j in 1:p, i in 1:n
+        X̃snparray[i, j] = iszero(X̃[i, j]) ? 0x00 : 
+            isone(iszero(X̃[i, j])) ? 0x02 : 0x03
+    end
+    return X̃snparray
 end
