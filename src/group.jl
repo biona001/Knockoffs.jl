@@ -177,46 +177,6 @@ function partition_group(snp_idx; windowsize=10)
     return groups
 end
 
-function modelX_gaussian_group_knockoffs(
-    xdata::SnpData, 
-    method::Symbol;
-    T::Type{T} = Float32,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs...
-    )
-    # first check errors
-    n, p = size(xdata)
-    any(x -> iszero(x), maf(xdata.snparray)) || 
-        error("Detected monomorphic SNPs. Please make sure QC is done properly.")
-    # estimate rough memory requirement
-    chromosomes = xdata.snp_info[!, :chromosome]
-    unique_chr = unique(chromosomes)
-    chromosome_length = [count(x -> x == chr, chromosomes) for chr in unique_chr]
-    max_chr_len = maximum(chromosome_length)
-    @info "This routine requires roughly $((4max_chr_len^2 + 4n*max_chr_len) / 10^9) GB of RAM"
-    # preallocated arrays
-    Sblocks = Matrix{T}[]
-    Σapprox = Matrix{T}[]
-    genotype_storage = Matrix{T}(undef, n, max_chr_len)
-    # construct group knockoffs chromosome by chromosome
-    for chr in unique_chr
-        snp_idx = findall(x -> x == chr, chromosomes)
-        groups = get_group(snp_idx)
-        # copy genotypes to numeric matrix
-        copyto!(genotype_storage, @view(xdata.snparray[:, snp_idx]), impute=true)
-        X = @view(genotype_storage[:, 1:length(snp_idx)])
-        # approximate covariance matrix and scale it to correlation matrix
-        @time Σapprox = cov(covariance_approximator, X)
-        σs = sqrt.(diag(Σapprox))
-        Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
-        # define group-blocks
-        for g in unique(groups)
-            idx = findall(x -> x == g, groups)
-            push!(Sblocks, Symmetric(Σcor[idx, idx]))
-        end
-    end
-end
-
 """
     modelX_gaussian_group_knockoffs(xdata::SnpData, method)
 
@@ -232,16 +192,18 @@ a single chromosome stored in PLINK formatted data.
 function modelX_gaussian_group_knockoffs(
     x::SnpArray, # assumes only have 1 chromosome, allows missing data
     method::Symbol;
-    T::Type{T} = Float64,
+    T::DataType = Float64,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    outfile = Union{String, UndefInitializer} = UndefInitializer
+    outfile::Union{String, UndefInitializer} = undef
     )
     # estimate rough memory requirement (need Σ which is p*p and X which is n*p)
     n, p = size(x)
     @info "This routine requires at least $((T.size * p^2 + T.size * n*p) / 10^9) GB of RAM"
     # import genotypes into numeric array
     @time X = convert(Matrix{T}, x, impute=true)
-    any(x -> iszero(x), std(X, dims=1)) || 
+    # n, p = 1000, 1000
+    # @time X = convert(Matrix{T}, @view(x[1:1000, 1:1000]), impute=true)
+    any(x -> iszero(x), std(X, dims=1)) &&
         error("Detected monomorphic SNPs. Please make sure QC is done properly.")
     #
     #### todo: need to split large chromosomes into blocks, and redefine groups accordingly
@@ -252,7 +214,7 @@ function modelX_gaussian_group_knockoffs(
     Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
     # define group-blocks
     groups = partition_group(1:p; windowsize=10) # todo: redefine groups if chr is split into blocks
-    group_ranges = Vector{Vector{Int}}[]
+    group_ranges = Vector{Int}[]
     Sblocks = Matrix{T}[]
     for g in unique(groups)
         idx = findall(x -> x == g, groups)
@@ -268,16 +230,19 @@ function modelX_gaussian_group_knockoffs(
     end
     # generate knockoffs
     μ = vec(mean(X, dims=1))
-    @time invΣ = inv(Σapprox) # 
-    @time X̃ = condition(X, μ, invΣ, S) # 
+    @time invΣ = inv(Σapprox) # 432.131293 seconds
+    @time X̃ = Knockoffs.condition(X, μ, invΣ, S) # 
     # finally, round values of X̃ to integers
-    round.(X̃)
-    clamp!.(X̃, 0, 2)
+    X̃ .= round.(X̃)
+    clamp!(X̃, 0, 2)
+    # count(vec(X̃) .!= vec(X)) # 23703 / 1000000 for 1000 by 1000 case
     # copy result into SnpArray before returning
     X̃snparray = SnpArray(outfile, n, p)
     for j in 1:p, i in 1:n
         X̃snparray[i, j] = iszero(X̃[i, j]) ? 0x00 : 
-            isone(iszero(X̃[i, j])) ? 0x02 : 0x03
+            isone(X̃[i, j]) ? 0x02 : 0x03
     end
+    # xtest = convert(Matrix{Float64}, X̃snparray)
+    # all(xtest .== X̃)
     return X̃snparray
 end
