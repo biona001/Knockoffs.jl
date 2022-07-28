@@ -64,7 +64,7 @@ function ghost_knockoffs(
     DΣinv = D * Σinv
     P = I - DΣinv
     μ = P * Zscores
-    V = Symmetric(Matrix(2D - DΣinv * D)) # do not wrap Matrix after this is resolved https://github.com/invenia/BlockDiagonals.jl/issues/102
+    V = Symmetric(2D - DΣinv * D)
     # generate ghost knockoffs
     Z̃ = rand(MvNormal(μ, V))
     return Z̃
