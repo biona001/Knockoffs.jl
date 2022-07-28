@@ -24,7 +24,7 @@ function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor!(Σ.data, σs)
     # solve optimization problem
     if method == :equi
         s = solve_equi(Σcor)

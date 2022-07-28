@@ -188,6 +188,8 @@ a single chromosome stored in PLINK formatted data.
     https://github.com/mateuszbaran/CovarianceEstimation.jl/issues/82
 2. Handle PLINK files with multiple chromosomes and multiple plink
     files each storing a chromosome
+3. Get rid of `condition_efficient` once this issue resolves
+    https://github.com/invenia/BlockDiagonals.jl/issues/112
 """
 function modelX_gaussian_group_knockoffs(
     x::SnpArray, # assumes only have 1 chromosome, allows missing data
@@ -197,7 +199,7 @@ function modelX_gaussian_group_knockoffs(
     outfile::Union{String, UndefInitializer} = undef,
     windowsize::Int = 10000
     )
-    # estimate rough memory requirement (need Σ which is p*p and X which is n*p)
+    # estimate rough memory requirement (need Σ which is windowsize*windowsize and X which is n*windowsize)
     n, p = size(x)
     windows = ceil(Int, p / windowsize)
     @info "This routine requires at least $((T.size * windowsize^2 + T.size * n*windowsize) / 10^9) GB of RAM"
@@ -219,7 +221,7 @@ function modelX_gaussian_group_knockoffs(
         # approximate covariance matrix and scale it to correlation matrix
         @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
         σs = sqrt.(diag(Σapprox))
-        Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
+        Σcor = StatsBase.cov2cor!(Σapprox.data, σs)
         # define group-blocks
         groups = partition_group(1:length(cur_range); windowsize=10)
         empty!(group_ranges); empty!(Sblocks)
@@ -255,7 +257,7 @@ function modelX_gaussian_group_knockoffs(
     return X̃snparray
 end
 
-# temporarily bypasses https://github.com/invenia/BlockDiagonals.jl/issues/112 is resolved
+# temporarily bypasses https://github.com/invenia/BlockDiagonals.jl/issues/112
 function condition_efficient(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::BlockDiagonal)
     n, p = size(X)
     ΣinvD = Σinv * D
