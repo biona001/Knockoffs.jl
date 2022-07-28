@@ -192,57 +192,75 @@ a single chromosome stored in PLINK formatted data.
 function modelX_gaussian_group_knockoffs(
     x::SnpArray, # assumes only have 1 chromosome, allows missing data
     method::Symbol;
-    T::DataType = Float64,
+    T::DataType = Float64, # Can default to Float32 once this prs merge: https://github.com/mateuszbaran/CovarianceEstimation.jl/pull/84
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    outfile::Union{String, UndefInitializer} = undef
+    outfile::Union{String, UndefInitializer} = undef,
+    windowsize::Int = 10000
     )
     # estimate rough memory requirement (need Σ which is p*p and X which is n*p)
     n, p = size(x)
-    @info "This routine requires at least $((T.size * p^2 + T.size * n*p) / 10^9) GB of RAM"
-    # import genotypes into numeric array
-    @time X = convert(Matrix{T}, x, impute=true)
-    # n, p = 1000, 1000
-    # @time X = convert(Matrix{T}, @view(x[1:1000, 1:1000]), impute=true)
-    any(x -> iszero(x), std(X, dims=1)) &&
-        error("Detected monomorphic SNPs. Please make sure QC is done properly.")
-    #
-    #### todo: need to split large chromosomes into blocks, and redefine groups accordingly
-    #
-    # approximate covariance matrix and scale it to correlation matrix
-    @time Σapprox = cov(covariance_approximator, X) # ~2 min
-    σs = sqrt.(diag(Σapprox))
-    Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
-    # define group-blocks
-    groups = partition_group(1:p; windowsize=10) # todo: redefine groups if chr is split into blocks
+    windows = ceil(Int, p / windowsize)
+    @info "This routine requires at least $((T.size * windowsize^2 + T.size * n*windowsize) / 10^9) GB of RAM"
+    # preallocated arrays
+    xstore = Matrix{T}(undef, n, windowsize)
+    X̃snparray = SnpArray(outfile, n, p)
     group_ranges = Vector{Int}[]
     Sblocks = Matrix{T}[]
-    for g in unique(groups)
-        idx = findall(x -> x == g, groups)
-        push!(Sblocks, @view(Σcor[idx, idx]))
-        push!(group_ranges, idx)
+    # loop over each window
+    for window in 1:windows
+        # import genotypes into numeric array
+        cur_range = window == windows ? 
+            ((windows - 1)*windowsize + 1:p) : 
+            ((window - 1)*windowsize + 1:window * windowsize)
+        @time copyto!(xstore, @view(x[:, cur_range]), impute=true)
+        X = @view(xstore[:, 1:length(cur_range)])
+        any(x -> iszero(x), std(X, dims=1)) &&
+            error("Detected monomorphic SNPs. Please make sure QC is done properly.")
+        # approximate covariance matrix and scale it to correlation matrix
+        @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
+        σs = sqrt.(diag(Σapprox))
+        Σcor = StatsBase.cov2cor!(Matrix(Σapprox), σs)
+        # define group-blocks
+        groups = partition_group(1:length(cur_range); windowsize=10)
+        empty!(group_ranges); empty!(Sblocks)
+        for g in unique(groups)
+            idx = findall(x -> x == g, groups)
+            push!(Sblocks, @view(Σcor[idx, idx]))
+            push!(group_ranges, idx)
+        end
+        Sblock_diag = BlockDiagonal(Sblocks)
+        # compute block diagonal S matrix using the specified knockoff method
+        @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
+        # rescale S back to the result for a covariance matrix   
+        for (i, idx) in enumerate(group_ranges)
+            StatsBase.cor2cov!(S.blocks[i], @view(σs[idx]))
+        end
+        # generate knockoffs
+        μ = vec(mean(X, dims=1))
+        @time invΣ = inv(Σapprox) # ~16 seconds for 10k SNPs
+        # @time X̃ = Knockoffs.condition(X, μ, invΣ, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
+        @time X̃ = condition_efficient(X, μ, invΣ, S)
+        # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
+        X̃ .= round.(X̃)
+        clamp!(X̃, 0, 2)
+        # count(vec(X̃) .!= vec(X)) # 160294 / 100000000 for a window
+        # copy result into SnpArray before returning
+        for (j, jj) in enumerate(cur_range), i in 1:n
+            X̃snparray[i, jj] = iszero(X̃[i, j]) ? 0x00 : 
+                isone(X̃[i, j]) ? 0x02 : 0x03
+        end
+        # xtest = convert(Matrix{Float64}, @view(X̃snparray[:, cur_range]))
+        # @assert all(xtest .== X̃)
     end
-    Sblocks = BlockDiagonal(Sblocks)
-    # compute block diagonal S matrix using the specified knockoff method
-    @time S, γs = solve_s_group(Σcor, Sblocks, groups, method) # 1061.229520 seconds (this step requires more memory allocation, need to analyze)
-    # rescale S back to the result for a covariance matrix   
-    for (i, idx) in enumerate(group_ranges)
-        StatsBase.cor2cov!(S.blocks[i], @view(σs[idx]))
-    end
-    # generate knockoffs
-    μ = vec(mean(X, dims=1))
-    @time invΣ = inv(Σapprox) # 432.131293 seconds
-    @time X̃ = Knockoffs.condition(X, μ, invΣ, S) # 
-    # finally, round values of X̃ to integers
-    X̃ .= round.(X̃)
-    clamp!(X̃, 0, 2)
-    # count(vec(X̃) .!= vec(X)) # 23703 / 1000000 for 1000 by 1000 case
-    # copy result into SnpArray before returning
-    X̃snparray = SnpArray(outfile, n, p)
-    for j in 1:p, i in 1:n
-        X̃snparray[i, j] = iszero(X̃[i, j]) ? 0x00 : 
-            isone(X̃[i, j]) ? 0x02 : 0x03
-    end
-    # xtest = convert(Matrix{Float64}, X̃snparray)
-    # all(xtest .== X̃)
     return X̃snparray
+end
+
+# temporarily bypasses https://github.com/invenia/BlockDiagonals.jl/issues/112 is resolved
+function condition_efficient(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::BlockDiagonal)
+    n, p = size(X)
+    ΣinvD = Σinv * D
+    tmp = -(D * ΣinvD)
+    new_V = Symmetric(2D + tmp)
+    L = cholesky(PositiveFactorizations.Positive, new_V).L
+    return X - (X .- μ') * ΣinvD + randn(n, p) * L
 end

@@ -404,7 +404,7 @@ end
 Computes and returns
 
 + `r1`: correlation between X[:, i] and X[:, j]
-+ `r2`: correlation between X[:, i] and X̃[:, i]
++ `r2`: correlation between X[:, i] and X̃[:, j]
 """
 function compare_pairwise_correlation(X::SnpArray, X̃::SnpArray; snps::Int = size(X, 2))
     n, p = size(X)
