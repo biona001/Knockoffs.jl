@@ -188,8 +188,6 @@ a single chromosome stored in PLINK formatted data.
     https://github.com/mateuszbaran/CovarianceEstimation.jl/issues/82
 2. Handle PLINK files with multiple chromosomes and multiple plink
     files each storing a chromosome
-3. Get rid of `condition_efficient` once this issue resolves
-    https://github.com/invenia/BlockDiagonals.jl/issues/112
 """
 function modelX_gaussian_group_knockoffs(
     x::SnpArray, # assumes only have 1 chromosome, allows missing data
@@ -240,13 +238,12 @@ function modelX_gaussian_group_knockoffs(
         # generate knockoffs
         μ = vec(mean(X, dims=1))
         @time invΣ = inv(Σapprox) # ~16 seconds for 10k SNPs
-        # @time X̃ = Knockoffs.condition(X, μ, invΣ, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
-        @time X̃ = condition_efficient(X, μ, invΣ, S)
+        @time X̃ = Knockoffs.condition(X, μ, invΣ, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
         # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
         X̃ .= round.(X̃)
         clamp!(X̃, 0, 2)
         # count(vec(X̃) .!= vec(X)) # 160294 / 100000000 for a window
-        # copy result into SnpArray before returning
+        # copy result into SnpArray
         for (j, jj) in enumerate(cur_range), i in 1:n
             X̃snparray[i, jj] = iszero(X̃[i, j]) ? 0x00 : 
                 isone(X̃[i, j]) ? 0x02 : 0x03
@@ -255,14 +252,4 @@ function modelX_gaussian_group_knockoffs(
         # @assert all(xtest .== X̃)
     end
     return X̃snparray
-end
-
-# temporarily bypasses https://github.com/invenia/BlockDiagonals.jl/issues/112
-function condition_efficient(X::AbstractMatrix, μ::AbstractVector, Σinv::AbstractMatrix, D::BlockDiagonal)
-    n, p = size(X)
-    ΣinvD = Σinv * D
-    tmp = -(D * ΣinvD)
-    new_V = Symmetric(2D + tmp)
-    L = cholesky(PositiveFactorizations.Positive, new_V).L
-    return X - (X .- μ') * ΣinvD + randn(n, p) * L
 end
