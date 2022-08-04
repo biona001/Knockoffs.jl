@@ -52,6 +52,24 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     return S, γs
 end
 
+# function solve_group_SDP_test(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+#     model = Model(() -> Hypatia.Optimizer(verbose=false))
+#     n = nblocks(Σblocks)
+#     block_sizes = size.(Σblocks.blocks, 1)
+#     @variable(model, 0 <= γ[1:n] <= 1)
+#     blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> SparseMatrixCSC
+#     @objective(model, Max, block_sizes' * γ)
+#     @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
+#     JuMP.optimize!(model)
+#     γs = clamp!(JuMP.value.(γ), 0, 1)
+#     S = BlockDiagonal(γs .* Σblocks.blocks)
+#     return S, γs
+# end
+# Σ = 0.5 * Matrix(I, 1000, 1000) + 0.5 * ones(1000, 1000)
+# S = [0.5 * Matrix(I, 10, 10) + 0.5 * ones(10, 10) for _ in 1:100] |> BlockDiagonal
+# @time solve_group_SDP(Σ, S); # 38.906791 seconds (5.22 M allocations: 2.498 GiB, 6.45% gc time)
+# @time solve_group_SDP_test(Σ, S);  # 41.817458 seconds (21.14 M allocations: 4.070 GiB, 10.55% gc time)
+
 """
     solve_s_group(Σ, Sblocks, groups, [method=:equi]; kwargs...)
 
@@ -184,15 +202,12 @@ Generates (model-X Gaussian second-order) group knockoffs for
 a single chromosome stored in PLINK formatted data. 
 
 # todo 
-1. Use single precision for Σ and X, once this issue is resolved
-    https://github.com/mateuszbaran/CovarianceEstimation.jl/issues/82
-2. Handle PLINK files with multiple chromosomes and multiple plink
-    files each storing a chromosome
+Handle PLINK files with multiple chromosomes and multiple plink files each storing a chromosome
 """
 function modelX_gaussian_group_knockoffs(
     x::SnpArray, # assumes only have 1 chromosome, allows missing data
     method::Symbol;
-    T::DataType = Float64, # Can default to Float32 once this prs merge: https://github.com/mateuszbaran/CovarianceEstimation.jl/pull/84
+    T::DataType = Float32,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     outfile::Union{String, UndefInitializer} = undef,
     windowsize::Int = 10000
