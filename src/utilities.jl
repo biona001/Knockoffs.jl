@@ -113,7 +113,7 @@ function solve_MVR(
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
-    for l in 1:niter
+    @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
             fill!(ej, 0)
@@ -129,7 +129,7 @@ function solve_MVR(
             s[j] += δj
             # rank 1 update to cholesky factor
             ej[j] = sqrt(abs(δj))
-            δj > 0 ? lowrankdowndate!(L, ej) : lowrankupdate!(L, ej)
+            δj > 0 ? lowrankdowndate_turbo!(L, ej) : lowrankupdate_turbo!(L, ej)
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
         end
@@ -192,10 +192,10 @@ function solve_max_entropy(
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
-    for l in 1:niter
+    @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
-            for i in 1:p
+            @simd for i in 1:p
                 ỹ[i] = 2Σ[i, j]
             end
             ỹ[j] = 0
@@ -212,7 +212,7 @@ function solve_max_entropy(
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
@@ -252,7 +252,7 @@ end
 #             # rank 1 update to cholesky factor
 #             fill!(u, 0)
 #             u[j] = sqrt(abs(δ))
-#             δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+#             δ > 0 ? lowrankupdate_turbo!(L, u) : lowrankdowndate_turbo!(L, u)
 #             # update convergence tol
 #             abs(δ) > max_delta && (max_delta = abs(δ))
 #         end
@@ -307,7 +307,7 @@ function solve_sdp_fast(
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
         end
         # check convergence 
         λ *= μ
@@ -707,3 +707,96 @@ end
 #     @assert length(group_membership) == size(Σ, 1)
 #     return group_membership
 # end
+
+"""
+    lowrankupdate_turbo!(C::Cholesky, v::AbstractVector)
+
+Vectorized version of lowrankupdate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L707
+"""
+function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
+    A = C.factors
+    n = length(v)
+    if size(C, 1) != n
+        throw(DimensionMismatch("updating vector must fit size of factorization"))
+    end
+    # if C.uplo == 'U'
+    #     conj!(v)
+    # end
+
+    @inbounds for i = 1:n
+
+        # Compute Givens rotation
+        c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
+
+        # Store new diagonal element
+        A[i,i] = r
+
+        # Update remaining elements in row/column
+        if C.uplo == 'U'
+            @turbo for j = i + 1:n
+                Aij = A[i,j]
+                vj  = v[j]
+                A[i,j]  =   c*Aij + s*vj
+                v[j]    = -s*Aij + c*vj
+            end
+        else
+            @turbo for j = i + 1:n
+                Aji = A[j,i]
+                vj  = v[j]
+                A[j,i]  =   c*Aji + s*vj
+                v[j]    = -s*Aji + c*vj
+            end
+        end
+    end
+    return C
+end
+
+"""
+lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
+
+Vectorized version of lowrankdowndate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L753
+"""
+function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
+    A = C.factors
+    n = length(v)
+    if size(C, 1) != n
+        throw(DimensionMismatch("updating vector must fit size of factorization"))
+    end
+    # if C.uplo == 'U'
+    #     conj!(v)
+    # end
+
+    @inbounds for i = 1:n
+
+        Aii = A[i,i]
+
+        # Compute Givens rotation
+        s = v[i] / Aii
+        s2 = abs2(s)
+        if s2 > 1
+            throw(LinearAlgebra.PosDefException(i))
+        end
+        c = sqrt(1 - abs2(s))
+
+        # Store new diagonal element
+        A[i,i] = c*Aii
+
+        # Update remaining elements in row/column
+        if C.uplo == 'U'
+            @turbo for j = i + 1:n
+                vj = v[j]
+                Aij = (A[i,j] - s*vj)/c
+                A[i,j] = Aij
+                v[j] = -s*Aij + c*vj
+            end
+        else
+            @turbo for j = i + 1:n
+                vj = v[j]
+                Aji = (A[j,i] - s*vj)/c
+                A[j,i] = Aji
+                v[j] = -s*Aji + c*vj
+            end
+        end
+    end
+    return C
+end
