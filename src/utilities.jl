@@ -287,10 +287,10 @@ function solve_sdp_fast(
     L = cholesky(Symmetric(2Σ))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
-    for l in 1:niter
+    @inbounds for l in 1:niter
         verbose && println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
         for j in 1:p
-            for i in 1:p
+            @simd for i in 1:p
                 ỹ[i] = 2Σ[i, j]
             end
             ỹ[j] = 0
@@ -712,6 +712,7 @@ end
     lowrankupdate_turbo!(C::Cholesky, v::AbstractVector)
 
 Vectorized version of lowrankupdate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L707
+Takes advantage of the fact that `v` is 0 everywhere except at 1 position
 """
 function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
     A = C.factors
@@ -723,10 +724,12 @@ function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Abst
     #     conj!(v)
     # end
 
-    @inbounds for i = 1:n
+    idx_start = something(findfirst(!iszero, v))
+    @inbounds for i = idx_start:n
 
         # Compute Givens rotation
         c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
+        abs(s) < 1e-10 && break # early terminate
 
         # Store new diagonal element
         A[i,i] = r
@@ -755,6 +758,7 @@ end
 lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
 
 Vectorized version of lowrankdowndate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L753
+Takes advantage of the fact that `v` is 0 everywhere except at 1 position
 """
 function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
     A = C.factors
@@ -766,7 +770,8 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
     #     conj!(v)
     # end
 
-    @inbounds for i = 1:n
+    idx_start = something(findfirst(!iszero, v))
+    @inbounds for i = idx_start:n
 
         Aii = A[i,i]
 
@@ -777,6 +782,7 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
             throw(LinearAlgebra.PosDefException(i))
         end
         c = sqrt(1 - abs2(s))
+        abs(s) < 1e-10 && break # early termination
 
         # Store new diagonal element
         A[i,i] = c*Aii
