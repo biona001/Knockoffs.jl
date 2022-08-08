@@ -126,6 +126,7 @@ function solve_MVR(
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j])
+            abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
             ej[j] = sqrt(abs(δj))
@@ -208,6 +209,7 @@ function solve_max_entropy(
             # solve optimality condition in eq 75 of spector et al 2020
             sj_new = (2Σ[j, j] - c) / 2
             δ = s[j] - sj_new
+            abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
@@ -303,6 +305,7 @@ function solve_sdp_fast(
             # 1st order optimality condition
             sj_new = clamp(2Σ[j, j] - c - λ, 0, 1)
             δ = s[j] - sj_new
+            abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
