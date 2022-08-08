@@ -2,10 +2,10 @@
     solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
 
 Solves the vector `s` for generating knockoffs. `Σ` can be a general 
-covariance matrix. 
+covariance matrix but it must be wrapped in the `Symmetric` keyword. 
 
 # Inputs
-+ `Σ`: A covariance matrix (in general, it is better to supply `Symmetric(Σ)` explicitly)
++ `Σ`: A covariance matrix (one must wrap `Symmetric(Σ)` explicitly)
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
@@ -318,11 +318,6 @@ function solve_sdp_fast(
     end
     return s
 end
-# using Random, Knockoffs, BenchmarkTools, ToeplitzMatrices, ProfileView
-# ρ = 0.4
-# p = 100
-# Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
-# @profview Knockoffs.solve_sdp_fast(Σ);
 
 """
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
@@ -355,7 +350,7 @@ function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
     corr_matrix = exp.(log_corrs)
 
     # Ensure PSD-ness
-    corr_matrix = cov2cor(shift_until_PSD(corr_matrix, tol))
+    corr_matrix = cov2cor(shift_until_PSD!(corr_matrix, tol))
 
     return corr_matrix
 end
@@ -650,27 +645,6 @@ function download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
     end
 end
 
-# function simulate_block_covariance(
-#     B::Int, # number of blocks
-#     num_groups_per_block=2:10, # each block have 2-10 groups
-#     num_vars_per_group=2:5, # each group have 2-5 variables
-#     rho = Uniform(0, 1) # correlation for covariates each group
-#     )
-#     Σ = BlockDiagonal{Float64}[]
-#     for b in 1:B
-#         num_groups = rand(num_groups_per_block) 
-#         Σb = Matrix{Float64}[]
-#         for g in 1:num_groups
-#             ρ = rand(rho)   
-#             p = rand(num_vars_per_group) 
-#             Σbi = (1-ρ) * Matrix(I, p, p) + ρ * ones(p, p)
-#             push!(Σb, Σbi)
-#         end
-#         push!(Σ, BlockDiagonal(Σb))
-#     end
-#     return BlockDiagonal(Σ)
-# end
-
 function simulate_block_covariance(
     groups::Vector{Int},
     ρ::T, # within group correlation 
@@ -690,26 +664,6 @@ function simulate_block_covariance(
     Σ[findall(iszero, Σ)] .= γ*ρ
     return Σ
 end
-
-# function get_group_memberships(
-#     Σ::BlockDiagonal{T, V}
-#     ) where {T <: AbstractFloat, V<:AbstractMatrix{T}}
-#     groups = 0
-#     group_membership = Int[]
-#     # loop over blocks
-#     for Σb in Σ.blocks
-#         # loop over all groups in current block
-#         for i in 1:nblocks(Σb)
-#             group_length = size(Σb.blocks[i], 1)
-#             groups += 1
-#             for _ in 1:group_length
-#                 push!(group_membership, groups)
-#             end
-#         end
-#     end
-#     @assert length(group_membership) == size(Σ, 1)
-#     return group_membership
-# end
 
 """
     lowrankupdate_turbo!(C::Cholesky, v::AbstractVector)
@@ -758,7 +712,7 @@ function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Abst
 end
 
 """
-lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
+    lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
 
 Vectorized version of lowrankdowndate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L753
 Takes advantage of the fact that `v` is 0 everywhere except at 1 position
