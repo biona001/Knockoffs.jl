@@ -414,13 +414,13 @@ end
 
     # ASDP (fixed window ranges)
     @time asdp = approx_modelX_gaussian_knockoffs(X, :sdp, windowsize = 99)
-    λmin = eigmin(2*asdp.Σ - Diagonal(asdp.s))
+    λmin = eigvals(2*asdp.Σ - Diagonal(asdp.s)) |> minimum
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
     # AMVR (arbitrary window ranges)
     window_ranges = [1:99, 100:121, 122:444, 445:500]
     @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, window_ranges);
-    λmin = eigmin(2*amvr.Σ - Diagonal(amvr.s))
+    λmin = eigvals(2*amvr.Σ - Diagonal(amvr.s)) |> minimum
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
