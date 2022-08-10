@@ -22,6 +22,8 @@ using Roots: fzero
 using Downloads
 using GLM
 using Reexport
+using LoopVectorization
+
 @reexport using GLM
 
 export knockoff_filter, 

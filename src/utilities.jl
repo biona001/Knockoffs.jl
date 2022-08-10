@@ -2,10 +2,10 @@
     solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
 
 Solves the vector `s` for generating knockoffs. `Σ` can be a general 
-covariance matrix. 
+covariance matrix but it must be wrapped in the `Symmetric` keyword. 
 
 # Inputs
-+ `Σ`: A covariance matrix (in general, it is better to supply `Symmetric(Σ)` explicitly)
++ `Σ`: A covariance matrix (one must wrap `Symmetric(Σ)` explicitly)
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
@@ -24,7 +24,7 @@ function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor!(Σ.data, σs)
     # solve optimization problem
     if method == :equi
         s = solve_equi(Σcor)
@@ -113,7 +113,7 @@ function solve_MVR(
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
-    for l in 1:niter
+    @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
             fill!(ej, 0)
@@ -126,10 +126,11 @@ function solve_MVR(
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j])
+            abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
             ej[j] = sqrt(abs(δj))
-            δj > 0 ? lowrankdowndate!(L, ej) : lowrankupdate!(L, ej)
+            δj > 0 ? lowrankdowndate_turbo!(L, ej) : lowrankupdate_turbo!(L, ej)
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
         end
@@ -192,10 +193,10 @@ function solve_max_entropy(
     L = cholesky(Symmetric(2Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
-    for l in 1:niter
+    @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
-            for i in 1:p
+            @simd for i in 1:p
                 ỹ[i] = 2Σ[i, j]
             end
             ỹ[j] = 0
@@ -208,11 +209,12 @@ function solve_max_entropy(
             # solve optimality condition in eq 75 of spector et al 2020
             sj_new = (2Σ[j, j] - c) / 2
             δ = s[j] - sj_new
+            abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
@@ -252,7 +254,7 @@ end
 #             # rank 1 update to cholesky factor
 #             fill!(u, 0)
 #             u[j] = sqrt(abs(δ))
-#             δ > 0 ? lowrankupdate!(L, u) : lowrankdowndate!(L, u)
+#             δ > 0 ? lowrankupdate_turbo!(L, u) : lowrankdowndate_turbo!(L, u)
 #             # update convergence tol
 #             abs(δ) > max_delta && (max_delta = abs(δ))
 #         end
@@ -287,10 +289,10 @@ function solve_sdp_fast(
     L = cholesky(Symmetric(2Σ))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
-    for l in 1:niter
+    @inbounds for l in 1:niter
         verbose && println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
         for j in 1:p
-            for i in 1:p
+            @simd for i in 1:p
                 ỹ[i] = 2Σ[i, j]
             end
             ỹ[j] = 0
@@ -303,11 +305,12 @@ function solve_sdp_fast(
             # 1st order optimality condition
             sj_new = clamp(2Σ[j, j] - c - λ, 0, 1)
             δ = s[j] - sj_new
+            abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankupdate!(L, x) : lowrankdowndate!(L, x)
+            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
         end
         # check convergence 
         λ *= μ
@@ -315,11 +318,6 @@ function solve_sdp_fast(
     end
     return s
 end
-# using Random, Knockoffs, BenchmarkTools, ToeplitzMatrices, ProfileView
-# ρ = 0.4
-# p = 100
-# Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
-# @profview Knockoffs.solve_sdp_fast(Σ);
 
 """
     simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
@@ -352,7 +350,7 @@ function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
     corr_matrix = exp.(log_corrs)
 
     # Ensure PSD-ness
-    corr_matrix = cov2cor(shift_until_PSD(corr_matrix, tol))
+    corr_matrix = cov2cor(shift_until_PSD!(corr_matrix, tol))
 
     return corr_matrix
 end
@@ -404,7 +402,7 @@ end
 Computes and returns
 
 + `r1`: correlation between X[:, i] and X[:, j]
-+ `r2`: correlation between X[:, i] and X̃[:, i]
++ `r2`: correlation between X[:, i] and X̃[:, j]
 """
 function compare_pairwise_correlation(X::SnpArray, X̃::SnpArray; snps::Int = size(X, 2))
     n, p = size(X)
@@ -647,27 +645,6 @@ function download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
     end
 end
 
-# function simulate_block_covariance(
-#     B::Int, # number of blocks
-#     num_groups_per_block=2:10, # each block have 2-10 groups
-#     num_vars_per_group=2:5, # each group have 2-5 variables
-#     rho = Uniform(0, 1) # correlation for covariates each group
-#     )
-#     Σ = BlockDiagonal{Float64}[]
-#     for b in 1:B
-#         num_groups = rand(num_groups_per_block) 
-#         Σb = Matrix{Float64}[]
-#         for g in 1:num_groups
-#             ρ = rand(rho)   
-#             p = rand(num_vars_per_group) 
-#             Σbi = (1-ρ) * Matrix(I, p, p) + ρ * ones(p, p)
-#             push!(Σb, Σbi)
-#         end
-#         push!(Σ, BlockDiagonal(Σb))
-#     end
-#     return BlockDiagonal(Σ)
-# end
-
 function simulate_block_covariance(
     groups::Vector{Int},
     ρ::T, # within group correlation 
@@ -688,22 +665,101 @@ function simulate_block_covariance(
     return Σ
 end
 
-# function get_group_memberships(
-#     Σ::BlockDiagonal{T, V}
-#     ) where {T <: AbstractFloat, V<:AbstractMatrix{T}}
-#     groups = 0
-#     group_membership = Int[]
-#     # loop over blocks
-#     for Σb in Σ.blocks
-#         # loop over all groups in current block
-#         for i in 1:nblocks(Σb)
-#             group_length = size(Σb.blocks[i], 1)
-#             groups += 1
-#             for _ in 1:group_length
-#                 push!(group_membership, groups)
-#             end
-#         end
-#     end
-#     @assert length(group_membership) == size(Σ, 1)
-#     return group_membership
-# end
+"""
+    lowrankupdate_turbo!(C::Cholesky, v::AbstractVector)
+
+Vectorized version of lowrankupdate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L707
+Takes advantage of the fact that `v` is 0 everywhere except at 1 position
+"""
+function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
+    A = C.factors
+    n = length(v)
+    if size(C, 1) != n
+        throw(DimensionMismatch("updating vector must fit size of factorization"))
+    end
+    # if C.uplo == 'U'
+    #     conj!(v)
+    # end
+
+    idx_start = something(findfirst(!iszero, v))
+    @inbounds for i = idx_start:n
+
+        # Compute Givens rotation
+        c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
+        abs(s) < 1e-10 && break # early terminate
+
+        # Store new diagonal element
+        A[i,i] = r
+
+        # Update remaining elements in row/column
+        if C.uplo == 'U'
+            @turbo for j = i + 1:n
+                Aij = A[i,j]
+                vj  = v[j]
+                A[i,j]  =   c*Aij + s*vj
+                v[j]    = -s*Aij + c*vj
+            end
+        else
+            @turbo for j = i + 1:n
+                Aji = A[j,i]
+                vj  = v[j]
+                A[j,i]  =   c*Aji + s*vj
+                v[j]    = -s*Aji + c*vj
+            end
+        end
+    end
+    return C
+end
+
+"""
+    lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
+
+Vectorized version of lowrankdowndate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L753
+Takes advantage of the fact that `v` is 0 everywhere except at 1 position
+"""
+function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
+    A = C.factors
+    n = length(v)
+    if size(C, 1) != n
+        throw(DimensionMismatch("updating vector must fit size of factorization"))
+    end
+    # if C.uplo == 'U'
+    #     conj!(v)
+    # end
+
+    idx_start = something(findfirst(!iszero, v))
+    @inbounds for i = idx_start:n
+
+        Aii = A[i,i]
+
+        # Compute Givens rotation
+        s = v[i] / Aii
+        s2 = abs2(s)
+        if s2 > 1
+            throw(LinearAlgebra.PosDefException(i))
+        end
+        c = sqrt(1 - abs2(s))
+        abs(s) < 1e-10 && break # early termination
+
+        # Store new diagonal element
+        A[i,i] = c*Aii
+
+        # Update remaining elements in row/column
+        if C.uplo == 'U'
+            @turbo for j = i + 1:n
+                vj = v[j]
+                Aij = (A[i,j] - s*vj)/c
+                A[i,j] = Aij
+                v[j] = -s*Aij + c*vj
+            end
+        else
+            @turbo for j = i + 1:n
+                vj = v[j]
+                Aji = (A[j,i] - s*vj)/c
+                A[j,i] = Aji
+                v[j] = -s*Aji + c*vj
+            end
+        end
+    end
+    return C
+end
