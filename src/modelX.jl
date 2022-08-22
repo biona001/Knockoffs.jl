@@ -49,7 +49,7 @@ end
 
 function modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::AbstractVector, Σ::AbstractMatrix; kwargs...)
     # compute s vector using the specified method
-    s = solve_s(Σ, method; kwargs...)
+    s = solve_s(Symmetric(Σ), method; kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, inv(Σ), Diagonal(s))
     return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)

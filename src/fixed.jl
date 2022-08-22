@@ -37,7 +37,7 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol; kwargs...) where T <: Abs
     #     σi^2 < λmin && (λmin = σi^2)
     # end
     # compute s vector using the specified method
-    s = solve_s(Σ, method; kwargs...)
+    s = solve_s(Symmetric(Σ), method; kwargs...)
     # compute Ũ such that Ũ'X = 0
     Ũ = @view(U[:, p+1:2p])
     # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
