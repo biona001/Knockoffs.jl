@@ -7,6 +7,7 @@ This is a Julia implementation of the [knockoff filter](https://web.stanford.edu
 Within Julia,
 ```julia
 using Pkg
+pkg"add https://github.com/biona001/fastPHASE.jl"
 pkg"add https://github.com/biona001/Knockoffs.jl"
 ```
 This package supports Julia `v1.6`+.
@@ -22,6 +23,7 @@ Pages = [
     "man/shapeit_hmm.md",
     "man/knockoffscreen/knockoffscreen.md",
     "man/ghost_knockoffs.md",
+    "man/JuliaCall.md",
     "man/api.md"
 ]
 Depth = 2

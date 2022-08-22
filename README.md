@@ -4,8 +4,6 @@
 |-------------------|------------------|--------------------|
 | [![](https://img.shields.io/badge/docs-latest-blue.svg)](https://biona001.github.io/Knockoffs.jl/dev/) [![](https://img.shields.io/badge/docs-stable-blue.svg)](https://biona001.github.io/Knockoffs.jl/stable/) | [![build Actions Status](https://github.com/biona001/Knockoffs.jl/workflows/CI/badge.svg)](https://github.com/biona001/Knockoffs.jl/actions) [![CI (Julia nightly)](https://github.com/biona001/Knockoffs.jl/workflows/JuliaNightly/badge.svg)](https://github.com/biona001/Knockoffs.jl/actions/workflows/JuliaNightly.yml) | [![codecov](https://codecov.io/gh/biona001/Knockoffs.jl/branch/master/graph/badge.svg?token=YyPqiFpIM1)](https://codecov.io/gh/biona001/Knockoffs.jl) |
 
-**This software is experimental in nature and should NOT be considered production ready**
-
 This is a Julia implementation of the [knockoff filter](https://web.stanford.edu/group/candes/knockoffs/), taking many inspirations from the MATLAB/R implementation of [knockoff-filter](https://github.com/msesia/knockoff-filter), python implementation of [knockpy](https://github.com/amspector100/knockpy), and also the C++/R code of [knockoffgwas](https://github.com/msesia/knockoffgwas). The knockoff filter is a general framework for controlling the false discovery rate when performing variable selection. As the name suggests, the knockoff filter operates by manufacturing knockoff variables that are cheap — their construction does not require collecting any new data — and are designed to mimic the correlation structure found within the original variables. The knockoffs serve as negative controls and they allow one to identify the truly important predictors, while controlling the false discovery rate (FDR) — the expected fraction of false discoveries among all discoveries.
 
 For more information, please see the [main webpage](https://web.stanford.edu/group/candes/knockoffs/)
@@ -20,7 +18,12 @@ pkg"add https://github.com/biona001/Knockoffs.jl"
 ```
 This package supports Julia `v1.6`+. 
 
-**fastPHASE.jl supports only mac and linux systems.** We are also experiencing some comptability issues with mac's M1 CPUs. Please file an issue if installation is a problem. 
+**Note**
++ [fastPHASE](https://stephenslab.uchicago.edu/software.html#fastphase) and hence [fastPHASE.jl](https://github.com/biona001/fastPHASE.jl) supports only Mac and linux systems. Thus, fastPHASE HMM knockoffs does not work on Windows machines. 
++  For users running with Apple's M1 CPUs, the current recommendation is to run Julia with Rosetta. 
+
+## Calling Knockoffs.jl from R and Python
+
 
 ## Development Roadmap
 

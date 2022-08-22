@@ -14,6 +14,7 @@ makedocs(
         "SHAPEIT HMM Knockoffs" => "man/shapeit_hmm.md",
         "KnockoffScreen Knockoffs" => "man/knockoffscreen/knockoffscreen.md",
         "Ghost Knockoffs" => "man/ghost_knockoffs.md",
+        "Calling from R" => "man/JuliaCall.md",
         "API" => "man/api.md",
     ]
 )

@@ -20,10 +20,6 @@ Pages = ["api.md"]
   full_knockoffscreen
   ghost_knockoffs
   solve_s
-  solve_MVR
-  solve_max_entropy
-  solve_sdp_fast
-  solve_SDP
   solve_s_group
 ```
 
