@@ -1,5 +1,5 @@
 """
-    solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
+    solve_s(Σ::Symmetric, method::Symbol; kwargs...)
 
 Solves the vector `s` for generating knockoffs. `Σ` can be a general 
 covariance matrix but it must be wrapped in the `Symmetric` keyword. 
@@ -20,7 +20,7 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function solve_s(Σ::AbstractMatrix, method::Symbol; kwargs...)
+function solve_s(Σ::Symmetric, method::Symbol; kwargs...)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
@@ -79,7 +79,8 @@ end
 """
     solve_equi(Σ::AbstractMatrix)
 
-Solves the equicorrelated problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
+Solves the equicorrelated problem for fixed-X and model-X knockoffs given 
+correlation matrix Σ. Users should call `solve_s` instead of this function. 
 """
 function solve_equi(
     Σ::AbstractMatrix{T},
@@ -94,7 +95,8 @@ end
     solve_MVR(Σ::AbstractMatrix)
 
 Solves the minimum variance-based reconstructability problem for fixed-X
-and model-X knockoffs given correlation matrix Σ.
+and model-X knockoffs given correlation matrix Σ. Users should call `solve_s` 
+instead of this function. 
 
 See algorithm 1 of "Powerful knockoffs via minimizing 
 reconstructability" by Spector, Asher, and Lucas Janson (2020)
@@ -164,7 +166,7 @@ end
     solve_max_entropy(Σ::AbstractMatrix)
 
 Solves the maximum entropy knockoff problem for fixed-X and model-X knockoffs
-given correlation matrix Σ.
+given correlation matrix Σ. Users should call `solve_s` instead of this function. 
 
 # Reference
 Algorithm 2.2 from Powerful Knockoffs via Minimizing Reconstructability: https://arxiv.org/pdf/2011.14625.pdf
@@ -268,7 +270,7 @@ end
     solve_sdp_fast(Σ::AbstractMatrix)
 
 Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent, 
-given correlation matrix Σ. 
+given correlation matrix Σ. Users should call `solve_s` instead of this function. 
 
 # Reference
 Algorithm 2.2 from "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
