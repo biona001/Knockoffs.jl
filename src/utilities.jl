@@ -48,14 +48,22 @@ end
     solve_SDP(Σ::AbstractMatrix)
 
 Solves the SDP problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
+Users should call `solve_s` instead of this function. 
 
 The optimization problem is stated in equation 3.13 of
 https://arxiv.org/pdf/1610.02351.pdf
+
+# Arguments
++ `Σ`: A correlation matrix (diagonals all equal to 1)
++ `optm`: SDP solver. Defaults to `Hypatia.Optimizer(verbose=false)`. This can
+    be any solver that supports the JuMP interface. For example, use 
+    `SDPT3.Optimizer` in SDPT3.jl package (which is a MATLAB dependency)
+    for the best performance. 
 """
-function solve_SDP(Σ::AbstractMatrix)
+function solve_SDP(Σ::AbstractMatrix, optm=Hypatia.Optimizer(verbose=false))
     # Build model via JuMP
     p = size(Σ, 1)
-    model = Model(() -> Hypatia.Optimizer(verbose=false))
+    model = Model(() -> optm)
     @variable(model, 0 ≤ s[i = 1:p] ≤ 1)
     @objective(model, Max, sum(s))
     @constraint(model, Symmetric(2Σ - diagm(s[1:p])) in PSDCone())
