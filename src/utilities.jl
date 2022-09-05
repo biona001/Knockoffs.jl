@@ -773,3 +773,10 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
     end
     return C
 end
+
+"""
+    ◺(n::Integer)
+
+Triangular number n * (n+1) / 2. Type ◺ by `<backslash>lltriangle<tab>`
+"""
+◺(n::Integer) = (n * (n + 1)) >> 1

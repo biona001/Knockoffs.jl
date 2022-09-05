@@ -52,23 +52,54 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     return S, γs
 end
 
-# function solve_group_SDP_test(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
-#     model = Model(() -> Hypatia.Optimizer(verbose=false))
-#     n = nblocks(Σblocks)
-#     block_sizes = size.(Σblocks.blocks, 1)
-#     @variable(model, 0 <= γ[1:n] <= 1)
-#     blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> SparseMatrixCSC
-#     @objective(model, Max, block_sizes' * γ)
-#     @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
-#     JuMP.optimize!(model)
-#     γs = clamp!(JuMP.value.(γ), 0, 1)
-#     S = BlockDiagonal(γs .* Σblocks.blocks)
-#     return S, γs
-# end
-# Σ = 0.5 * Matrix(I, 1000, 1000) + 0.5 * ones(1000, 1000)
-# S = [0.5 * Matrix(I, 10, 10) + 0.5 * ones(10, 10) for _ in 1:100] |> BlockDiagonal
-# @time solve_group_SDP(Σ, S); # 38.906791 seconds (5.22 M allocations: 2.498 GiB, 6.45% gc time)
-# @time solve_group_SDP_test(Σ, S);  # 41.817458 seconds (21.14 M allocations: 4.070 GiB, 10.55% gc time)
+# equicorrelated construction by choosing S_g = γΣ_{g,g}
+function solve_group_max_entropy_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+    p = size(Σ, 1)
+    # calculate Db = bdiag(Σ_{11}^{-1/2}, ..., Σ_{GG}^{-1/2})
+    Db = Matrix{eltype(Σ)}[]
+    for Σbi in Σblocks.blocks
+        push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
+    end
+    Db = BlockDiagonal(Db)
+    λ = Symmetric(2Db * Σ * Db) |> eigvals
+    # solve non-linear objective using Ipopt
+    model = Model(() -> Ipopt.Optimizer())
+    set_optimizer_attribute(model, "print_level", 0)
+    @variable(model, 0 <= γ <= minimum(λ))
+    @NLobjective(model, Max, p * log(γ) + sum(log(λ[i] - γ) for i in 1:p))
+    JuMP.optimize!(model)
+    # convert solution to vector and return resulting block diagonal matrix
+    γs = [JuMP.value.(γ)]
+    S = BlockDiagonal(γs[1] .* Σblocks.blocks)
+    return S, γs
+end
+
+# equicorrelated construction by choosing S_g = γ_g * Σ_{g,g}
+function solve_group_max_entropy_general(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+    p = size(Σ, 1)
+    G = length(Σblocks.blocks)
+    group_sizes = size.(Σblocks.blocks, 1)
+    # calculate Db = bdiag(Σ_{11}^{-1/2}, ..., Σ_{GG}^{-1/2})
+    Db = Matrix{eltype(Σ)}[]
+    for Σbi in Σblocks.blocks
+        push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
+    end
+    Db = BlockDiagonal(Db)
+    λ = Symmetric(2Db * Σ * Db) |> eigvals
+    # solve non-linear objective using Ipopt
+    model = Model(() -> Ipopt.Optimizer())
+    set_optimizer_attribute(model, "print_level", 0)
+    @variable(model, 0 <= γ[1:G] <= 1)
+    @NLobjective(model, Max, 
+        sum(group_sizes[g] * log(γ[g]) for g in 1:G) + 
+        logdet(2Db)
+    )
+    JuMP.optimize!(model)
+    # convert solution to vector and return resulting block diagonal matrix
+    γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
+    S = BlockDiagonal(γs[1] .* Σblocks.blocks)
+    return S, γs
+end
 
 """
     solve_s_group(Σ, Sblocks, groups, [method=:equi]; kwargs...)
@@ -101,8 +132,12 @@ function solve_s_group(
         S, γs = solve_group_equi(Σ, Sblocks)
     elseif method == :sdp
         S, γs = solve_group_SDP(Σ, Sblocks)
+    elseif method == :sdp_full
+        S, γs = solve_group_SDP_full(Σ, Sblocks)
+    elseif method == :maxent
+        S, γs = solve_group_max_entropy_equi(Σ, Sblocks)
     else
-        error("Method can only be :equi or :sdp, but was $method")
+        error("Method can only be :equi, :sdp, or :maxent, but was $method")
     end
     return S, γs
 end
