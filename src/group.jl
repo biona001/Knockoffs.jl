@@ -40,6 +40,7 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 """
 function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     model = Model(() -> Hypatia.Optimizer(verbose=false))
+    # model = Model(() -> SCS.Optimizer())
     n = nblocks(Σblocks)
     block_sizes = size.(Σblocks.blocks, 1)
     @variable(model, 0 <= γ[1:n] <= 1)
@@ -47,6 +48,7 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     @objective(model, Max, block_sizes' * γ)
     @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
     JuMP.optimize!(model)
+    check_model_solution(model)
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks)
     return S, γs
@@ -68,6 +70,7 @@ function solve_group_max_entropy_equi(Σ::AbstractMatrix, Σblocks::BlockDiagona
     @variable(model, 0 <= γ <= minimum(λ))
     @NLobjective(model, Max, p * log(γ) + sum(log(λ[i] - γ) for i in 1:p))
     JuMP.optimize!(model)
+    check_model_solution(model, verbose=false)
     # convert solution to vector and return resulting block diagonal matrix
     γs = [JuMP.value.(γ)]
     S = BlockDiagonal(γs[1] .* Σblocks.blocks)
@@ -95,10 +98,48 @@ function solve_group_max_entropy_general(Σ::AbstractMatrix, Σblocks::BlockDiag
         logdet(2Db)
     )
     JuMP.optimize!(model)
+    check_model_solution(model)
     # convert solution to vector and return resulting block diagonal matrix
     γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
     S = BlockDiagonal(γs[1] .* Σblocks.blocks)
     return S, γs
+end
+
+function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+    model = Model(() -> Hypatia.Optimizer(verbose=false))
+    # model = Model(() -> SCS.Optimizer())
+    T = eltype(Σ)
+    p = size(Σ, 1)
+    group_sizes = size.(Σblocks.blocks, 1)
+    # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
+    @variable(model, S[1:p, 1:p], Symmetric)
+    # fix everything
+    for j in 1:p, i in j:p
+        fix(S[i, j], zero(T))
+    end
+    # free pertinent variables
+    idx = 0
+    for g in group_sizes
+        for j in 1:g, i in j:g
+            unfix(S[i + idx, j + idx])
+            set_lower_bound(S[i + idx, j + idx], zero(T))
+            set_upper_bound(S[i + idx, j + idx], one(T))
+        end
+        idx += g
+    end
+    @constraint(model, Symmetric(2Σ - S) in PSDCone())
+    @objective(model, Max, tr(S))
+    JuMP.optimize!(model)
+    check_model_solution(model)
+    # construct block diagonal S
+    Sm = convert(Matrix{T}, clamp!(JuMP.value.(S), 0, 1))
+    Sdata = Matrix{T}[]
+    idx = 0
+    for g in group_sizes
+        push!(Sdata, Symmetric(Sm[idx+1 : idx+g, idx+1 : idx+g]))
+        idx += g
+    end
+    return BlockDiagonal(Sdata), T[]
 end
 
 """
