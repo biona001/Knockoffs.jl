@@ -78,7 +78,7 @@ function solve_group_max_entropy_equi(Σ::AbstractMatrix, Σblocks::BlockDiagona
 end
 
 # equicorrelated construction by choosing S_g = γ_g * Σ_{g,g}
-function solve_group_max_entropy_general(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+function solve_group_max_entropy_sdp(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     p = size(Σ, 1)
     G = length(Σblocks.blocks)
     group_sizes = size.(Σblocks.blocks, 1)
@@ -89,13 +89,22 @@ function solve_group_max_entropy_general(Σ::AbstractMatrix, Σblocks::BlockDiag
     end
     Db = BlockDiagonal(Db)
     λ = Symmetric(2Db * Σ * Db) |> eigvals
+    reverse!(λ)
     # solve non-linear objective using Ipopt
     model = Model(() -> Ipopt.Optimizer())
     set_optimizer_attribute(model, "print_level", 0)
-    @variable(model, 0 <= γ[1:G] <= 1)
+    # optimize over p different γ values but set those within a group equal to each other
+    @variable(model, 0 <= γ[1:p] <= 1)
+    idx = 0
+    for g in group_sizes
+        for i in idx+1 : idx+g-1
+            @constraint(model, γ[i] == γ[i + 1])
+        end
+        idx += g
+    end
     @NLobjective(model, Max, 
         sum(group_sizes[g] * log(γ[g]) for g in 1:G) + 
-        logdet(2Db)
+        sum(log(λ[i] - γ[i]) for i in 1:p)
     )
     JuMP.optimize!(model)
     check_model_solution(model)
@@ -177,6 +186,8 @@ function solve_s_group(
         S, γs = solve_group_SDP_full(Σ, Sblocks)
     elseif method == :maxent
         S, γs = solve_group_max_entropy_equi(Σ, Sblocks)
+    elseif method == :maxent_sdp
+        S, γs = solve_group_max_entropy_sdp(Σ, Sblocks)
     else
         error("Method can only be :equi, :sdp, or :maxent, but was $method")
     end
