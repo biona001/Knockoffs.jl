@@ -45,6 +45,7 @@ PositiveFactorizations = "0.2"
 ProgressMeter = "1"
 Reexport = "1"
 Roots = "2"
+SCS = "1"
 SnpArrays = "0.3"
 julia = "1"
 
