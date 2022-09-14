@@ -99,7 +99,7 @@ function solve_group_max_entropy_sdp(Σ::AbstractMatrix, Σblocks::BlockDiagonal
         variant_to_group[offset:offset+g-1] .= idx
         offset += g
     end
-    @variable(model, 0 <= γ[1:G] <= minimum(λ))
+    @variable(model, 0 <= γ[1:G] <= minimum(λ)) # todo: should this be γ[g] ≤ the corresponding λ?
     @NLobjective(model, Max, 
         sum(group_sizes[g] * log(γ[g]) for g in 1:G) + 
         sum(log(λ[i] - γ[variant_to_group[i]]) for i in 1:p)
@@ -135,7 +135,8 @@ function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
         idx += g
     end
     @constraint(model, Symmetric(2Σ - S) in PSDCone())
-    @objective(model, Max, tr(S))
+    # @objective(model, Max, tr(S))
+    @objective(model, Max, sum(S))
     JuMP.optimize!(model)
     check_model_solution(model)
     # construct block diagonal S
@@ -147,6 +148,180 @@ function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
         idx += g
     end
     return BlockDiagonal(Sdata), T[]
+end
+
+function solve_group_MVR_full(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal, 
+    niter::Int = 100,
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    blocks = nblocks(Sblocks)
+    group_sizes = size.(Sblocks.blocks, 1)
+    # initialize S matrix and compute initial cholesky factor
+    S, _ = solve_group_equi(Σ, Sblocks)
+    S = convert(Matrix{T}, S)
+    L = cholesky(Symmetric(2Σ - S))
+    C = cholesky(Symmetric(S))
+
+                    # # check equality is maintained
+                    # sigma = 2Σ - C.L * C.L' # 2Σ - S
+                    # LLt = L.L * L.L' # 2Σ - S
+                    # @show sigma[1:5, 1:5]
+                    # @show LLt[1:5, 1:5]
+
+    # preallocated vectors for efficiency
+    vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
+    u, v, ei = zeros(p), zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        offset = 0
+        for b in 1:blocks
+            #
+            # optimize diagonal entries
+            #
+            for idx in 1:group_sizes[b]
+                j = idx + offset
+                fill!(ej, 0)
+                ej[j] = 1
+                # compute cn and cd as detailed in eq 72
+                forward_backward!(vn, L, ej, storage) # solves L*L'*vn = ej for vn
+                cn = -sum(abs2, vn)
+                # find vd as the solution to L*vd = ej
+                ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
+                cd = sum(abs2, vd)
+                # solve quadratic optimality condition in eq 71
+                δj = solve_quadratic(cn, cd, S[j, j])
+                abs(δj) < 1e-15 && continue
+                S[j, j] += δj
+
+                @show 
+                @show eigmin(S)
+                # rank 1 update to cholesky factor
+                ej[j] = sqrt(abs(δj))
+                if δj > 0
+                    # lowrankdowndate_turbo!(L, ej)
+                    # lowrankupdate_turbo!(C, ej)
+                    lowrankdowndate!(L, ej)
+                    fill!(ej, 0)
+                    ej[j] = sqrt(abs(δj))
+                    lowrankupdate!(C, ej)
+
+
+                    # check equality is maintained
+                    # sigma = 2Σ - C.L * C.L' # 2Σ - S
+                    # LLt = L.L * L.L' # 2Σ - S
+                    # @show sigma[1:5, 1:5]
+                    # @show LLt[1:5, 1:5]
+                else
+                    lowrankupdate!(L, ej)
+                    fill!(ej, 0)
+                    ej[j] = sqrt(abs(δj))
+                    lowrankdowndate!(C, ej)
+                end
+                # update convergence tol
+                abs(δj) > max_delta && (max_delta = abs(δj))
+            end
+            # @show eigvals(Symmetric(S)) |> minimum
+            # fdsa
+            #
+            # optimize off-diagonal entries
+            #
+            # for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
+            #     j, i = idx1 + offset, idx2 + offset
+            #     fill!(ej, 0)
+            #     fill!(ei, 0)
+            #     ej[j], ei[i] = 1, 1
+            #     # compute cn, cd
+            #     forward_backward!(u, L, ei, storage) # solves L*L'*u = ej for u
+            #     forward_backward!(v, L, ej, storage) # solves L*L'*v = ej for v
+            #     cn = dot(u, v)
+            #     ldiv!(v, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(v, L.L, ej)
+            #     ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ej)
+            #     cd = dot(u, v)
+            #     # compute kn, kd
+            #     forward_backward!(u, C, ei, storage)
+            #     forward_backward!(v, C, ej, storage)
+            #     kn = dot(u, v)
+            #     ldiv!(v, UpperTriangular(C.factors)', ej)
+            #     ldiv!(u, UpperTriangular(C.factors)', ei)
+            #     kd = dot(u, v)
+            #     @show cn, cd, kn, kd
+            #     # 1st order optimality condition
+            #     δ = solve_group_quadratic(cn, cd, kn, kd)
+            #     @show δ
+            #     abs(δ) < 1e-15 && continue
+            #     S[i, j] += δ
+            #     S[j, i] += δ
+            #     # update cholesky factor via 3 rank-1 updates
+            #     fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+            #     storage[i] = storage[j] = ei[i] = ej[j] = sqrt(abs(δ))
+            #     if δ > 0
+            #         lowrankdowndate!(L, storage)
+            #         lowrankupdate_turbo!(L, ei)
+            #         lowrankupdate_turbo!(L, ej)
+            #         lowrankupdate!(C, storage)
+            #         lowrankdowndate_turbo!(C, ei)
+            #         lowrankdowndate_turbo!(C, ej)
+            #     else
+            #         lowrankupdate!(L, storage)
+            #         lowrankdowndate_turbo!(L, ei)
+            #         lowrankdowndate_turbo!(L, ej)
+            #         lowrankdowndate!(C, storage)
+            #         lowrankupdate_turbo!(C, ei)
+            #         lowrankupdate_turbo!(C, ej)
+            #     end
+            #     # update convergence tol
+            #     abs(δ) > max_delta && (max_delta = abs(δ))
+            # end
+            offset += group_sizes[b]
+        end
+    end
+    return S, Float64[]
+end
+
+# rank 1 update to cholesky factor
+function rank1_update_linesearch(δj, C, L)
+    δ = sqrt(abs(δj))
+    # update C via linesearch
+    for i in 1:50
+        try
+            ej[j] = δ
+            if δj > 0
+                lowrankdowndate_turbo!(L, ej)
+                lowrankupdate_turbo!(C, ej)
+            else
+                lowrankupdate_turbo!(L, ej)
+                lowrankdowndate_turbo!(C, ej)
+            end
+            break
+        catch
+            δ /= 2
+            continue
+        end
+    end
+    if δj > 0
+        lowrankdowndate_turbo!(L, ej)
+    else
+        lowrankupdate_turbo!(L, ej)
+    end
+    S[j, j] += δ
+end
+
+function solve_group_quadratic(cn, cd, kn, kd)
+    a = cn*kd^2 - cd^2*kn
+    b = 2*(cn*kd - cd*kn)
+    c = cn - kd
+    a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
+    x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
+    x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
+    δ = inv(cd) < x1 < inv(kd) ? x1 : x2
+    # @show x1, x2, inv(cd), inv(kd) 
+    isinf(δ) && error("δ is Inf, aborting")
+    isnan(δ) && error("δ is NaN, aborting")
+    return δ
 end
 
 """
@@ -186,6 +361,8 @@ function solve_s_group(
         S, γs = solve_group_max_entropy_equi(Σ, Sblocks)
     elseif method == :maxent_sdp
         S, γs = solve_group_max_entropy_sdp(Σ, Sblocks)
+    elseif method == :mvr_full
+        S, γs = solve_group_MVR_full(Σ, Sblocks)
     else
         error("Method can only be :equi, :sdp, or :maxent, but was $method")
     end

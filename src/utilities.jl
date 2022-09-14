@@ -129,7 +129,7 @@ function solve_MVR(
             fill!(ej, 0)
             ej[j] = 1
             # compute cn and cd as detailed in eq 72
-            solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
+            forward_backward!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
             cn = -sum(abs2, vn)
             # find vd as the solution to L*vd = ej
             ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
@@ -151,9 +151,14 @@ function solve_MVR(
     return s
 end
 
-function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
-    ldiv!(storage, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(storage, L.L, ej)
-    ldiv!(vn, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(vn, L.U, storage)
+"""
+    forward_backward!(x, L, y, storage=zeros(length(x)))
+
+Non-allocating solver for finding `x` to the solution of LL'x = y where L is a cholesky factor. 
+"""
+function forward_backward!(x, L, y, storage=zeros(length(x)))
+    ldiv!(storage, UpperTriangular(L.factors)', y) # non-allocating version of ldiv!(storage, L.L, y)
+    ldiv!(x, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(x, L.U, storage)
 end
 
 function solve_quadratic(cn, cd, Sjj, verbose=false)
