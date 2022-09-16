@@ -180,15 +180,15 @@ given correlation matrix Σ. Users should call `solve_s` instead of this functio
 Algorithm 2.2 from Powerful Knockoffs via Minimizing Reconstructability: https://arxiv.org/pdf/2011.14625.pdf
 
 # Note
-The commented out code of `solve_max_entropy`` faithfully implements alg 2 of
-"Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and 
-Lucas Janson (2020). While I may have a bug there, the resulting `s` vector from
-the algorithm have strange behaviors. On the other hand, it seems knockpy code at
-https://github.com/amspector100/knockpy/blob/c4980ebd506c110473babd85836dbd8ae1d548b7/knockpy/mrc.py#L1045
-is somehow mixing in parts of algorithm 2.2 from
-"FANOK: KNOCKOFFS IN LINEAR TIME" by Askari et al. (2020), and this confuses me.
-I have replicated the implementation in knockpy here but in the future, it may
-be worth it to check which version is correct.
+There is a typo in algorithm for computing ME knockoffs in "Powerful knockoffs
+via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020).
+In the supplemental section, equation 59, they needed to evaluate 
+`c_m = D^t_{-j,j}D^{-1}_{-j,-j}D_{-j,j}`. They claimed the FANOK paper 
+("FANOK: KNOCKOFFS IN LINEAR TIME" by Askari et al. (2020)) implies that
+`c_m = ||v_m||^2` where `Lv_m = u`. However, according to section A.1.2
+of the FANOK paper, it seems like the actual update should be
+`D^t_{-j,j}D^{-1}_{-j,-j}D_{-j,j} = ζ*||c_m||^2 / (ζ + ||c_m||^2)` 
+where `ζ = 2Σ_{jj} - s_j`.
 """
 function solve_max_entropy(
     Σ::AbstractMatrix{T};
@@ -234,45 +234,6 @@ function solve_max_entropy(
     end
     return s
 end
-
-# function solve_max_entropy(
-#     Σ::AbstractMatrix{T};
-#     λmin::T = eigmin(Σ),
-#     niter::Int = 100,
-#     tol=1e-6 # converges when changes in s are all smaller than tol
-#     ) where T
-#     p = size(Σ, 1)
-#     # initialize s vector and compute initial cholesky factor
-#     s = fill(λmin, p)
-#     L = cholesky(Symmetric(2Σ - Diagonal(s)))
-#     # preallocated vectors for efficiency
-#     vm, u = zeros(p), zeros(p)
-#     for l in 1:niter
-#         max_delta = zero(T)
-#         for j in 1:p
-#             for i in 1:p
-#                 u[i] = 2Σ[i, j]
-#             end
-#             u[j] = 0
-#             # compute vm as the solution to L*vm = u, and use it to compute cm
-#             ldiv!(vm, UpperTriangular(L.factors)', u) # non-allocating version of ldiv!(vm, L.L, u)
-#             cm = sum(abs2, vm)
-#             # solve optimality condition in eq 75
-#             sj_new = (2Σ[j, j] - cm) / 2
-#             δ = s[j] - sj_new
-#             s[j] = sj_new
-#             # rank 1 update to cholesky factor
-#             fill!(u, 0)
-#             u[j] = sqrt(abs(δ))
-#             δ > 0 ? lowrankupdate_turbo!(L, u) : lowrankdowndate_turbo!(L, u)
-#             # update convergence tol
-#             abs(δ) > max_delta && (max_delta = abs(δ))
-#         end
-#         # declare convergence if changes in s are all smaller than tol
-#         max_delta < tol && break 
-#     end
-#     return s
-# end
 
 """
     solve_sdp_fast(Σ::AbstractMatrix)
