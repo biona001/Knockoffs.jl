@@ -1,5 +1,5 @@
 """
-    solve_s(Σ::Symmetric, method::Symbol; kwargs...)
+    solve_s(Σ::Symmetric, method::Symbol; m=1, kwargs...)
 
 Solves the vector `s` for generating knockoffs. `Σ` can be a general 
 covariance matrix but it must be wrapped in the `Symmetric` keyword. 
@@ -15,12 +15,20 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
     [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
+# Optional Inputs
++ `m`: Number of knockoffs per variable, defaults to 1. 
++ `kwargs`: Extra arguments available for specific methods. For example, to use 
+    less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
+
 # Reference
 1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function solve_s(Σ::Symmetric, method::Symbol; kwargs...)
+function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
+    m < 1 && error("m should be 1 or larger but was $m.")
+    m > 1 && method ∈ [:equi, :sdp, :sdp_fast] && 
+        error("Currently only :mvr and :maxent knockoffs support multiple knockoffs!")
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
@@ -31,9 +39,9 @@ function solve_s(Σ::Symmetric, method::Symbol; kwargs...)
     elseif method == :sdp
         s = solve_SDP(Σcor)
     elseif method == :mvr
-        s = solve_MVR(Σcor; kwargs...)
+        s = solve_MVR(Σcor; m=m, kwargs...)
     elseif method == :maxent
-        s = solve_max_entropy(Σcor; kwargs...)
+        s = solve_max_entropy(Σcor; m=m, kwargs...)
     elseif method == :sdp_fast
         s = solve_sdp_fast(Σcor; kwargs...)
     else
@@ -112,15 +120,18 @@ https://arxiv.org/pdf/2011.14625.pdf
 """
 function solve_MVR(
     Σ::AbstractMatrix{T};
-    λmin::T = eigmin(Σ),
+    s_init = fill(eigmin(Σ), size(Σ, 1)), # initialize s vector with min eigenvalue of Σ if not supplied
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
+    m::Int = 1, # number of knockoffs per variable
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    all(x -> 0 < x < 1, s_init) || 
+        error("s_init should have values in [0, 1]. Is Σ a correlation matrix?")
     # initialize s vector and compute initial cholesky factor
-    s = fill(λmin, p)
-    L = cholesky(Symmetric(2Σ - Diagonal(s)))
+    s = copy(s_init)
+    L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -135,11 +146,11 @@ function solve_MVR(
             ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
-            δj = solve_quadratic(cn, cd, s[j])
+            δj = solve_quadratic(cn, cd, s[j], m)
             abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
-            ej[j] = sqrt(abs(δj))
+            ej[j] = sqrt(abs(m*δj))
             δj > 0 ? lowrankdowndate_turbo!(L, ej) : lowrankupdate_turbo!(L, ej)
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
@@ -156,14 +167,14 @@ function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
     ldiv!(vn, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(vn, L.U, storage)
 end
 
-function solve_quadratic(cn, cd, Sjj, verbose=false)
-    a = -cn - cd^2
-    b = 2*(-cn*Sjj + cd)
+function solve_quadratic(cn, cd, Sjj, m, verbose=false)
+    a = -cn - cd^2*m^2
+    b = 2*(-cn*Sjj + cd*m)
     c = -cn*Sjj^2 - 1
     a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
     x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
-    δj = -Sjj < x1 < inv(cd) ? x1 : x2
+    δj = -Sjj < x1 < inv(cd*m) ? x1 : x2
     isinf(δj) && error("δj is Inf, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     isnan(δj) && error("δj is NaN, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
@@ -192,38 +203,41 @@ where `ζ = 2Σ_{jj} - s_j`.
 """
 function solve_max_entropy(
     Σ::AbstractMatrix{T};
-    λmin::T = eigmin(Σ),
+    s_init = fill(eigmin(Σ), size(Σ, 1)), # initialize s vector with min eigenvalue of Σ if not supplied
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
+    m::Int = 1, # number of knockoffs per variable
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    all(x -> 0 < x < 1, s_init) || 
+        error("s_init should have values in [0, 1]. Is Σ a correlation matrix?")
     # initialize s vector and compute initial cholesky factor
-    s = fill(λmin, p)
-    L = cholesky(Symmetric(2Σ - Diagonal(s)))
+    s = copy(s_init)
+    L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
             @simd for i in 1:p
-                ỹ[i] = 2Σ[i, j]
+                ỹ[i] = (m + 1) * Σ[i, j]
             end
             ỹ[j] = 0
             # compute x as the solution to L*x = ỹ
             ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
-            ζ = 2Σ[j, j] - s[j]
+            ζ = (m+1)*Σ[j, j] - m*s[j]
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # solve optimality condition in eq 75 of spector et al 2020
-            sj_new = (2Σ[j, j] - c) / 2
+            sj_new = ((m+1)*Σ[j, j] - c) / (m+1)
             δ = s[j] - sj_new
             abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
-            x[j] = sqrt(abs(δ))
+            x[j] = sqrt(m*abs(δ))
             δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
