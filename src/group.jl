@@ -257,13 +257,13 @@ function modelX_gaussian_group_knockoffs(
         idx = findall(x -> x == g, groups)
         push!(Sblocks, Σcor[idx, idx])
     end
-    Sblocks = BlockDiagonal(Sblocks)
+    S = BlockDiagonal(Sblocks)
     # compute block diagonal S matrix using the specified knockoff method
-    S, γs = solve_s_group(Σcor, Sblocks, groups, method; kwargs...)
+    S, γs = solve_s_group(Σcor, S, groups, method; kwargs...)
     # rescale S back to the result for a covariance matrix   
     iscor || StatsBase.cor2cov!(S, σs)
     # generate knockoffs
-    X̃ = condition(X, μ, inv(Σ), S)
+    X̃ = condition(X, μ, Σ, S)
     return GaussianGroupKnockoff(X, X̃, S, γs, Symmetric(Σ), method)
 end
 
@@ -337,8 +337,7 @@ function modelX_gaussian_group_knockoffs(
         end
         # generate knockoffs
         μ = vec(mean(X, dims=1))
-        @time invΣ = inv(Σapprox) # ~16 seconds for 10k SNPs
-        @time X̃ = Knockoffs.condition(X, μ, invΣ, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
+        @time X̃ = Knockoffs.condition(X, μ, Σapprox, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
         # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
         X̃ .= round.(X̃)
         clamp!(X̃, 0, 2)

@@ -89,7 +89,7 @@ function approx_modelX_gaussian_knockoffs(
     γ = fzero(γ -> f(γ, s, Σ), 0, 1)
     s .*= γ
     # generate knockoffs
-    X̃ = condition(X, μ, inv(Σ), Diagonal(s))
+    X̃ = condition(X, μ, Σ, Diagonal(s))
     return ApproxGaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
 end
 
