@@ -127,8 +127,6 @@ function solve_MVR(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    all(x -> 0 < x < 1, s_init) || 
-        error("s_init should have values in [0, 1]. Is Σ a correlation matrix?")
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
@@ -215,8 +213,6 @@ function solve_max_entropy(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    all(x -> 0 < x < 1, s_init) || 
-        error("s_init should have values in [0, 1]. Is Σ a correlation matrix?")
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
