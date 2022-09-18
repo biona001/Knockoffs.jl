@@ -172,9 +172,9 @@ function modelX_gaussian_group_knockoffs(
         idx = findall(x -> x == g, groups)
         push!(Sblocks, Σcor[idx, idx])
     end
-    Sblocks = BlockDiagonal(Sblocks)
+    S = BlockDiagonal(Sblocks)
     # compute block diagonal S matrix using the specified knockoff method
-    S, γs = solve_s_group(Σcor, Sblocks, groups, method; kwargs...)
+    S, γs = solve_s_group(Σcor, S, groups, method; kwargs...)
     # rescale S back to the result for a covariance matrix   
     iscor || StatsBase.cor2cov!(S, σs)
     # generate knockoffs
