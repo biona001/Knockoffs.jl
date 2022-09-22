@@ -127,8 +127,6 @@ function solve_MVR(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    all(x -> 0 < x < 1, s_init) || 
-        error("s_init should have values in [0, 1]. Is Σ a correlation matrix?")
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
@@ -140,7 +138,7 @@ function solve_MVR(
             fill!(ej, 0)
             ej[j] = 1
             # compute cn and cd as detailed in eq 72
-            solve_vn!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
+            forward_backward!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
             cn = -sum(abs2, vn)
             # find vd as the solution to L*vd = ej
             ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
@@ -162,9 +160,14 @@ function solve_MVR(
     return s
 end
 
-function solve_vn!(vn, L, ej, storage=zeros(length(vn)))
-    ldiv!(storage, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(storage, L.L, ej)
-    ldiv!(vn, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(vn, L.U, storage)
+"""
+    forward_backward!(x, L, y, storage=zeros(length(x)))
+
+Non-allocating solver for finding `x` to the solution of LL'x = y where L is a cholesky factor. 
+"""
+function forward_backward!(x, L, y, storage=zeros(length(x)))
+    ldiv!(storage, UpperTriangular(L.factors)', y) # non-allocating version of ldiv!(storage, L.L, y)
+    ldiv!(x, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(x, L.U, storage)
 end
 
 function solve_quadratic(cn, cd, Sjj, m, verbose=false)
@@ -210,8 +213,6 @@ function solve_max_entropy(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    all(x -> 0 < x < 1, s_init) || 
-        error("s_init should have values in [0, 1]. Is Σ a correlation matrix?")
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
@@ -747,4 +748,37 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
         end
     end
     return C
+end
+
+"""
+    ◺(n::Integer)
+
+Triangular number n * (n+1) / 2. Type ◺ by `<backslash>lltriangle<tab>`
+"""
+◺(n::Integer) = (n * (n + 1)) >> 1
+
+"""
+    check_model_solution(model; verbose=false)
+
+After solving a JuMP model, checks if the solution is accurate. 
+"""
+function check_model_solution(model; verbose=false)
+    if termination_status(model) == OPTIMAL
+        verbose && println("Solution is optimal")
+    elseif termination_status(model) == LOCALLY_SOLVED
+        verbose && println("Solution is locally optimal")
+    elseif termination_status(model) == ALMOST_OPTIMAL
+        verbose && println("Solution is almost optimal")
+    elseif termination_status(model) == TIME_LIMIT && has_values(model)
+        verbose && println("Solution is suboptimal due to a time limit, but a primal solution is available")
+    else
+        error("The model was not solved correctly.")
+    end
+    verbose && println("  objective value = ", objective_value(model))
+    if primal_status(model) == FEASIBLE_POINT
+        verbose && println("  primal solution: x = ", value(x))
+    end
+    if dual_status(model) == FEASIBLE_POINT
+        verbose && println("  dual solution: c1 = ", dual(c1))
+    end
 end

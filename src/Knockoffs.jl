@@ -23,6 +23,8 @@ using Downloads
 using GLM
 using Reexport
 using LoopVectorization
+using Ipopt
+using SCS
 
 @reexport using GLM
 
