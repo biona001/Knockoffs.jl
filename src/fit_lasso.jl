@@ -5,11 +5,12 @@ Generates model-X knockoffs with `method`, runs Lasso,
 then applies the knockoff-filter.
 
 # Inputs
-+ `y`: Response vector
-+ `X`: Design matrix
++ `y`: A `n × 1` response vector
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
 + `method`: Method for knockoff generation (defaults to `:mvr`)
 + `d`: Distribution of response. Defaults `Normal()`, for binary response
     (logistic regression) use `Binomial()`.
++ `m`: Number of simultaneous knockoffs to generate, defaults to `m=1`
 + `fdrs`: Target FDRs, defaults to `[0.01, 0.05, 0.1, 0.25, 0.5]`
 + `filter_method`: Choices are `:knockoff` (default) or `:knockoff_plus`
 + `debias`: Defines how the selected coefficients are debiased. Specify `:ls` 
@@ -26,13 +27,14 @@ function fit_lasso(
     X::AbstractMatrix{T};
     method::Symbol = :mvr,
     d::Distribution=Normal(),
+    m::Int = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff,
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
-    ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method) : 
+    ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
         modelX_gaussian_group_knockoffs(X, groups, method)
     return fit_lasso(y, X, ko.X̃, d=d, fdrs=fdrs, groups=groups, 
         filter_method=filter_method, debias=debias; kwargs...)
@@ -51,6 +53,7 @@ function fit_lasso(
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
+    m = Int(size(X̃, 2) / size(X, 2)) # number of knockoffs per feature
     # cross validate for λ, then refit Lasso with best λ
     XX̃, original, knockoff = merge_knockoffs_with_original(X, X̃)
     knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
@@ -60,26 +63,23 @@ function fit_lasso(
     a0 = best_fit.a0[1]
     # compute feature importance statistics and allocate necessary knockoff-filter variables
     isnothing(groups) || (groups_2p = repeat(groups, inner=2)) # since X and X̃ is interleaved, each group length can simply be doubled
-    W = isnothing(groups) ? coefficient_diff(βestim, original, knockoff) : 
-        coefficient_diff(βestim, groups_2p, original, knockoff)
-    βs, a0s, τs = Vector{T}[], T[], T[]
+    βs, a0s = Vector{T}[], T[]
     for fdr in fdrs
         # apply knockoff-filter based on target fdr
-        β_filtered, _, τ = isnothing(groups) ? 
-            extract_beta(βestim, fdr, original, knockoff, filter_method, W) : 
-            extract_beta(βestim, fdr, groups_2p, original, knockoff, filter_method, W)
+        β_filtered = isnothing(groups) ? 
+            extract_beta(βestim, fdr, original, knockoff, filter_method) : 
+            extract_beta(βestim, fdr, groups_2p, original, knockoff, filter_method)
         # debias the estimates if requested
         if !isnothing(debias)
             a0 = isnothing(groups) ? 
                 debias!(β_filtered, X, y; method=debias, d=d, kwargs...) : 
                 debias!(β_filtered, X, y, groups; method=debias, d=d, stringent=stringent, kwargs...)
         end
-        # save knockoff statistics
+        # save beta and intercept
         push!(βs, β_filtered)
-        push!(τs, τ)
         push!(a0s, a0)
     end
-    return KnockoffFilter(y, X, X̃, W, βs, a0s, τs, fdrs, d, debias)
+    return KnockoffFilter(y, X, X̃, m, βs, a0s, fdrs, d, debias)
 end
 
 function debias!(

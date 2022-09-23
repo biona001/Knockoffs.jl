@@ -13,9 +13,7 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
     + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
-    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
-
-# Optional Inputs
+        [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
@@ -494,20 +492,34 @@ function merge_knockoffs_with_original(
     return merge_knockoffs_with_original(xdata, x̃data, des=des)
 end
 
+"""
+    merge_knockoffs_with_original(X, X̃)
+
+Merges the original variables `X` with its knockoffs `X̃`, shuffling their index. 
+"""
 function merge_knockoffs_with_original(
     X::AbstractMatrix{T},
-    X̃::AbstractMatrix{T}
+    X̃::AbstractMatrix{T};
     ) where T
     n, p = size(X)
-    Xfull = zeros(n, 2p)
-    original, knockoff = sizehint!(Int[], p), sizehint!(Int[], p)
+    m = Int(size(X̃, 2) / p) # number of knockoffs per feature
+    Xfull = zeros(n, (m + 1) * p)
+    original, knockoff = sizehint!(Int[], p), sizehint!(Int[], m * p)
+    cur_range = zeros(Int, m + 1)
     for i in 1:p
-        # decide which of original or knockoff SNP comes first
-        orig, knoc = rand() < 0.5 ? (2i - 1, 2i) : (2i, 2i - 1)
-        copyto!(@view(Xfull[:, orig]), @view(X[:, i]))
-        copyto!(@view(Xfull[:, knoc]), @view(X̃[:, i]))
+        # fill next m + 1 columns of Xfull with the ith feature and its m knockoffs
+        copyto!(cur_range, (i - 1) * (m + 1) + 1 : (m + 1) * i)
+        shuffle!(cur_range)
+        # copy original feature
+        orig = cur_range[1]
+        Xfull[:, orig] .= @view(X[:, i])
         push!(original, orig)
-        push!(knockoff, knoc)
+        # copy knockoff feature
+        for j in 1:m
+            knoc = cur_range[j + 1]
+            Xfull[:, knoc] .= @view(X̃[:, p * (j - 1) + i])
+            push!(knockoff, knoc)
+        end
     end
     return Xfull, original, knockoff
 end
