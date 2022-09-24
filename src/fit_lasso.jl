@@ -12,7 +12,7 @@ then applies the knockoff-filter.
     (logistic regression) use `Binomial()`.
 + `m`: Number of simultaneous knockoffs to generate, defaults to `m=1`
 + `fdrs`: Target FDRs, defaults to `[0.01, 0.05, 0.1, 0.25, 0.5]`
-+ `filter_method`: Choices are `:knockoff` (default) or `:knockoff_plus`
++ `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default) 
 + `debias`: Defines how the selected coefficients are debiased. Specify `:ls` 
     for least squares (default) or `:lasso` for Lasso (only running on the 
     support). To not debias, specify `debias=nothing`
@@ -30,7 +30,7 @@ function fit_lasso(
     m::Int = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff,
+    filter_method::Symbol = :knockoff_plus,
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
@@ -47,7 +47,7 @@ function fit_lasso(
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff, # `:knockoff` or `:knockoff_plus`
+    filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
     debias::Union{Nothing, Symbol} = :ls,
     stringent::Bool = false,
     kwargs..., # arguments for glmnetcv

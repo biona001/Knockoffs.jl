@@ -10,7 +10,7 @@ function select_features(
     original::AbstractVector{Int}, 
     knockoff::AbstractVector{Int},
     fdr::Number;
-    method::Symbol=:knockoff
+    filter_method::Symbol=:knockoff_plus
     ) where T
     p = length(original)
     length(β) == p + length(knockoff) || 
@@ -18,7 +18,7 @@ function select_features(
     m = Int(length(knockoff) / p)
     if m == 1 # single knockoff uses coefficient-difference statistic
         W = coefficient_diff(β, original, knockoff)
-        τ = threshold(W, fdr, method)
+        τ = threshold(W, fdr, filter_method)
         return findall(x -> x ≥ τ, W)
     end
     # multiple simultaneous knockoffs
@@ -32,7 +32,7 @@ function select_features(
         κ[i] = argmax(importance_scores)
         τ[i] = maximum(importance_scores) - importance_scores[partialsortperm(importance_scores, 2, rev=true)]
     end
-    τ̂ = mk_threshold(τ, κ, m, fdr) # multi-knockoff selection threshold
+    τ̂ = mk_threshold(τ, κ, m, fdr, filter_method) # multi-knockoff selection threshold
     selected = Int[]
     for i in 1:p
         if τ[i] ≥ τ̂ && κ[i] == 1
@@ -99,30 +99,30 @@ zeros out the effect of non-selected features.
 """
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
     original::AbstractVector{Int}, knockoff::AbstractVector{Int},
-    method::Symbol=:knockoff
+    filter_method::Symbol=:knockoff_plus
     ) where T <: AbstractFloat
     # first handle errors
     p = length(β̂_knockoff) >> 1
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     # select variables using knockoff filter
-    idx = select_features(β̂_knockoff, original, knockoff, fdr, method=method)
+    selected_idx = select_features(β̂_knockoff, original, knockoff, fdr, filter_method=filter_method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, p)
-    for i in idx
+    for i in selected_idx
         β[i] = β̂_knockoff[original[i]]
     end
     return β
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, method=:knockoff
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, filter_method=:knockoff_plus
     ) where T <: AbstractFloat
     # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     # extract feature importance statistic
     W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
     # find knockoff-filter threshold
-    τ = threshold(W, fdr, method)
+    τ = threshold(W, fdr, filter_method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, length(β̂_knockoff))
     for g in findall(W .≥ τ)
