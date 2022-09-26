@@ -54,6 +54,7 @@ function fit_lasso(
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     m = Int(size(X̃, 2) / size(X, 2)) # number of knockoffs per feature
+    m > 1 && !isnothing(groups) && error("Currently groups knockoffs do not support multiple knockoffs!")
     # cross validate for λ, then refit Lasso with best λ
     XX̃, original, knockoff = merge_knockoffs_with_original(X, X̃)
     knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
@@ -70,7 +71,7 @@ function fit_lasso(
             extract_beta(βestim, fdr, original, knockoff, filter_method) : 
             extract_beta(βestim, fdr, groups_2p, original, knockoff, filter_method)
         # debias the estimates if requested
-        if !isnothing(debias)
+        if !isnothing(debias) && count(!iszero, β_filtered) > 0
             a0 = isnothing(groups) ? 
                 debias!(β_filtered, X, y; method=debias, d=d, kwargs...) : 
                 debias!(β_filtered, X, y, groups; method=debias, d=d, stringent=stringent, kwargs...)
@@ -90,6 +91,7 @@ function debias!(
     d::Distribution=Normal(),
     kwargs... # extra arguments for glmnetcv
     ) where T
+    count(!iszero, β̂) == 0 && error("β̂ is all zeros! Nothing to debias!")
     zero_idx = β̂ .== 0
     if method == :lasso
         # Give infinite penalty to indices of zeros
@@ -129,6 +131,7 @@ function debias!(
     ) where T
     p = length(β̂)
     p == length(groups) || error("check vector length") # note GLMNet.jl does not include intercept in β̂
+    count(!iszero, β̂) == 0 && error("β̂ is all zeros! Nothing to debias!")
     # first find active groups
     if stringent
         # active variables can only be non-zero variables within active group

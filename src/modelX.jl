@@ -108,6 +108,8 @@ function condition(
         L = cholesky(PositiveFactorizations.Positive, Σ̃).L
         return X - (X .- μ') * ΣinvS + randn(n, p) * L
     end
+    # todo: can we form Σ̃ using SymmetricToeplitz? 
+    # So we don't need to actually store a matrix of size pm × pm in memory?
     Σ̃ = repeat(Σ - C, m, m)
     Σ̃ += BlockDiagonal([S for _ in 1:m])
     μi = X - (X .- μ') * ΣinvS

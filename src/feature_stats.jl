@@ -114,6 +114,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     return β
 end
 
+# todo: make this work for multiple group knockoffs
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
     original::AbstractVector{Int}, knockoff::AbstractVector{Int}, filter_method=:knockoff_plus
     ) where T <: AbstractFloat
@@ -129,5 +130,5 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
         group_idx = findall(x -> x == g, groups)
         β[group_idx] .= @view(β̂_knockoff[group_idx])
     end
-    return β[original], W, τ
+    return β[original]
 end
