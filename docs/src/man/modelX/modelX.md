@@ -1,3 +1,4 @@
+
 # Model-X knockoffs
 
 This tutorial is for generating model-X knockoffs, which handles cases where covariates outnumber sample size ($p > n$). The methodology is described in the following paper
@@ -7,6 +8,7 @@ This tutorial is for generating model-X knockoffs, which handles cases where cov
 
 ```julia
 # load packages needed for this tutorial
+using Revise
 using Knockoffs
 using Plots
 using Random
@@ -17,10 +19,6 @@ using ToeplitzMatrices
 using StatsBase
 gr(fmt=:png);
 ```
-
-    ┌ Info: Precompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
-    └ @ Base loading.jl:1423
-
 
 ## Gaussian model-X knockoffs with known mean and covariance
 
@@ -101,25 +99,25 @@ X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
 
 
 
-To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument specifies the method to generate knockoffs. We generally recommend `:mvr` or `:maxent` because they are more efficient to compute and tend to be more powerful than the SDP construction. The 3rd and 4th argument supplies the true mean and covariance of features.
+To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument specifies the method to generate knockoffs. We generally recommend `:mvr` or `:maxent` because they are [more efficient to compute and tend to be more powerful than the SDP construction](https://projecteuclid.org/journals/annals-of-statistics/volume-50/issue-1/Powerful-knockoffs-via-minimizing-reconstructability/10.1214/21-AOS2104.short). The 3rd and 4th argument supplies the true mean and covariance of features.
 
 
 ```julia
 @time mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ);
 ```
 
-      2.798276 seconds (60 allocations: 19.917 MiB)
+     11.227334 seconds (32.85 M allocations: 1.709 GiB, 4.59% gc time, 96.61% compilation time)
 
 
 The return type is a `GaussianKnockoff` struct, which contains the following fields
 
 ```julia
-struct GaussianKnockoff{T}
-    X::Matrix{T}    # n × p original design matrix
-    X̃::Matrix{T}    # n × p knockoff of X
-    s::Vector{T}    # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::Matrix{T}    # p × p gram matrix X'X
-    method::Symbol # :sdp or :equi
+struct GaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S <: Symmetric} <: Knockoff
+    X::M # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
+    Σ::S # p × p symmetric covariance matrix. 
+    method::Symbol # method for solving s
 end
 ```
 
@@ -134,32 +132,32 @@ s = mvr.s
 
 
     500-element Vector{Float64}:
-     0.7055837242604751
-     0.550599643132556
-     0.5579633308207883
-     0.5578990459757974
-     0.5578830358745579
-     0.5578842779646905
+     0.7055837242604757
+     0.5505996431325556
+     0.5579633308207881
+     0.5578990459757973
+     0.5578830358745575
+     0.5578842779646903
      0.557884239188223
-     0.557884238362934
-     0.5578842385242271
-     0.5578842385157536
-     0.557884238515875
-     0.5578842385158908
-     0.5578842385158888
+     0.5578842383629335
+     0.557884238524227
+     0.557884238515753
+     0.5578842385158744
+     0.5578842385158905
+     0.5578842385158891
      ⋮
-     0.5578842369066758
-     0.5578842348979732
-     0.5578842398872369
-     0.5578842817258655
-     0.5578843495474255
-     0.5578842071395308
-     0.5578843562366876
-     0.5578830621807336
-     0.557899089676546
-     0.5579633702735248
-     0.5505996786150799
-     0.7055838005026086
+     0.5578842369066757
+     0.5578842348979727
+     0.5578842398872366
+     0.5578842817258646
+     0.5578843495474252
+     0.5578842071395304
+     0.5578843562366873
+     0.5578830621807334
+     0.5578990896765453
+     0.5579633702735247
+     0.5505996786150797
+     0.7055838005026088
 
 
 
@@ -173,7 +171,7 @@ The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoff
 @time mvr_2nd_order = modelX_gaussian_knockoffs(X, :mvr);
 ```
 
-      1.382837 seconds (110 allocations: 30.624 MiB)
+      1.023831 seconds (3.42 M allocations: 204.294 MiB, 3.40% gc time, 70.10% compilation time)
 
 
 ## Approximate construction for speed
@@ -187,46 +185,75 @@ Sometimes one expects that covariates are only correlated with its nearby neighb
 @time mvr_approx = approx_modelX_gaussian_knockoffs(X, :mvr, windowsize=100);
 ```
 
-      0.866715 seconds (2.40 M allocations: 192.950 MiB, 28.64% gc time)
+      6.919185 seconds (30.79 M allocations: 1.702 GiB, 4.76% gc time, 98.03% compilation time)
 
 
-We can compare the `s` vector estimated from all 3 methods.
+## Multiple knockoffs
+
+[Gimenez et al](http://proceedings.mlr.press/v89/gimenez19b.html) suggested multiple simultaneous knockoffs, which can give a boost in power when the target FDR or the number of variables to select are low. 
+
+If one generated $m$ knockoffs for each of the $p$ variables, the convex optimization problem in solving for diagonal $S$ matrix is equally efficient as in the single-knockoff case, but the subsequent model selection would have $(m + 1) * p$ columns as opposed to $2p$ columns in the single-knockoff case. Thus, both computational speed and memory demand scales roughly linearly in $m$. 
 
 
 ```julia
-[mvr.s mvr_2nd_order.s mvr_approx.s]
+m = 3
+@time mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Σ, m=m);
+```
+
+      0.698913 seconds (2.81 k allocations: 80.742 MiB, 2.11% gc time, 0.96% compilation time)
+
+
+As a sanity check, lets make sure the modified SDP constraint is satisfied
+
+
+```julia
+eigmin((m+1)/m * Σ - Diagonal(mvr_multiple.s))
 ```
 
 
 
 
-    500×3 Matrix{Float64}:
-     0.705584  0.765939  0.663288
-     0.5506    0.809084  0.697905
-     0.557963  1.04366   0.921062
-     0.557899  0.86139   0.761527
-     0.557883  0.911251  0.79024
-     0.557884  0.978194  0.861529
-     0.557884  0.919028  0.801033
-     0.557884  0.738538  0.667032
-     0.557884  0.867094  0.766879
-     0.557884  0.85405   0.741398
-     0.557884  0.719779  0.643368
-     0.557884  1.17217   1.0488
-     0.557884  0.827193  0.71336
-     ⋮                   
-     0.557884  0.817115  0.692749
-     0.557884  0.991195  0.855441
-     0.557884  0.604032  0.534393
-     0.557884  0.67311   0.593851
-     0.557884  0.867172  0.765961
-     0.557884  0.877053  0.784296
-     0.557884  0.962095  0.843415
-     0.557883  1.09807   0.955454
-     0.557899  0.929814  0.821244
-     0.557963  0.961874  0.833571
-     0.5506    0.868214  0.779083
-     0.705584  0.685257  0.598158
+    0.0714938929162792
+
+
+
+Finally, we can compare the `s` vector estimated from all 4 methods.
+
+
+```julia
+[mvr.s mvr_2nd_order.s mvr_approx.s mvr_multiple.s]
+```
+
+
+
+
+    500×4 Matrix{Float64}:
+     0.705584  0.765939  0.663288  0.659554
+     0.5506    0.809084  0.697905  0.490815
+     0.557963  1.04366   0.921062  0.499175
+     0.557899  0.86139   0.761527  0.499988
+     0.557883  0.911251  0.79024   0.499943
+     0.557884  0.978194  0.861529  0.499939
+     0.557884  0.919028  0.801033  0.499939
+     0.557884  0.738538  0.667032  0.499939
+     0.557884  0.867094  0.766879  0.499939
+     0.557884  0.85405   0.741398  0.499939
+     0.557884  0.719779  0.643368  0.499939
+     0.557884  1.17217   1.0488    0.499939
+     0.557884  0.827193  0.71336   0.499939
+     ⋮                             
+     0.557884  0.817115  0.692749  0.499939
+     0.557884  0.991195  0.855441  0.499939
+     0.557884  0.604032  0.534393  0.499939
+     0.557884  0.67311   0.593851  0.499939
+     0.557884  0.867172  0.765961  0.49994
+     0.557884  0.877053  0.784296  0.499939
+     0.557884  0.962095  0.843415  0.499939
+     0.557883  1.09807   0.955454  0.499943
+     0.557899  0.929814  0.821244  0.499988
+     0.557963  0.961874  0.833571  0.499174
+     0.5506    0.868214  0.779083  0.490815
+     0.705584  0.685257  0.598158  0.659554
 
 
 
@@ -255,7 +282,7 @@ Random.seed!(123)
 n, p = size(X)
 k = 50
 βtrue = zeros(p)
-βtrue[1:k] .= randn(50)
+βtrue[1:k] .= randn(k)
 shuffle!(βtrue)
 
 # find true causal variables
@@ -269,32 +296,32 @@ y = X * βtrue + randn(n)
 
 
     100-element Vector{Float64}:
-      10.430304834810704
-       9.430844234150014
-       2.41106568009123
+      10.430304834810705
+       9.430844234150015
+       2.411065680091229
       14.925207979666721
-      -8.743596474193751
-       5.775257576204118
-      -1.5879969409798689
-      13.60514062643101
-     -18.781349632593468
-       7.855239413947383
-      -5.738117008161742
-      -4.631197619265103
+      -8.743596474193755
+       5.775257576204116
+      -1.587996940979867
+      13.605140626431009
+     -18.781349632593464
+       7.855239413947385
+      -5.7381170081617405
+      -4.631197619265106
      -11.89784179331142
        ⋮
-     -10.887325590058023
-      13.949139924153949
-      -2.5416321952957093
-       3.1895938123917964
+     -10.887325590058026
+      13.949139924153947
+      -2.54163219529571
+       3.1895938123917973
        1.0637262185056753
-      -7.626490623432156
-       1.8563101020426087
-       1.0666016246401202
+      -7.626490623432161
+       1.8563101020426065
+       1.066601624640122
       -7.242249824299234
-      -3.2289570492580526
-       4.014480647244053
-       4.832304427120105
+      -3.2289570492580513
+       4.014480647244052
+       4.832304427120103
 
 
 
@@ -336,31 +363,31 @@ $$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j �
 
 !!! note
     
-    In step 1, $[\mathbf{X} \mathbf{\tilde{X}}]$ is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. 
+    In step 1, $[\mathbf{X} \mathbf{\tilde{X}}]$ is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. We export a convenient function `merge_knockoffs_with_original` that performs this operation. 
 
-Run Lasso on $[\mathbf{X} \mathbf{\tilde{X}}]$ and apply knockoff filter:
+The `fit_lasso` function generates knockoffs, run Lasso on $[\mathbf{X} \mathbf{\tilde{X}}]$, and apply knockoff filter:
 
 
 ```julia
-@time knockoff_filter = fit_lasso(y, X, mvr.X̃);
+@time knockoff_filter = fit_lasso(y, X, method=:mvr);
 ```
 
-      0.370703 seconds (4.81 k allocations: 53.646 MiB)
+      0.524779 seconds (102.90 k allocations: 60.830 MiB, 16.13% compilation time)
 
 
 The return type is now a `KnockoffFilter`, which contains the following information
 
 ```julia
 struct KnockoffFilter{T}
-    XX̃ :: Matrix{T} # n × 2p matrix of original X and its knockoff interleaved randomly
-    original :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X
-    knockoff :: Vector{Int} # p × 1 vector of indices of XX̃ that corresponds to X̃
-    W :: Vector{T} # p × 1 vector of feature-importance statistics for fdr level fdr
+    y :: Vector{T} # n × 1 response vector
+    X :: Matrix{T} # n × p matrix of original X and its knockoff interleaved randomly
+    X̃ :: Matrix{T} # n × p matrix of X knockoff
+    m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
-    τs :: Vector{T}   # knockoff threshold for selecting Ws correponding to each FDR
     fdr_target :: Vector{T} # target FDR level for each τs and βs
-    debiased :: Bool # whether βs and a0 have been debiased
+    d :: UnivariateDistribution # distribution of y
+    debias :: Union{Nothing, Symbol} # how βs and a0 have been debiased (`nothing` for not debiased)
 end
 ```
 
@@ -392,9 +419,49 @@ plot(power_plot, fdr_plot)
 
 
 
+![png](output_28_0.png)
+
+
+
+### Multiple Knockoffs+LASSO
+
+To improve selection stability, we can generate multiple simultaneous knockoffs. This is more computationally intensive but tends to boost power. 
+
+
+```julia
+@time knockoff_filter = fit_lasso(y, X, method=:mvr, m=3);
+```
+
+      0.667028 seconds (13.69 k allocations: 140.866 MiB, 1.09% gc time)
+
+
+
+```julia
+FDR = knockoff_filter.fdr_target
+empirical_power = Float64[]
+empirical_fdr = Float64[]
+for i in eachindex(FDR)
+    # extract beta for current fdr
+    βknockoff = knockoff_filter.βs[i]
     
-![png](output_24_0.png)
-    
+    # compute power and false discovery proportion
+    power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
+    fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
+    push!(empirical_power, power)
+    push!(empirical_fdr, fdp)
+end
+
+# visualize FDR and power
+power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false, w=2)
+fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false, w=2)
+Plots.abline!(fdr_plot, 1, 0, line=:dash)
+plot(power_plot, fdr_plot)
+```
+
+
+
+
+![png](output_31_0.png)
 
 
 
@@ -402,5 +469,6 @@ plot(power_plot, fdr_plot)
 
 + LASSO + knockoffs controls the false discovery rate at below the target (dashed line). Thus, one trade power for FDR control. 
 + The power of standard LASSO is better, but it comes with high empirical FDR that one cannot control via cross validation. 
++ Multiple simultaneous knockoffs increases power at the expensive of larger regression problem. 
 
 If we repeated the simulation multiple times, we expect the empirical FDR to hug the target FDR more closely.
