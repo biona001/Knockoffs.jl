@@ -30,7 +30,7 @@ function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Σ.data, σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor(Σ.data, σs)
     # solve optimization problem
     if method == :equi
         s = solve_equi(Σcor)
@@ -213,31 +213,31 @@ function solve_max_entropy(
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
+    L = cholesky(Symmetric((m+1)/m * Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
             @simd for i in 1:p
-                ỹ[i] = (m + 1) * Σ[i, j]
+                ỹ[i] = (m+1)/m * Σ[i, j]
             end
             ỹ[j] = 0
             # compute x as the solution to L*x = ỹ
             ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
-            ζ = (m+1)*Σ[j, j] - m*s[j]
+            ζ = (m+1)/m * Σ[j, j] - s[j]
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # solve optimality condition in eq 75 of spector et al 2020
-            sj_new = ((m+1)*Σ[j, j] - c) / (m+1)
-            δ = s[j] - sj_new
+            sj_new = ((m+1)/m * Σ[j, j] - c) / 2
+            δ = sj_new - s[j]
             abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
-            x[j] = sqrt(m*abs(δ))
-            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
+            x[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankdowndate_turbo!(L, x) : lowrankupdate_turbo!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
