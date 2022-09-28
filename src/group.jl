@@ -155,6 +155,7 @@ function solve_group_MVR_full(
     Sblocks::BlockDiagonal, 
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
+    m::Int = 1, # number of knockoffs per variable
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
@@ -282,6 +283,141 @@ function solve_group_MVR_full(
     return S, Float64[]
 end
 
+function solve_group_max_entropy_full(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    niter::Int = 100,
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    blocks = nblocks(Sblocks)
+    group_sizes = size.(Sblocks.blocks, 1)
+    # initialize S matrix and compute initial cholesky factor
+    # S, _ = solve_group_equi(Σ, Sblocks)
+    # S = convert(Matrix{T}, S)
+    S = Diagonal(fill(eigmin(Σ), size(Σ, 1))) |> Matrix
+    L = cholesky(Symmetric((m+1)/m * Σ - S))
+    C = cholesky(Symmetric(S))
+    # preallocated vectors for efficiency
+    x, ỹ = zeros(p), zeros(p)
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        offset = 0
+        for b in 1:blocks
+            #
+            # optimize diagonal entries
+            #
+            for idx in 1:group_sizes[b]
+                j = idx + offset
+                @simd for i in 1:p
+                    ỹ[i] = (m+1)/m * Σ[i, j]
+                end
+                ỹ[j] = 0
+                # compute x as the solution to L*x = ỹ
+                ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
+                x_l2sum = sum(abs2, x)
+                # compute zeta and c as in alg 2.2 of askari et al
+                ζ = (m+1)/m * Σ[j, j] - S[j, j]
+                c = (ζ * x_l2sum) / (ζ + x_l2sum)
+                # solve optimality condition in eq 75 of spector et al 2020
+                sj_new = ((m+1)/m * Σ[j, j] - c) / 2
+                δ = sj_new - S[j, j]
+                # compute δ, ensuring S[j, j] + δ is in feasible region
+                abs(δ) < 1e-15 && continue
+                fill!(ej, 0)
+                ej[j] = 1
+                ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
+                ldiv!(v, UpperTriangular(C.factors)', ej)
+                invD_jj = -1 / sum(abs2, u) + tol
+                invS_jj = -1 / sum(abs2, c) + tol
+                δ = max(δ, invD_jj, invS_jj)
+                # update S
+                S[j, j] += δ
+                # rank 1 update to cholesky factors
+                fill!(x, 0); fill!(ỹ, 0)
+                x[j] = ỹ[j] = sqrt(abs(δ))
+                if δ > 0
+                    lowrankdowndate_turbo!(L, x)
+                    lowrankupdate_turbo!(C, ỹ)
+                else
+                    lowrankupdate_turbo!(L, x)
+                    lowrankdowndate_turbo!(C, ỹ)
+                end
+                # update convergence tol
+                abs(δ) > max_delta && (max_delta = abs(δ))
+            end
+            #
+            # optimize off-diagonal entries
+            #
+            for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
+                j, i = idx1 + offset, idx2 + offset
+                fill!(ej, 0); fill!(ei, 0)
+                ej[j], ei[i] = 1, 1
+                # compute aii, ajj, aij, bii, bjj, bij
+                ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ei)
+                ldiv!(v, UpperTriangular(L.factors)', ej)
+                aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
+                ldiv!(u, UpperTriangular(C.factors)', ei)
+                ldiv!(v, UpperTriangular(C.factors)', ej)
+                bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
+                # compute feasible region
+                s1 = (aij - sqrt(aii*ajj)) / (aij^2 - aii * ajj)
+                s2 = (aij + sqrt(aii*ajj)) / (aij^2 - aii * ajj)
+                d1 = (bij - sqrt(bii*bjj)) / (bij^2 - bii * bjj)
+                d2 = (bij + sqrt(bii*bjj)) / (bij^2 - bii * bjj)
+                # @show s1, s2, d1, d2
+                s1 > s2 && ((s1, s2) = (s2, s1))
+                d1 > d2 && ((d1, d2) = (d2, d1))
+                # @show s1, s2, d1, d2
+                lb = max(s1, d1)
+                ub = min(s2, d2)
+                # ensure S[i, j] + δ and S[j, i] + δ are in feasible region
+                δ = clamp((aij - bij) / (aij^2 + bij^2 - aii*ajj - bii*bjj), lb, ub)
+                # @show δ
+                abs(δ) < 1e-15 && continue
+                # update S
+                # @show eigmin(S)
+                S[i, j] += δ
+                S[j, i] += δ
+                # @show eigmin(S)
+                # update cholesky factor L
+                fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+                x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+                if δ > 0
+                    lowrankdowndate_turbo!(L, x)
+                    lowrankupdate_turbo!(L, ei)
+                    lowrankupdate_turbo!(L, ej)
+                else 
+                    lowrankupdate_turbo!(L, x)
+                    lowrankdowndate_turbo!(L, ei)
+                    lowrankdowndate_turbo!(L, ej)
+                end
+                # update cholesky factor C
+                fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+                x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+                if δ > 0
+                    lowrankupdate_turbo!(C, x)
+                    lowrankdowndate_turbo!(C, ei)
+                    lowrankdowndate_turbo!(C, ej)
+                else 
+                    lowrankdowndate_turbo!(C, x)
+                    lowrankupdate_turbo!(C, ei)
+                    lowrankupdate_turbo!(C, ej)
+                end
+                # update convergence tol
+                abs(δ) > max_delta && (max_delta = abs(δ))
+            end
+            offset += group_sizes[b]
+        end
+        verbose && println("Iter $l: δ = $max_delta")
+        max_delta < tol && break 
+    end
+    return S, Float64[]
+end
+
 # rank 1 update to cholesky factor
 function rank1_update_linesearch(δj, C, L)
     δ = sqrt(abs(δj))
@@ -363,6 +499,8 @@ function solve_s_group(
         S, γs = solve_group_max_entropy_sdp(Σ, Sblocks)
     elseif method == :mvr_full
         S, γs = solve_group_MVR_full(Σ, Sblocks)
+    elseif method == :maxent_full
+        S, γs = solve_group_max_entropy_full(Σ, Sblocks; kwargs...)
     else
         error("Method can only be :equi, :sdp, or :maxent, but was $method")
     end
