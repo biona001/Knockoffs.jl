@@ -287,7 +287,8 @@ function solve_group_max_entropy_full(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol
+    tol=1e-6, # converges when changes in s are all smaller than tol,
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     verbose::Bool = false
     ) where T
@@ -324,17 +325,16 @@ function solve_group_max_entropy_full(
                 c = (ζ * x_l2sum) / (ζ + x_l2sum)
                 # solve optimality condition in eq 75 of spector et al 2020
                 sj_new = ((m+1)/m * Σ[j, j] - c) / 2
-                δ = sj_new - S[j, j]
-                # compute δ, ensuring S[j, j] + δ is in feasible region
-                abs(δ) < 1e-15 && continue
+                # ensure new S[j, j] is in feasible region
                 fill!(ej, 0)
                 ej[j] = 1
                 ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
                 ldiv!(v, UpperTriangular(C.factors)', ej)
-                ub = 1 / sum(abs2, u) - tol
-                lb = -1 / sum(abs2, v) + tol
+                ub = 1 / sum(abs2, u) - λmin
+                lb = -1 / sum(abs2, v) + λmin
                 lb ≥ ub && continue
-                δ = clamp(δ, lb, ub)
+                δ = clamp(sj_new - S[j, j], lb, ub)
+                abs(δ) < 1e-15 && continue
                 # update S
                 S[j, j] += δ
                 # rank 1 update to cholesky factors
@@ -372,19 +372,16 @@ function solve_group_max_entropy_full(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # less stringent feasible region criteria
-                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + tol
-                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - tol
+                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
+                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
                 # most stringent feasible region criteria
-                # lb = max(s1, d1, -1 / (bii + 2bij + bjj), -1 / (2bij + bjj)) + tol
-                # ub = min(s2, d2, 1 / (aii + 2aij + ajj), 1 / (2aij + ajj)) - tol
-                if lb ≥ ub
-                    println("lb ≥ ub at i=$i, j=$j")
-                    continue
-                end
+                # lb = max(s1, d1, -1 / (bii + 2bij + bjj), -1 / (2bij + bjj)) + λmin
+                # ub = min(s2, d2, 1 / (aii + 2aij + ajj), 1 / (2aij + ajj)) - λmin
+                lb ≥ ub && continue
                 # lb ≥ ub && continue
                 # ensure S[i, j] + δ and S[j, i] + δ are in feasible region
                 δ = clamp((aij - bij) / (aij^2 + bij^2 - aii*ajj - bii*bjj), lb, ub)
-                abs(δ) < 1e-5 && continue
+                abs(δ) < 1e-15 && continue
                 # f(x) = log((1 - x*aij)^2 - x^2*aii*ajj) + m*log((1 - x+bij)^2 - x^2*bjj*bii)
                 # find_zero(f, (lb, ub))
                 # update S
@@ -417,43 +414,50 @@ function solve_group_max_entropy_full(
                 fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
                 x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
                 if δ > 0
-                    if i == 49 && j == 46
+                    # if i == 49 && j == 46
 
-                        fill!(ei, 0); fill!(ej, 0)
-                        ei[i] = ej[j] = 1
-                        @show δ, lb, ub
-                        @show eigmin(S + δ*(ei + ej)*(ei + ej)')
-                        @show eigmin(S + δ*((ei + ej)*(ei + ej)' - ei*ei'))
-                        @show eigmin(S + δ*(ei*ej' + ei*ej'))
+                    #     fill!(ei, 0); fill!(ej, 0)
+                    #     ei[i] = ej[j] = 1
+                    #     @show δ, lb, ub
+                    #     @show eigmin(S + δ*(ei + ej)*(ei + ej)')
+                    #     @show eigmin(S + δ*((ei + ej)*(ei + ej)' - ei*ei'))
+                    #     @show eigmin(S + δ*(ei*ej' + ei*ej'))
 
-                        @show eigmin(C.L * C.U + δ*(ei + ej)*(ei + ej)')
-                        @show eigmin(C.L * C.U + δ*((ei + ej)*(ei + ej)' - ei*ei'))
-                        @show eigmin(C.L * C.U + δ*(ei*ej' + ei*ej'))
+                    #     @show eigmin(C.L * C.U + δ*(ei + ej)*(ei + ej)')
+                    #     @show eigmin(C.L * C.U + δ*((ei + ej)*(ei + ej)' - ei*ei'))
+                    #     @show eigmin(C.L * C.U + δ*(ei*ej' + ei*ej'))
 
-                        lowrankupdate_turbo!(C, x)
+                    #     correct_update = C.L * C.U + δ*(ei + ej)*(ei + ej)'
+                    #     fill!(x, 0)
+                    #     x[j] = x[i] = sqrt(abs(δ))
+                    #     lowrankupdate_turbo!(C, x)
+                    #     actual_update = C.L * C.U
+                    #     @show correct_update
+                    #     @show actual_update
+                    #     fff
 
-                        # @show δ
-                        # @show ei
-                        # @show C.L * C.U
+                    #     @show δ
+                    #     ei[i] = ej[j] = 1
+                    #     @show eigmin(C.L * C.U - δ * ei*ei')
+                    #     ei[i] = ej[j] = sqrt(abs(δ))
+                    #     lowrankdowndate_turbo!(C, ei)
+                    #     lowrankdowndate_turbo!(C, ej)
 
-                        @show δ
-                        @show eigmin(C.L * C.U - δ * ei*ei')
 
-                        lowrankdowndate_turbo!(C, ei)
 
-                        fff
-                    end
-                    try
-                        lowrankupdate_turbo!(C, x)
-                        lowrankdowndate_turbo!(C, ei)
-                        lowrankdowndate_turbo!(C, ej)
-                    catch
-                        @show i, j
-                        fdsa
-                    end
-                    # lowrankupdate_turbo!(C, x)
-                    # lowrankdowndate_turbo!(C, ei)
-                    # lowrankdowndate_turbo!(C, ej)
+                    #     fff
+                    # end
+                    # try
+                    #     lowrankupdate_turbo!(C, x)
+                    #     lowrankdowndate_turbo!(C, ei)
+                    #     lowrankdowndate_turbo!(C, ej)
+                    # catch
+                    #     @show i, j
+                    #     fdsa
+                    # end
+                    lowrankupdate_turbo!(C, x)
+                    lowrankdowndate_turbo!(C, ei)
+                    lowrankdowndate_turbo!(C, ej)
                 else
                     lowrankdowndate_turbo!(C, x)
                     lowrankupdate_turbo!(C, ei)
