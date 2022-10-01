@@ -22,9 +22,10 @@ using Roots: fzero
 using Downloads
 using GLM
 using Reexport
-using LoopVectorization
+using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
 using Ipopt
 using SCS
+using Optim: optimize, Brent # for group knockoffs
 
 @reexport using GLM
 

@@ -296,10 +296,9 @@ function solve_group_max_entropy_full(
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     # initialize S matrix and compute initial cholesky factor
-    # S, _ = solve_group_equi(Σ, Sblocks)
-    # S = convert(Matrix{T}, S)
-    S = Diagonal(fill(eigmin(Σ), size(Σ, 1))) |> Matrix
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
+    S, _ = solve_group_equi(Σ, Sblocks)
+    S = convert(Matrix{T}, S)
+    L = cholesky(Symmetric((m+1)/m * Σ - S + λmin*I))
     C = cholesky(Symmetric(S))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
@@ -374,28 +373,18 @@ function solve_group_max_entropy_full(
                 # less stringent feasible region criteria
                 lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
                 ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
-                # most stringent feasible region criteria
+                # most stringent feasible region criteria (not really needed in my experiments, and it tends to cause lb ≥ ub much more often)
                 # lb = max(s1, d1, -1 / (bii + 2bij + bjj), -1 / (2bij + bjj)) + λmin
                 # ub = min(s2, d2, 1 / (aii + 2aij + ajj), 1 / (2aij + ajj)) - λmin
                 lb ≥ ub && continue
-                # lb ≥ ub && continue
-                # ensure S[i, j] + δ and S[j, i] + δ are in feasible region
-                δ = clamp((aij - bij) / (aij^2 + bij^2 - aii*ajj - bii*bjj), lb, ub)
+                # find δ ∈ [lb, ub] that maximizes objective
+                opt = optimize(
+                    δ -> offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj),
+                    lb, ub, Brent(), show_trace=false, abs_tol=0.0001
+                )
+                δ = clamp(opt.minimizer, lb, ub)
                 abs(δ) < 1e-15 && continue
-                # f(x) = log((1 - x*aij)^2 - x^2*aii*ajj) + m*log((1 - x+bij)^2 - x^2*bjj*bii)
-                # find_zero(f, (lb, ub))
                 # update S
-
-
-                # fill!(ei, 0); fill!(ej, 0)
-                # ei[i] = ej[j] = sqrt(abs(δ))
-                # @show δ, lb, ub
-                # @show eigmin(S + δ*(ei + ej)*(ei + ej)')
-                # @show eigmin(S + δ*((ei + ej)*(ei + ej)' - ei*ei'))
-                # @show eigmin(S + δ*(ei*ej' + ei*ej'))
-
-
-
                 S[i, j] += δ
                 S[j, i] += δ
                 # update cholesky factor L
@@ -414,47 +403,6 @@ function solve_group_max_entropy_full(
                 fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
                 x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
                 if δ > 0
-                    # if i == 49 && j == 46
-
-                    #     fill!(ei, 0); fill!(ej, 0)
-                    #     ei[i] = ej[j] = 1
-                    #     @show δ, lb, ub
-                    #     @show eigmin(S + δ*(ei + ej)*(ei + ej)')
-                    #     @show eigmin(S + δ*((ei + ej)*(ei + ej)' - ei*ei'))
-                    #     @show eigmin(S + δ*(ei*ej' + ei*ej'))
-
-                    #     @show eigmin(C.L * C.U + δ*(ei + ej)*(ei + ej)')
-                    #     @show eigmin(C.L * C.U + δ*((ei + ej)*(ei + ej)' - ei*ei'))
-                    #     @show eigmin(C.L * C.U + δ*(ei*ej' + ei*ej'))
-
-                    #     correct_update = C.L * C.U + δ*(ei + ej)*(ei + ej)'
-                    #     fill!(x, 0)
-                    #     x[j] = x[i] = sqrt(abs(δ))
-                    #     lowrankupdate_turbo!(C, x)
-                    #     actual_update = C.L * C.U
-                    #     @show correct_update
-                    #     @show actual_update
-                    #     fff
-
-                    #     @show δ
-                    #     ei[i] = ej[j] = 1
-                    #     @show eigmin(C.L * C.U - δ * ei*ei')
-                    #     ei[i] = ej[j] = sqrt(abs(δ))
-                    #     lowrankdowndate_turbo!(C, ei)
-                    #     lowrankdowndate_turbo!(C, ej)
-
-
-
-                    #     fff
-                    # end
-                    # try
-                    #     lowrankupdate_turbo!(C, x)
-                    #     lowrankdowndate_turbo!(C, ei)
-                    #     lowrankdowndate_turbo!(C, ej)
-                    # catch
-                    #     @show i, j
-                    #     fdsa
-                    # end
                     lowrankupdate_turbo!(C, x)
                     lowrankdowndate_turbo!(C, ei)
                     lowrankdowndate_turbo!(C, ej)
@@ -474,32 +422,12 @@ function solve_group_max_entropy_full(
     return S, Float64[]
 end
 
-# rank 1 update to cholesky factor
-function rank1_update_linesearch(δj, C, L)
-    δ = sqrt(abs(δj))
-    # update C via linesearch
-    for i in 1:50
-        try
-            ej[j] = δ
-            if δj > 0
-                lowrankdowndate_turbo!(L, ej)
-                lowrankupdate_turbo!(C, ej)
-            else
-                lowrankupdate_turbo!(L, ej)
-                lowrankdowndate_turbo!(C, ej)
-            end
-            break
-        catch
-            δ /= 2
-            continue
-        end
-    end
-    if δj > 0
-        lowrankdowndate_turbo!(L, ej)
-    else
-        lowrankupdate_turbo!(L, ej)
-    end
-    S[j, j] += δ
+# objective function to minimize when optimizing off-diagonal entries in max entropy group knockoffs
+function offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj)
+    in1 = (1 - δ*aij)^2 - δ^2*aii*ajj
+    in2 = (1 - δ+bij)^2 - δ^2*bjj*bii
+    in1 ≤ 0 || in2 ≤ 0 && return typemin(δ)
+    return -log(in1) - m*log(in2)
 end
 
 function solve_group_quadratic(cn, cd, kn, kd)
