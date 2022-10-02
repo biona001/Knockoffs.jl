@@ -1,4 +1,47 @@
 """
+    solve_s_group(Σ, Sblocks, groups, [method=:equi]; kwargs...)
+
+Solves the group knockoff problem, returns block diagonal matrix S
+satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
+
+# Inputs 
++ `Σ`: A covariance matrix that has been scaled to a correlation matrix.
++ `Sblocks`: A `BlockDiagonal` matrix that approximates `Σ` using group
+structure. Each block should be `pi × pi` where `pi` is number of variables
+in group `i`
++ `groups`: Vector of group membership
++ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
+"""
+function solve_s_group(
+    Σ::AbstractMatrix, 
+    Sblocks::BlockDiagonal, 
+    groups::Vector{Int},
+    method::Symbol=:equi;
+    kwargs...)
+    # check for error first
+    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    for block in Sblocks.blocks
+        all(x -> x ≈ 1, diag(block)) || 
+            error("Sblocks must be scaled to a correlation matrix first.")
+    end
+    # solve optimization problem
+    if method == :equi
+        S, γs = solve_group_equi(Σ, Sblocks)
+    elseif method == :sdp
+        S, γs = solve_group_SDP(Σ, Sblocks)
+    elseif method == :sdp_full
+        S, γs = solve_group_SDP_full(Σ, Sblocks)
+    elseif method == :mvr_full
+        S, γs = solve_group_MVR_full(Σ, Sblocks; kwargs...)
+    elseif method == :maxent_full
+        S, γs = solve_group_max_entropy_full(Σ, Sblocks; kwargs...)
+    else
+        error("Method can only be :equi, :sdp, or :maxent, but was $method")
+    end
+    return S, γs
+end
+
+"""
 Computes A^{-1/2} via eigen-decomposition
 """
 function inverse_mat_sqrt(A::Symmetric; tol=1e-4)
@@ -386,53 +429,6 @@ function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij
     numer1 = -m^2 * δ * ((cij*bij - cjj*cii - cii*bjj + cij*bij)*δ + 2cij)
     numer2 = δ * ((-dij*aij - djj*aii + dii*ajj - dij*aij)*δ + 2dij)
     return numer1 / denom1 + numer2 / denom2
-end
-
-"""
-    solve_s_group(Σ, Sblocks, groups, [method=:equi]; kwargs...)
-
-Solves the group knockoff problem, returns block diagonal matrix S
-satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
-
-# Inputs 
-+ `Σ`: A covariance matrix that has been scaled to a correlation matrix.
-+ `Sblocks`: A `BlockDiagonal` matrix that approximates `Σ` using group
-    structure. Each block should be `pi × pi` where `pi` is number of variables
-    in group `i`
-+ `groups`: Vector of group membership
-+ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
-"""
-function solve_s_group(
-    Σ::AbstractMatrix, 
-    Sblocks::BlockDiagonal, 
-    groups::Vector{Int},
-    method::Symbol=:equi;
-    kwargs...)
-    # check for error first
-    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
-    for block in Sblocks.blocks
-        all(x -> x ≈ 1, diag(block)) || 
-            error("Sblocks must be scaled to a correlation matrix first.")
-    end
-    # solve optimization problem
-    if method == :equi
-        S, γs = solve_group_equi(Σ, Sblocks)
-    elseif method == :sdp
-        S, γs = solve_group_SDP(Σ, Sblocks)
-    elseif method == :sdp_full
-        S, γs = solve_group_SDP_full(Σ, Sblocks)
-    elseif method == :maxent
-        S, γs = solve_group_max_entropy_equi(Σ, Sblocks)
-    elseif method == :maxent_sdp
-        S, γs = solve_group_max_entropy_sdp(Σ, Sblocks)
-    elseif method == :mvr_full
-        S, γs = solve_group_MVR_full(Σ, Sblocks; kwargs...)
-    elseif method == :maxent_full
-        S, γs = solve_group_max_entropy_full(Σ, Sblocks; kwargs...)
-    else
-        error("Method can only be :equi, :sdp, or :maxent, but was $method")
-    end
-    return S, γs
 end
 
 """
