@@ -127,7 +127,7 @@ function solve_MVR(
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)))
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -146,7 +146,7 @@ function solve_MVR(
             abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
-            ej[j] = sqrt(abs(m*δj))
+            ej[j] = sqrt(abs(δj))
             δj > 0 ? lowrankdowndate_turbo!(L, ej) : lowrankupdate_turbo!(L, ej)
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
@@ -170,12 +170,12 @@ end
 
 function solve_quadratic(cn, cd, Sjj, m, verbose=false)
     a = -cn - cd^2*m^2
-    b = 2*(-cn*Sjj + cd*m)
-    c = -cn*Sjj^2 - 1
+    b = 2*(-cn*Sjj + cd*m^2)
+    c = -cn*Sjj^2 - m^2
     a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
     x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
-    δj = -Sjj < x1 < inv(cd*m) ? x1 : x2
+    δj = -Sjj < x1 < inv(cd) ? x1 : x2
     isinf(δj) && error("δj is Inf, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     isnan(δj) && error("δj is NaN, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
