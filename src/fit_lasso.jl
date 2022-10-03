@@ -30,20 +30,20 @@ function fit_lasso(
     m::Int = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff_plus,
+    filter_method::Symbol = :knockoff,
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
-        modelX_gaussian_group_knockoffs(X, groups, method)
-    return fit_lasso(y, X, ko.X̃, d=d, fdrs=fdrs, groups=groups, 
+        modelX_gaussian_group_knockoffs(X, method, groups)
+    return fit_lasso(y, X, ko, d=d, fdrs=fdrs, groups=groups, 
         filter_method=filter_method, debias=debias; kwargs...)
 end
 
 function fit_lasso(
     y::AbstractVector{T},
     X::AbstractMatrix{T}, 
-    X̃::AbstractMatrix{T};
+    ko::Knockoff;
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
@@ -53,6 +53,7 @@ function fit_lasso(
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
+    X̃ = ko.X̃
     m = Int(size(X̃, 2) / size(X, 2)) # number of knockoffs per feature
     m > 1 && !isnothing(groups) && error("Currently groups knockoffs do not support multiple knockoffs!")
     # cross validate for λ, then refit Lasso with best λ
@@ -80,7 +81,7 @@ function fit_lasso(
         push!(βs, β_filtered)
         push!(a0s, a0)
     end
-    return KnockoffFilter(y, X, X̃, m, βs, a0s, fdrs, d, debias)
+    return KnockoffFilter(y, X, ko, m, βs, a0s, fdrs, d, debias)
 end
 
 function debias!(

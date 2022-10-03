@@ -30,6 +30,7 @@ end
 struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric} <: Knockoff
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
+    groups::Vector{Int} # p × 1 vector of group membership
     S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
     γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
     Σ::S # p × p symmetric covariance matrix. 
@@ -89,7 +90,7 @@ level `q`
 struct KnockoffFilter{T}
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original X and its knockoff interleaved randomly
-    X̃ :: Matrix{T} # n × p matrix of X knockoff
+    ko :: Knockoff # A knockoff struct
     m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
