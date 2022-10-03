@@ -315,13 +315,13 @@ specified, then the process is stationary with correlation
 # Source
 https://github.com/amspector100/knockpy/blob/20eddb3eb60e0e82b206ec989cb936e3c3ee7939/knockpy/dgp.py#L61
 """
-function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
+function simulate_AR1(p::Int; a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
     # Generate rhos, take log to make multiplication easier
     d = Beta(a, b)
     if isnothing(rho)
         rhos = log.(clamp!(rand(d, p), 0, max_corr))
     else
-        abs(rho) > 1 || error("rho $rho must be a correlation between -1 and 1")
+        abs(rho) > 1 && error("rho must be a correlation between -1 and 1")
         rhos = log.([rho for _ in 1:p])
     end
     rhos[1] = 0
@@ -648,7 +648,6 @@ function simulate_block_covariance(
     ρ::T, # within group correlation 
     γ::T # between group correlation
     ) where T <: AbstractFloat
-    p = length(groups)
     issorted(groups) || error("groups needs to be a sorted vector (i.e. continuous)")
     # form block diagonals to handle within group correlation
     Σ = Matrix{Float64}[]

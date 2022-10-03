@@ -31,9 +31,9 @@ function solve_s_group(
         S, γs = solve_group_SDP(Σ, Sblocks)
     elseif method == :sdp_full
         S, γs = solve_group_SDP_full(Σ, Sblocks)
-    elseif method == :mvr_full
+    elseif method == :mvr
         S, γs = solve_group_MVR_full(Σ, Sblocks; kwargs...)
-    elseif method == :maxent_full
+    elseif method == :maxent
         S, γs = solve_group_max_entropy_full(Σ, Sblocks; kwargs...)
     else
         error("Method can only be :equi, :sdp, or :maxent, but was $method")
@@ -424,16 +424,16 @@ function offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj)
 end
 
 function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij, dii, djj)
-    denom1 = (1 - δ+bij)^2 - δ^2*bjj*bii
+    denom1 = (1 + δ+bij)^2 - δ^2*bii*bjj
     denom2 = (1 - δ*aij)^2 - δ^2*aii*ajj
-    numer1 = -m^2 * δ * ((cij*bij - cjj*cii - cii*bjj + cij*bij)*δ + 2cij)
+    numer1 = -m^2 * δ * ((cij*bij - cjj*bii - cii*bjj + cij*bij)*δ + 2cij)
     numer2 = δ * ((-dij*aij - djj*aii + dii*ajj - dij*aij)*δ + 2dij)
     return numer1 / denom1 + numer2 / denom2
 end
 
 """
-    modelX_gaussian_group_knockoffs(X, groups, method, Σ, μ)
-    modelX_gaussian_group_knockoffs(X, groups, method; [covariance_approximator])
+    modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ)
+    modelX_gaussian_group_knockoffs(X, method, groups; [covariance_approximator])
 
 Constructs Gaussian model-X group knockoffs. If the covariance `Σ` and mean `μ` 
 are not specified, they will be estimated from data, i.e. we will make second-order
@@ -443,10 +443,10 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
 
 # Inputs
 + `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
-+ `groups`: Vector of group membership
 + `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
-+ `Σ`: A `p × p` covariance matrix for columns of `X`
++ `groups`: Vector of group membership
 + `μ`: A length `p` vector storing the true column means of `X`
++ `Σ`: A `p × p` covariance matrix for columns of `X`
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
@@ -456,8 +456,8 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 """
 function modelX_gaussian_group_knockoffs(
     X::Matrix, 
-    groups::AbstractVector{Int},
-    method::Symbol;
+    method::Symbol,
+    groups::AbstractVector{Int};
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
@@ -470,15 +470,15 @@ function modelX_gaussian_group_knockoffs(
     Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, groups, method, Σapprox, μ)
+    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox)
 end
 
 function modelX_gaussian_group_knockoffs(
     X::Matrix, 
-    groups::AbstractVector{Int},
     method::Symbol,
-    Σ::AbstractMatrix,
-    μ::AbstractVector;
+    groups::AbstractVector{Int},
+    μ::AbstractVector,
+    Σ::AbstractMatrix;
     kwargs...
     )
     # first check errors
@@ -503,7 +503,7 @@ function modelX_gaussian_group_knockoffs(
     iscor || StatsBase.cor2cov!(S, σs)
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S)
-    return GaussianGroupKnockoff(X, X̃, S, γs, Symmetric(Σ), method)
+    return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
 end
 
 # every `windowsize` SNPs form a group
@@ -526,7 +526,10 @@ Generates (model-X Gaussian second-order) group knockoffs for
 a single chromosome stored in PLINK formatted data. 
 
 # todo 
-Handle PLINK files with multiple chromosomes and multiple plink files each storing a chromosome
++ Handle PLINK files with multiple chromosomes and multiple plink files each storing a chromosome
++ Make this accept multiple knockoffs
++ Output to PGEN which stores dosages
++ Better window definition via hierarchical clustering
 """
 function modelX_gaussian_group_knockoffs(
     x::SnpArray, # assumes only have 1 chromosome, allows missing data
