@@ -418,16 +418,16 @@ end
 # objective function to minimize when optimizing off-diagonal entries in max entropy group knockoffs
 function offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj)
     in1 = (1 - δ*aij)^2 - δ^2*aii*ajj
-    in2 = (1 - δ+bij)^2 - δ^2*bjj*bii
+    in2 = (1 + δ*bij)^2 - δ^2*bjj*bii
     in1 ≤ 0 || in2 ≤ 0 && return typemin(δ)
     return -log(in1) - m*log(in2)
 end
 
 function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij, dii, djj)
-    denom1 = (1 + δ+bij)^2 - δ^2*bii*bjj
+    denom1 = (1 + δ*bij)^2 - δ^2*bii*bjj
     denom2 = (1 - δ*aij)^2 - δ^2*aii*ajj
     numer1 = -m^2 * δ * ((cij*bij - cjj*bii - cii*bjj + cij*bij)*δ + 2cij)
-    numer2 = δ * ((-dij*aij - djj*aii + dii*ajj - dij*aij)*δ + 2dij)
+    numer2 = δ * ((-dij*aij + djj*aii + dii*ajj - dij*aij)*δ + 2dij)
     return numer1 / denom1 + numer2 / denom2
 end
 
