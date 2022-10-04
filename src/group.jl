@@ -8,11 +8,15 @@ satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
 + `Σ`: A covariance matrix that has been scaled to a correlation matrix.
 + `groups`: Vector of group membership, does not need to be contiguous
 + `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
++ `m`: Number of knockoffs per variable, defaults to 1. 
++ `kwargs`: Extra arguments available for specific methods. For example, to use 
+    less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
 """
 function solve_s_group(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int},
-    method::Symbol=:equi;
+    method::Symbol=:maxent;
+    m::Int=1,
     kwargs...
     ) where T
     # check for errors
@@ -36,13 +40,13 @@ function solve_s_group(
     Sblocks = BlockDiagonal(blocks)
     # solve optimization problem
     if method == :equi
-        S, γs = solve_group_equi(Σ, Sblocks)
+        S, γs = solve_group_equi(Σ, Sblocks; m=m)
     elseif method == :sdp
-        S, γs = solve_group_SDP(Σ, Sblocks)
+        S, γs = solve_group_SDP(Σ, Sblocks; m=m)
     elseif method == :sdp_full
-        S, γs = solve_group_SDP_full(Σ, Sblocks)
+        S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
     elseif method == :mvr
-        S, γs = solve_group_MVR_full(Σ, Sblocks; kwargs...)
+        S, γs = solve_group_MVR_full(Σ, Sblocks; m=m, kwargs...)
     elseif method == :maxent
         S, γs = solve_group_max_entropy_full(Σ, Sblocks; kwargs...)
     else
@@ -77,14 +81,18 @@ block corresponds to groups.
 Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
 """
-function solve_group_equi(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+function solve_group_equi(
+    Σ::AbstractMatrix, 
+    Σblocks::BlockDiagonal;
+    m::Int = 1 # number of knockoffs per feature to generate
+    )
     Db = Matrix{eltype(Σ)}[]
     for Σbi in Σblocks.blocks
         push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
     end
     Db = BlockDiagonal(Db)
     λmin = Symmetric(Db * Σ * Db) |> eigmin
-    γ = min(1, 2λmin)
+    γ = min(1, (m+1)/m * λmin)
     S = BlockDiagonal(γ .* Σblocks.blocks)
     return S, [γ]
 end
@@ -97,7 +105,7 @@ multiplies Σ_jj. In the equi-correlated setting, all `γ[j]` is forced to be eq
 Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
 """
-function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
     model = Model(() -> Hypatia.Optimizer(verbose=false))
     # model = Model(() -> SCS.Optimizer())
     n = nblocks(Σblocks)
@@ -105,7 +113,7 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     @variable(model, 0 <= γ[1:n] <= 1)
     blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
     @objective(model, Max, block_sizes' * γ)
-    @constraint(model, Symmetric(2Σ - blocks) in PSDCone())
+    @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
     JuMP.optimize!(model)
     check_model_solution(model)
     γs = clamp!(JuMP.value.(γ), 0, 1)
@@ -113,7 +121,7 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     return S, γs
 end
 
-function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
     model = Model(() -> Hypatia.Optimizer(verbose=false))
     # model = Model(() -> SCS.Optimizer())
     T = eltype(Σ)
@@ -135,7 +143,7 @@ function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
         end
         idx += g
     end
-    @constraint(model, Symmetric(2Σ - S) in PSDCone())
+    @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
     # @objective(model, Max, tr(S))
     @objective(model, Max, sum(S))
     JuMP.optimize!(model)

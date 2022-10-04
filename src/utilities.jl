@@ -25,17 +25,17 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 """
 function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     m < 1 && error("m should be 1 or larger but was $m.")
-    m > 1 && method ∈ [:equi, :sdp, :sdp_fast] && 
-        error("Currently only :mvr and :maxent knockoffs support multiple knockoffs!")
+    m > 1 && method ∈ [:sdp_fast] && 
+        error("Currently :sdp_fast does not support multiple knockoffs!")
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
     Σcor = iscor ? Σ : StatsBase.cov2cor(Σ.data, σs)
     # solve optimization problem
     if method == :equi
-        s = solve_equi(Σcor)
+        s = solve_equi(Σcor; m=m)
     elseif method == :sdp
-        s = solve_SDP(Σcor)
+        s = solve_SDP(Σcor; m=m)
     elseif method == :mvr
         s = solve_MVR(Σcor; m=m, kwargs...)
     elseif method == :maxent
@@ -61,18 +61,23 @@ https://arxiv.org/pdf/1610.02351.pdf
 
 # Arguments
 + `Σ`: A correlation matrix (diagonals all equal to 1)
++ `m`: Number of knockoffs to generate, defaults to 1
 + `optm`: SDP solver. Defaults to `Hypatia.Optimizer(verbose=false)`. This can
     be any solver that supports the JuMP interface. For example, use 
     `SDPT3.Optimizer` in SDPT3.jl package (which is a MATLAB dependency)
     for the best performance. 
 """
-function solve_SDP(Σ::AbstractMatrix, optm=Hypatia.Optimizer(verbose=false))
+function solve_SDP(
+    Σ::AbstractMatrix; # correlation matrix
+    m::Int = 1, # number of multiple knockoffs to generate
+    optm=Hypatia.Optimizer(verbose=false) # Any solver compatible with JuMP
+    )
     # Build model via JuMP
     p = size(Σ, 1)
     model = Model(() -> optm)
     @variable(model, 0 ≤ s[i = 1:p] ≤ 1)
     @objective(model, Max, sum(s))
-    @constraint(model, Symmetric(2Σ - diagm(s[1:p])) in PSDCone())
+    @constraint(model, Symmetric((m+1)/m*Σ - diagm(s[1:p])) in PSDCone())
     # Solve optimization problem
     JuMP.optimize!(model)
     # Retrieve solution
@@ -97,12 +102,12 @@ Solves the equicorrelated problem for fixed-X and model-X knockoffs given
 correlation matrix Σ. Users should call `solve_s` instead of this function. 
 """
 function solve_equi(
-    Σ::AbstractMatrix{T},
-    λmin::Union{Nothing, T} = nothing
+    Σ::AbstractMatrix{T}; # correlation matrix
+    m::Int = 1 # number of multiple knockoffs to generate
     ) where T
-    isnothing(λmin) && (λmin = eigmin(Σ))
-    s = min(1, 2*λmin) .* ones(size(Σ, 1))
-    return s
+    λmin = eigmin(Σ)
+    sj = min(1, (m+1)/m * λmin)
+    return fill(sj, size(Σ, 1))
 end
 
 """
@@ -117,11 +122,11 @@ reconstructability" by Spector, Asher, and Lucas Janson (2020)
 https://arxiv.org/pdf/2011.14625.pdf
 """
 function solve_MVR(
-    Σ::AbstractMatrix{T};
-    s_init = fill(eigmin(Σ), size(Σ, 1)), # initialize s vector with min eigenvalue of Σ if not supplied
+    Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
     m::Int = 1, # number of knockoffs per variable
+    s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
@@ -203,11 +208,11 @@ of the FANOK paper, it seems like the actual update should be
 where `ζ = 2Σ_{jj} - s_j`.
 """
 function solve_max_entropy(
-    Σ::AbstractMatrix{T};
-    s_init = fill(eigmin(Σ), size(Σ, 1)), # initialize s vector with min eigenvalue of Σ if not supplied
+    Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
     m::Int = 1, # number of knockoffs per variable
+    s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
