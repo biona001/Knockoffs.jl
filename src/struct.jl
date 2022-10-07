@@ -37,6 +37,14 @@ struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric}
     method::Symbol # method for solving s
 end
 
+struct MergedKnockoff{T} <: Knockoff
+    XX̃::Matrix{T} # n × (m+1)p matrix of original features
+    original::Vector{Int} # p × 1 vector of indices storing which columns of XX̃ contains the original features
+    knockoff::Vector{Int} # mp × 1 vector of indices storing which columns of XX̃ contains the knockoff features
+    p::Int # number of original features
+    m::Int # number of knockoffs per feature
+end
+
 # 1 state of a markov chain
 struct GenotypeState
     a::Int # int between 1 and K
@@ -89,8 +97,9 @@ level `q`
 """
 struct KnockoffFilter{T}
     y :: Vector{T} # n × 1 response vector
-    X :: Matrix{T} # n × p matrix of original X and its knockoff interleaved randomly
+    X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
+    merged_ko :: Knockoff # A MergedKnockoff struct
     m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs

@@ -132,7 +132,7 @@ function solve_MVR(
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)))
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -218,7 +218,7 @@ function solve_max_entropy(
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)/m * Σ - Diagonal(s)))
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -451,6 +451,10 @@ Interleaves the original PLINK genotypes with its knockoff into a single PLINK f
 + `xfull`: A `n × 2p` array of original and knockoff genotypes. 
 + `original`: Indices of original genotypes. `original[i]` is the column number for the `i`th SNP. 
 + `knockoff`: Indices of knockoff genotypes. `knockoff[i]` is the column number for the `i`th SNP. 
+
+# todo
++ Handle for >1 knockoffs per feature
++ Also need to output groups membership vector
 """
 function merge_knockoffs_with_original(
     xdata::SnpData,
@@ -501,6 +505,9 @@ end
     merge_knockoffs_with_original(X, X̃)
 
 Merges the original variables `X` with its knockoffs `X̃`, shuffling their index. 
+This is done because, in Lasso, when 2 variables are highly correlated, the one 
+listed first tends to get selected. This shuffle helps ensure the Wj statistics 
+in Knockoffs satisfy the flip sign property. 
 """
 function merge_knockoffs_with_original(
     X::AbstractMatrix{T},
@@ -526,7 +533,7 @@ function merge_knockoffs_with_original(
             push!(knockoff, knoc)
         end
     end
-    return Xfull, original, knockoff
+    return MergedKnockoff(Xfull, original, knockoff, m, p)
 end
 
 """
@@ -743,7 +750,6 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
         s = v[i] / Aii
         s2 = abs2(s)
         if s2 > 1
-            @show s2
             throw(LinearAlgebra.PosDefException(i))
         end
         c = sqrt(1 - abs2(s))

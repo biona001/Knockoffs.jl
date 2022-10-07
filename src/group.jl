@@ -11,6 +11,12 @@ satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
+
+# Output
++ `S`: A matrix solved so that `(m+1)/m*Σ - S ⪰ 0` and `S ⪰ 0`
++ `γ`: A vector that is only non-empty for equi and SDP knockoffs. They correspond to 
+    values of γ where `S_{gg} = γΣ_{gg}`. So for equi, the vector is length 1. For 
+    SDP, the vector has length equal to number of groups
 """
 function solve_s_group(
     Σ::AbstractMatrix{T}, 
@@ -27,8 +33,8 @@ function solve_s_group(
     perm = sortperm(groups)
     permuted = false
     if !issorted(groups)
-        @info "groups is not contiguous, permuting columns of X to put groups in contiguous order"
         permute!(groups, perm)
+        Σ .= @view(Σ[perm, perm])
         permuted = true
     end
     # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg, for other cases we initialize with equi solution
@@ -48,7 +54,7 @@ function solve_s_group(
     elseif method == :mvr
         S, γs = solve_group_MVR_full(Σ, Sblocks; m=m, kwargs...)
     elseif method == :maxent
-        S, γs = solve_group_max_entropy_full(Σ, Sblocks; kwargs...)
+        S, γs = solve_group_max_entropy_full(Σ, Sblocks; m=m, kwargs...)
     else
         error("Method can only be :equi, :sdp, or :maxent, but was $method")
     end
@@ -56,7 +62,7 @@ function solve_s_group(
     if permuted
         invpermute!(groups, perm)
         iperm = invperm(perm)
-        S = S[iperm, iperm] 
+        S .= @view(S[iperm, iperm])
     end
     return S, γs
 end
@@ -93,7 +99,7 @@ function solve_group_equi(
     Db = BlockDiagonal(Db)
     λmin = Symmetric(Db * Σ * Db) |> eigmin
     γ = min(1, (m+1)/m * λmin)
-    S = BlockDiagonal(γ .* Σblocks.blocks)
+    S = BlockDiagonal(γ .* Σblocks.blocks) |> Matrix
     return S, [γ]
 end
 
@@ -117,7 +123,7 @@ function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1
     JuMP.optimize!(model)
     check_model_solution(model)
     γs = clamp!(JuMP.value.(γ), 0, 1)
-    S = BlockDiagonal(γs .* Σblocks.blocks)
+    S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
     return S, γs
 end
 
