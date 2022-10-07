@@ -179,9 +179,9 @@ function solve_group_MVR_full(
     group_sizes = size.(Sblocks.blocks, 1)
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks)
-    S = convert(Matrix{T}, S)
+    S = convert(Matrix{T}, S + λmin*I)
     L = cholesky(Symmetric((m+1)/m * Σ - S + λmin*I))
-    C = cholesky(Symmetric(S + λmin*I))
+    C = cholesky(Symmetric(S))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -335,9 +335,9 @@ function solve_group_max_entropy_full(
     group_sizes = size.(Sblocks.blocks, 1)
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks)
-    S = convert(Matrix{T}, S)
+    S = convert(Matrix{T}, S + λmin*I)
     L = cholesky(Symmetric((m+1)/m * Σ - S + λmin*I))
-    C = cholesky(Symmetric(S + λmin*I))
+    C = cholesky(Symmetric(S))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
