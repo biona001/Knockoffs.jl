@@ -111,8 +111,13 @@ multiplies Σ_jj. In the equi-correlated setting, all `γ[j]` is forced to be eq
 Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
 """
-function solve_group_SDP(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
-    model = Model(() -> Hypatia.Optimizer(verbose=false))
+function solve_group_SDP(
+    Σ::AbstractMatrix, 
+    Σblocks::BlockDiagonal; 
+    m::Int = 1,
+    verbose=false
+    )
+    model = Model(() -> Hypatia.Optimizer(verbose=verbose))
     # model = Model(() -> SCS.Optimizer())
     n = nblocks(Σblocks)
     block_sizes = size.(Σblocks.blocks, 1)
@@ -180,7 +185,7 @@ function solve_group_MVR_full(
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks)
     S = convert(Matrix{T}, S + λmin*I)
-    L = cholesky(Symmetric((m+1)/m * Σ - S + λmin*I))
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
@@ -336,7 +341,7 @@ function solve_group_max_entropy_full(
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks)
     S = convert(Matrix{T}, S + λmin*I)
-    L = cholesky(Symmetric((m+1)/m * Σ - S + λmin*I))
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     # some timers
     t1 = zero(T) # time for updating cholesky factors

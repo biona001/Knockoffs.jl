@@ -696,9 +696,13 @@ function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Abst
 
         # Compute Givens rotation
         c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
-        if abs(s) < 1e-10
+
+        # check for early termination
+        if abs(s) < 1e-15
             early_term += 1
-            early_term > 5 && break # early termination
+            early_term > 10 && break
+        else
+            early_term = 0
         end
 
         # Store new diagonal element
@@ -753,9 +757,13 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
             throw(LinearAlgebra.PosDefException(i))
         end
         c = sqrt(1 - abs2(s))
-        if abs(s) < 1e-10
+
+        # check for early termination
+        if abs(s) < 1e-15
             early_term += 1
-            early_term > 5 && break # early termination
+            early_term > 10 && break
+        else
+            early_term = 0
         end
 
         # Store new diagonal element
