@@ -177,11 +177,15 @@ function solve_group_MVR_full(
     tol=1e-6, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks)
     S = convert(Matrix{T}, S + λmin*I)
@@ -230,11 +234,11 @@ function solve_group_MVR_full(
                 ej[j] = ei[j] = sqrt(abs(δj))
                 t1 += @elapsed begin
                     if δj > 0
-                        lowrankdowndate_turbo!(L, ej)
-                        lowrankupdate_turbo!(C, ei)
+                        choldowndate!(L, ej)
+                        cholupdate!(C, ei)
                     else
-                        lowrankupdate_turbo!(L, ej)
-                        lowrankdowndate_turbo!(C, ei)
+                        cholupdate!(L, ej)
+                        choldowndate!(C, ei)
                     end
                 end
                 # update convergence tol
@@ -292,13 +296,13 @@ function solve_group_MVR_full(
                 storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
                 t1 += @elapsed begin
                     if δ > 0
-                        lowrankdowndate_turbo!(L, storage)
-                        lowrankupdate_turbo!(L, ei)
-                        lowrankupdate_turbo!(L, ej)
+                        choldowndate!(L, storage)
+                        cholupdate!(L, ei)
+                        cholupdate!(L, ej)
                     else 
-                        lowrankupdate_turbo!(L, storage)
-                        lowrankdowndate_turbo!(L, ei)
-                        lowrankdowndate_turbo!(L, ej)
+                        cholupdate!(L, storage)
+                        choldowndate!(L, ei)
+                        choldowndate!(L, ej)
                     end
                 end
                 # update cholesky factor C
@@ -306,13 +310,13 @@ function solve_group_MVR_full(
                 storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
                 t1 += @elapsed begin
                     if δ > 0
-                        lowrankupdate_turbo!(C, storage)
-                        lowrankdowndate_turbo!(C, ei)
-                        lowrankdowndate_turbo!(C, ej)
+                        cholupdate!(C, storage)
+                        choldowndate!(C, ei)
+                        choldowndate!(C, ej)
                     else
-                        lowrankdowndate_turbo!(C, storage)
-                        lowrankupdate_turbo!(C, ei)
-                        lowrankupdate_turbo!(C, ej)
+                        choldowndate!(C, storage)
+                        cholupdate!(C, ei)
+                        cholupdate!(C, ej)
                     end
                 end
                 # update convergence tol
@@ -333,11 +337,15 @@ function solve_group_max_entropy_full(
     tol=1e-6, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks)
     S = convert(Matrix{T}, S + λmin*I)
@@ -388,11 +396,11 @@ function solve_group_max_entropy_full(
                 x[j] = ỹ[j] = sqrt(abs(δ))
                 t1 += @elapsed begin
                     if δ > 0
-                        lowrankdowndate_turbo!(L, x)
-                        lowrankupdate_turbo!(C, ỹ)
+                        choldowndate!(L, x)
+                        cholupdate!(C, ỹ)
                     else
-                        lowrankupdate_turbo!(L, x)
-                        lowrankdowndate_turbo!(C, ỹ)
+                        cholupdate!(L, x)
+                        choldowndate!(C, ỹ)
                     end
                 end
                 # update convergence tol
@@ -440,13 +448,13 @@ function solve_group_max_entropy_full(
                 x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
                 t1 += @elapsed begin
                     if δ > 0
-                        lowrankdowndate_turbo!(L, x)
-                        lowrankupdate_turbo!(L, ei)
-                        lowrankupdate_turbo!(L, ej)
+                        choldowndate!(L, x)
+                        cholupdate!(L, ei)
+                        cholupdate!(L, ej)
                     else 
-                        lowrankupdate_turbo!(L, x)
-                        lowrankdowndate_turbo!(L, ei)
-                        lowrankdowndate_turbo!(L, ej)
+                        cholupdate!(L, x)
+                        choldowndate!(L, ei)
+                        choldowndate!(L, ej)
                     end
                 end
                 # update cholesky factor C
@@ -454,13 +462,13 @@ function solve_group_max_entropy_full(
                 x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
                 t1 += @elapsed begin
                     if δ > 0
-                        lowrankupdate_turbo!(C, x)
-                        lowrankdowndate_turbo!(C, ei)
-                        lowrankdowndate_turbo!(C, ej)
+                        cholupdate!(C, x)
+                        choldowndate!(C, ei)
+                        choldowndate!(C, ej)
                     else
-                        lowrankdowndate_turbo!(C, x)
-                        lowrankupdate_turbo!(C, ei)
-                        lowrankupdate_turbo!(C, ej)
+                        choldowndate!(C, x)
+                        cholupdate!(C, ei)
+                        cholupdate!(C, ej)
                     end
                 end
                 # update convergence tol
