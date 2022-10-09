@@ -100,7 +100,7 @@ function condition(
     )
     n, p = size(X)
     m < 1 && error("m should be 1 or larger but was $m.")
-    Σinv = inv(Σ)
+    Σinv = inv(Symmetric(Σ))
     ΣinvS = Σinv * S
     C = 2S - S*ΣinvS
     if m == 1

@@ -1,3 +1,4 @@
+
 # Group Knockoffs
 
 This tutorial generates group (model-X) knockoffs, which is useful when predictors are highly correlated. The methodology is described in the following paper
@@ -7,11 +8,19 @@ This tutorial generates group (model-X) knockoffs, which is useful when predicto
 
 !!! note
 
-    In the original paper, Dai and Barber only describes how to construct equi-correlated group knockoffs, but the same idea can be generalized to SDP group knockoffs, which we also implement here. 
+    In the original paper, Dai and Barber only describes how to construct a suboptimal equi-correlated group knockoffs. Here we implement fully generalized alternatives.
+    
+Currently available options for group knockoffs:
++ `:mvr`: Fully general minimum variance-based reconstructability (MVR) group knockoff, based on coordinate descent.
++ `:maxent`: Fully general maximum entropy (maxent) group knockoff, based on coordinate descent.
++ `:equi`: This implements the equi-correlated idea proposed in [Barber and Dai](https://proceedings.mlr.press/v48/daia16.html), which lets $S_j = \gamma \Sigma_{(G_j, G_j)}$ where $\Sigma_{(G_j, G_j)}$ is the block of $\Sigma$ containing variables in the $j$th group. Thus, instead of optimizing over all variables in $S$, we optimize a scalar $\gamma$. Conveniently, there a simple closed form solution for $\gamma$. For `mvr` and `maxent` group knockoffs, we initialize $S$ using this construction. 
++ `:SDP`: This generalizes the equi-correlated group knockoff idea by having $S_j = \gamma_j \Sigma_{(G_j, G_j)}$. Instead of optimizing over all variables in $S$, we optimize over a vector $\gamma_1,...,\gamma_G$. 
+
 
 
 ```julia
 # load packages for this tutorial
+using Revise
 using Knockoffs
 using LinearAlgebra
 using Random
@@ -53,17 +62,7 @@ end
 
 
 
-# Equi-correlated group knockoffs
-
-+ Given $p \times p$ positive definite matrix $\Sigma$, partition the $p$ features into $m$ groups $G_1,...,G_m$. We want to optimize the following problem
-```math
-\begin{aligned}
-    \min_{S} & \ Tr(|\Sigma - S|)\\
-    \text{such that } & S \succeq 0 \text{ and } 2\Sigma - S \succeq 0.
-\end{aligned}
-```
-+ Here $S$ is a group-block-diagonal matrix of the form $S = diag(S_1,...,S_m)$ where each $S_j$ is a positive definite matrix that has dimension $|G_j| \times |G_j|$
-+ The equi-correlated idea proposed in [Barber and Dai](https://proceedings.mlr.press/v48/daia16.html) is to let $S_j = \gamma \Sigma_{(G_j, G_j)}$ where $\Sigma_{(G_j, G_j)}$ is the block of $\Sigma$ containing variables in the $j$th group. Thus, instead of optimizing over all variables in $S$, we optimize a scalar $\gamma$. Conveniently, there a simple closed form solution.
+# Constructing group knockoffs
 
 First, let's simulate data and generate equi-correlated knockoffs. Our true covariance matrix looks like
 
@@ -88,10 +87,10 @@ For simplicity, let simulate data where every 5 variables form a group:
 # simulate data
 Random.seed!(2022)
 n = 1000 # sample size
-p = 100  # number of covariates
+p = 200  # number of covariates
 k = 10   # number of true predictors
-Σ = Matrix(SymmetricToeplitz(0.9.^(0:(p-1)))) # true covariance matrix
-groupsizes = [5 for i in 1:20] # each group has 5 variables
+Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1)))) # true covariance matrix
+groupsizes = [5 for i in 1:div(p, 5)] # each group has 5 variables
 groups = vcat([i*ones(g) for (i, g) in enumerate(groupsizes)]...) |> Vector{Int}
 true_mu = zeros(p)
 L = cholesky(Σ).L
@@ -99,71 +98,58 @@ X = randn(n, p) * L
 zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
 ```
 
-Generate group knockoffs as such:
+Generate group knockoffs with the exported function `modelX_gaussian_group_knockoffs`. Similar to non-group knockoffs, group knockoff accepts keyword arguments `m`, `tol`, `niter`, and `verbose` which controls the algorithm's behavior. 
 
 
 ```julia
-ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, Σ, true_mu);
+Gme = modelX_gaussian_group_knockoffs(
+    X, :maxent, groups, true_mu, Σ, 
+    m = 1,          # number of knockoffs per variable to generate
+    tol = 0.0001,   # convergence tolerance
+    niter = 100,    # max number of coordinate descent iterations
+    verbose=true);  # whether to print informative intermediate results
 ```
 
-Lets do a sanity check: is $2\Sigma - S$ positive semi-definite?
+    Iter 1: δ = 0.35041635762964374, t1 = 0.07, t2 = 0.01, t3 = 0.0
+    Iter 2: δ = 0.06174971923894666, t1 = 0.07, t2 = 0.02, t3 = 0.0
+    Iter 3: δ = 0.020679713293120027, t1 = 0.08, t2 = 0.04, t3 = 0.0
+    Iter 4: δ = 0.010800522507824841, t1 = 0.09, t2 = 0.05, t3 = 0.0
+    Iter 5: δ = 0.006051906091741958, t1 = 0.09, t2 = 0.06, t3 = 0.0
+    Iter 6: δ = 0.003458575128440409, t1 = 0.1, t2 = 0.07, t3 = 0.0
+    Iter 7: δ = 0.0016285523099343307, t1 = 0.1, t2 = 0.09, t3 = 0.0
+    Iter 8: δ = 0.0007940739052498399, t1 = 0.11, t2 = 0.1, t3 = 0.0
+    Iter 9: δ = 0.0003768922472274655, t1 = 0.11, t2 = 0.11, t3 = 0.0
+    Iter 10: δ = 0.00015544193550259136, t1 = 0.12, t2 = 0.12, t3 = 0.0
+    Iter 11: δ = 0.00014451264472101048, t1 = 0.12, t2 = 0.14, t3 = 0.0
+    Iter 12: δ = 3.6816774372557906e-5, t1 = 0.12, t2 = 0.15, t3 = 0.0
 
 
+Note $t1, t2, t3$ are timers which corresponds to (1) updating cholesky factors, (2) solving forward-backward equations, and (3) solving off-diagonal 1D optimization problems using Brent's method. As we can see, the computational bottleneck in (2), which we dispatch to efficient LAPACK libraries. 
+
+The output is a struct with the following fields
 ```julia
-# compute minimum eigenvalues of 2Σ - S
-eigmin(2ko_equi.Σ - ko_equi.S)
+struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × p knockoff of X
+    groups::Vector{Int} # p × 1 vector of group membership
+    S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
+    γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
+    Σ::S # p × p symmetric covariance matrix. 
+    method::Symbol # method for solving s
+end
 ```
-
-
-
-
-    6.152687425537049e-16
-
-
-
-The min eigenvalue is $\approx 0$ up to numerical precision, so the knockoff structure indeed satisfies the PSD constraint. 
-
-## SDP group knockoffs
-
-
-+ This extends the equi-correlated construction of [Barber and Dai](https://proceedings.mlr.press/v48/daia16.html)
-+ The idea is to choose $S_j = \gamma_j \Sigma_{(G_j, G_j)}$. Note that the difference with the equi-correlated construction is that $\gamma$ is potentially allowed to vary in each group. If $\Sigma$ has unit variance, we optimize the following problem
-
-```math
-\begin{aligned}
-    \min_{\gamma_1,...,\gamma_m} & Tr(|\Sigma - S|)\\
-    \text{such that } & 0 \le \gamma_j \le 1 \text{ for all } j \text{ and }\\
-    & 2\Sigma - 
-    \begin{pmatrix}
-        \gamma_1\Sigma_{(G_1, G_1)} & & 0\\
-        & \ddots & \\
-        0 & & \gamma_m \Sigma_{(G_m, G_m)}
-    \end{pmatrix} \succeq 0
-\end{aligned}
-```
-
-Now lets generate SDP group knockoffs
-
-
-```julia
-@time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, Σ, true_mu);
-```
-
-      0.379894 seconds (96.31 k allocations: 18.528 MiB)
-
-
-We can also do a sanity check to see if the SDP knockoffs satisfy the PSD constraint
+Given this result, lets do a sanity check: is $2\Sigma - S$ positive semi-definite?
 
 
 ```julia
 # compute minimum eigenvalues of 2Σ - S
-eigmin(2ko_sdp.Σ - ko_sdp.S)
+eigmin(2Gme.Σ - Gme.S)
 ```
 
 
 
 
-    -6.413307528979749e-8
+    0.417481414774321
 
 
 
@@ -173,23 +159,35 @@ In practice, we often do not have the true covariance matrix $\Sigma$ and the tr
 
 
 ```julia
-ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi);
+Gme_second_order = modelX_gaussian_group_knockoffs(X, :maxent, groups);
 ```
 
-This will estimate the covariance matrix, see documentation API for more details. 
+This will estimate the covariance matrix via a shrinkage estimator, see documentation API for more details. 
 
-## Power and FDR comparison
+## Lasso Example
 
-Lets compare empirical power and FDR for equi and SDP group knockoffs when the targer FDR is 10%.
+Lets see the empirical power and FDR group knockoffs over 10 simulations when the targer FDR is 10%. Here power and FDR is defined at the group level. 
 
 
 ```julia
 target_fdr = 0.1
-equi_powers, equi_fdrs, equi_times = Float64[], Float64[], Float64[]
-sdp_powers, sdp_fdrs, sdp_times = Float64[], Float64[], Float64[]
+group_powers, group_fdrs, group_times, group_s = Float64[], Float64[], Float64[], Float64[]
 
 Random.seed!(2022)
 for sim in 1:10
+    # simulate X
+    Random.seed!(sim)
+    n = 1000 # sample size
+    p = 200  # number of covariates
+    k = 10   # number of true predictors
+    Σ = Matrix(SymmetricToeplitz(0.9.^(0:(p-1)))) # true covariance matrix
+    groupsizes = [5 for i in 1:div(p, 5)] # each group has 5 variables
+    groups = vcat([i*ones(g) for (i, g) in enumerate(groupsizes)]...) |> Vector{Int}
+    true_mu = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L
+    zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
+
     # simulate y
     βtrue = zeros(p)
     βtrue[1:k] .= rand(-1:2:1, k) .* 0.1
@@ -198,68 +196,39 @@ for sim in 1:10
     ϵ = randn(n)
     y = X * βtrue + ϵ;
 
-    # equi-group knockoffs
-    t = @elapsed ko_filter = fit_lasso(y, X, method=:equi, groups=groups)
-    idx = findfirst(x -> x == target_fdr, ko_filter.fdr_target)
+    # group MVR knockoffs
+    t = @elapsed ko_filter = fit_lasso(y, X, method=:maxent, groups=groups)
     power = round(TP(correct_groups, ko_filter.βs[idx], groups), digits=3)
     fdr = round(FDR(correct_groups, ko_filter.βs[idx], groups), digits=3)
-    println("Simulation $sim equi-group knockoffs power = $power, FDR = $fdr, time=$t")
-    push!(equi_powers, power)
-    push!(equi_fdrs, fdr)
-    push!(equi_times, t)
-    
-    # SDP-group knockoffs
-    t = @elapsed ko_filter = fit_lasso(y, X, method=:sdp, groups=groups)
-    power = round(TP(correct_groups, ko_filter.βs[idx], groups), digits=3)
-    fdr = round(FDR(correct_groups, ko_filter.βs[idx], groups), digits=3)
-    println("Simulation $sim SDP-group knockoffs power = $power, FDR = $fdr, time=$t")
-    push!(sdp_powers, power)
-    push!(sdp_fdrs, fdr)
-    push!(sdp_times, t)
+    println("Sim $sim group-knockoff power = $power, FDR = $fdr, time=$t")
+    push!(group_powers, power); push!(group_fdrs, fdr); push!(group_times, t)
+    GC.gc();GC.gc();GC.gc();
 end
 
-println("\nEqui-correlated group knockoffs have average group power $(mean(equi_powers))")
-println("Equi-correlated group knockoffs have average group FDR $(mean(equi_fdrs))");
-println("Equi-correlated group knockoffs took average $(mean(equi_times)) seconds");
-
-println("\nSDP group knockoffs have average group power $(mean(sdp_powers))")
-println("SDP group knockoffs have average group FDR $(mean(sdp_fdrs))");
-println("SDP group knockoffs took average $(mean(sdp_times)) seconds");
+println("\nME group knockoffs have average group power $(mean(group_powers))")
+println("ME group knockoffs have average group FDR $(mean(group_fdrs))")
+println("ME group knockoffs took average $(mean(group_times)) seconds");
 ```
 
-    Simulation 1 equi-group knockoffs power = 0.125, FDR = 0.0, time=2.053749326
-    Simulation 1 SDP-group knockoffs power = 0.0, FDR = 0.0, time=6.45688248
-    Simulation 2 equi-group knockoffs power = 0.0, FDR = 0.0, time=1.777067223
-    Simulation 2 SDP-group knockoffs power = 0.125, FDR = 0.5, time=2.843801253
-    Simulation 3 equi-group knockoffs power = 0.333, FDR = 0.0, time=3.566960454
-    Simulation 3 SDP-group knockoffs power = 0.0, FDR = 0.0, time=2.373457417
-    Simulation 4 equi-group knockoffs power = 0.333, FDR = 0.0, time=1.670845043
-    Simulation 4 SDP-group knockoffs power = 0.333, FDR = 0.0, time=2.79045689
-    Simulation 5 equi-group knockoffs power = 0.25, FDR = 0.0, time=1.317231961
-    Simulation 5 SDP-group knockoffs power = 0.375, FDR = 0.0, time=6.14065572
-    Simulation 6 equi-group knockoffs power = 0.333, FDR = 0.0, time=1.737344252
-    Simulation 6 SDP-group knockoffs power = 0.667, FDR = 0.333, time=3.045115028
-    Simulation 7 equi-group knockoffs power = 0.125, FDR = 0.0, time=1.873825217
-    Simulation 7 SDP-group knockoffs power = 0.5, FDR = 0.0, time=4.890016678
-    Simulation 8 equi-group knockoffs power = 0.111, FDR = 0.0, time=1.986784703
-    Simulation 8 SDP-group knockoffs power = 0.667, FDR = 0.143, time=2.524734588
-    Simulation 9 equi-group knockoffs power = 0.556, FDR = 0.0, time=1.600709261
-    Simulation 9 SDP-group knockoffs power = 0.444, FDR = 0.0, time=2.742993123
-    Simulation 10 equi-group knockoffs power = 0.5, FDR = 0.429, time=1.599380885
-    Simulation 10 SDP-group knockoffs power = 0.25, FDR = 0.0, time=2.205388288
+    Sim 1 group-knockoff power = 0.0, FDR = 0.0, time=5.356796708
+    Sim 2 group-knockoff power = 0.1, FDR = 0.0, time=3.846174709
+    Sim 3 group-knockoff power = 0.222, FDR = 0.0, time=2.418540375
+    Sim 4 group-knockoff power = 0.4, FDR = 0.2, time=3.774003875
+    Sim 5 group-knockoff power = 0.4, FDR = 0.0, time=2.337522042
+    Sim 6 group-knockoff power = 0.0, FDR = 0.0, time=3.913260458
+    Sim 7 group-knockoff power = 0.222, FDR = 0.333, time=2.531130667
+    Sim 8 group-knockoff power = 0.0, FDR = 0.0, time=3.927257125
+    Sim 9 group-knockoff power = 0.0, FDR = 0.0, time=3.9803245
+    Sim 10 group-knockoff power = 0.1, FDR = 0.0, time=2.300255291
     
-    Equi-correlated group knockoffs have average group power 0.2666
-    Equi-correlated group knockoffs have average group FDR 0.0429
-    Equi-correlated group knockoffs took average 1.9183898324999997 seconds
-    
-    SDP group knockoffs have average group power 0.33609999999999995
-    SDP group knockoffs have average group FDR 0.09759999999999999
-    SDP group knockoffs took average 3.6013501465000006 seconds
+    ME group knockoffs have average group power 0.1444
+    ME group knockoffs have average group FDR 0.0533
+    ME group knockoffs took average 3.438526575 seconds
 
 
 ## Conclusion
 
-+ Both equicorrelated and SDP group knockoffs control the group FDR to be below the target FDR level. 
-+ SDP group knockoffs have slightly better power than equi-correlated group knockoffs
-+ Equi-correlated knockoffs are ~2x faster to construct than group-SDP (for $p=100$ covariates and 20 groups). On a separate test with 200 groups and 5 features per group ($p = 1000$), SDP construction were ~45x slower. 
++ When variables are highly correlated so that one cannot find exact discoveries, group knockoffs may be useful as it identifies whether a group of variables are non-null without having to pinpoint the exact discovery.
++ Group knockoffs control the group FDR to be below the target FDR level. 
++ Groups do not have to be contiguous
 

@@ -4,6 +4,11 @@
 Returns a `Vector{Int}` that includes the selected variables
 
 # Inputs
++ `β`: mp × 1 vector of estimated beta for the original and knockoff features
++ `original`: p × 1 vector of indices storing which columns of XX̃ contains the original features
++ `knockoff`: mp × 1 vector of indices storing which columns of XX̃ contains the knockoff features
++ `fdr`: Target FDR level, a number between 0 and 1
++ `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default) 
 """
 function select_features(
     β::AbstractVector{T}, 
@@ -102,7 +107,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     filter_method::Symbol=:knockoff_plus
     ) where T <: AbstractFloat
     # first handle errors
-    p = length(β̂_knockoff) >> 1
+    p = length(original)
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     # select variables using knockoff filter
     selected_idx = select_features(β̂_knockoff, original, knockoff, fdr, filter_method=filter_method)

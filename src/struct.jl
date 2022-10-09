@@ -23,17 +23,26 @@ struct ApproxGaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S<:Symmetric}
     X::M # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::BlockDiagonal{T, S} # p × p block-diagonal covariance matrix. 
+    Σ::S # p × p block-diagonal covariance matrix. 
     method::Symbol # method for solving s
 end
 
-struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:BlockDiagonal, S<:Symmetric} <: Knockoff
+struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric} <: Knockoff
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
+    groups::Vector{Int} # p × 1 vector of group membership
     S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
     γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
+end
+
+struct MergedKnockoff{T} <: Knockoff
+    XX̃::Matrix{T} # n × (m+1)p matrix of original features
+    original::Vector{Int} # p × 1 vector of indices storing which columns of XX̃ contains the original features
+    knockoff::Vector{Int} # mp × 1 vector of indices storing which columns of XX̃ contains the knockoff features
+    p::Int # number of original features
+    m::Int # number of knockoffs per feature
 end
 
 # 1 state of a markov chain
@@ -88,8 +97,9 @@ level `q`
 """
 struct KnockoffFilter{T}
     y :: Vector{T} # n × 1 response vector
-    X :: Matrix{T} # n × p matrix of original X and its knockoff interleaved randomly
-    X̃ :: Matrix{T} # n × p matrix of X knockoff
+    X :: Matrix{T} # n × p matrix of original features
+    ko :: Knockoff # A knockoff struct
+    merged_ko :: Knockoff # A MergedKnockoff struct
     m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs

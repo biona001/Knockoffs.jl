@@ -25,17 +25,17 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 """
 function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     m < 1 && error("m should be 1 or larger but was $m.")
-    m > 1 && method ∈ [:equi, :sdp, :sdp_fast] && 
-        error("Currently only :mvr and :maxent knockoffs support multiple knockoffs!")
+    m > 1 && method ∈ [:sdp_fast] && 
+        error("Currently :sdp_fast does not support multiple knockoffs!")
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Σ.data, σs)
+    Σcor = iscor ? Σ : StatsBase.cov2cor(Σ.data, σs)
     # solve optimization problem
     if method == :equi
-        s = solve_equi(Σcor)
+        s = solve_equi(Σcor; m=m)
     elseif method == :sdp
-        s = solve_SDP(Σcor)
+        s = solve_SDP(Σcor; m=m)
     elseif method == :mvr
         s = solve_MVR(Σcor; m=m, kwargs...)
     elseif method == :maxent
@@ -61,18 +61,23 @@ https://arxiv.org/pdf/1610.02351.pdf
 
 # Arguments
 + `Σ`: A correlation matrix (diagonals all equal to 1)
++ `m`: Number of knockoffs to generate, defaults to 1
 + `optm`: SDP solver. Defaults to `Hypatia.Optimizer(verbose=false)`. This can
     be any solver that supports the JuMP interface. For example, use 
     `SDPT3.Optimizer` in SDPT3.jl package (which is a MATLAB dependency)
     for the best performance. 
 """
-function solve_SDP(Σ::AbstractMatrix, optm=Hypatia.Optimizer(verbose=false))
+function solve_SDP(
+    Σ::AbstractMatrix; # correlation matrix
+    m::Int = 1, # number of multiple knockoffs to generate
+    optm=Hypatia.Optimizer(verbose=false) # Any solver compatible with JuMP
+    )
     # Build model via JuMP
     p = size(Σ, 1)
     model = Model(() -> optm)
     @variable(model, 0 ≤ s[i = 1:p] ≤ 1)
     @objective(model, Max, sum(s))
-    @constraint(model, Symmetric(2Σ - diagm(s[1:p])) in PSDCone())
+    @constraint(model, Symmetric((m+1)/m*Σ - diagm(s[1:p])) in PSDCone())
     # Solve optimization problem
     JuMP.optimize!(model)
     # Retrieve solution
@@ -97,12 +102,12 @@ Solves the equicorrelated problem for fixed-X and model-X knockoffs given
 correlation matrix Σ. Users should call `solve_s` instead of this function. 
 """
 function solve_equi(
-    Σ::AbstractMatrix{T},
-    λmin::Union{Nothing, T} = nothing
+    Σ::AbstractMatrix{T}; # correlation matrix
+    m::Int = 1 # number of multiple knockoffs to generate
     ) where T
-    isnothing(λmin) && (λmin = eigmin(Σ))
-    s = min(1, 2*λmin) .* ones(size(Σ, 1))
-    return s
+    λmin = eigmin(Σ)
+    sj = min(1, (m+1)/m * λmin)
+    return fill(sj, size(Σ, 1))
 end
 
 """
@@ -117,17 +122,17 @@ reconstructability" by Spector, Asher, and Lucas Janson (2020)
 https://arxiv.org/pdf/2011.14625.pdf
 """
 function solve_MVR(
-    Σ::AbstractMatrix{T};
-    s_init = fill(eigmin(Σ), size(Σ, 1)), # initialize s vector with min eigenvalue of Σ if not supplied
+    Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
     m::Int = 1, # number of knockoffs per variable
+    s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -146,7 +151,7 @@ function solve_MVR(
             abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
-            ej[j] = sqrt(abs(m*δj))
+            ej[j] = sqrt(abs(δj))
             δj > 0 ? lowrankdowndate_turbo!(L, ej) : lowrankupdate_turbo!(L, ej)
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
@@ -170,12 +175,12 @@ end
 
 function solve_quadratic(cn, cd, Sjj, m, verbose=false)
     a = -cn - cd^2*m^2
-    b = 2*(-cn*Sjj + cd*m)
-    c = -cn*Sjj^2 - 1
+    b = 2*(-cn*Sjj + cd*m^2)
+    c = -cn*Sjj^2 - m^2
     a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
     x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
-    δj = -Sjj < x1 < inv(cd*m) ? x1 : x2
+    δj = -Sjj < x1 < inv(cd) ? x1 : x2
     isinf(δj) && error("δj is Inf, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     isnan(δj) && error("δj is NaN, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
     verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
@@ -203,41 +208,41 @@ of the FANOK paper, it seems like the actual update should be
 where `ζ = 2Σ_{jj} - s_j`.
 """
 function solve_max_entropy(
-    Σ::AbstractMatrix{T};
-    s_init = fill(eigmin(Σ), size(Σ, 1)), # initialize s vector with min eigenvalue of Σ if not supplied
+    Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
     m::Int = 1, # number of knockoffs per variable
+    s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)Σ - m*Diagonal(s)))
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
         max_delta = zero(T)
         for j in 1:p
             @simd for i in 1:p
-                ỹ[i] = (m + 1) * Σ[i, j]
+                ỹ[i] = (m+1)/m * Σ[i, j]
             end
             ỹ[j] = 0
             # compute x as the solution to L*x = ỹ
             ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
-            ζ = (m+1)*Σ[j, j] - m*s[j]
+            ζ = (m+1)/m * Σ[j, j] - s[j]
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # solve optimality condition in eq 75 of spector et al 2020
-            sj_new = ((m+1)*Σ[j, j] - c) / (m+1)
-            δ = s[j] - sj_new
+            sj_new = ((m+1)/m * Σ[j, j] - c) / 2
+            δ = sj_new - s[j]
             abs(δ) < 1e-15 && continue
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
-            x[j] = sqrt(m*abs(δ))
-            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
+            x[j] = sqrt(abs(δ))
+            δ > 0 ? lowrankdowndate_turbo!(L, x) : lowrankupdate_turbo!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
@@ -315,13 +320,13 @@ specified, then the process is stationary with correlation
 # Source
 https://github.com/amspector100/knockpy/blob/20eddb3eb60e0e82b206ec989cb936e3c3ee7939/knockpy/dgp.py#L61
 """
-function simulate_AR1(p::Int, a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
+function simulate_AR1(p::Int; a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
     # Generate rhos, take log to make multiplication easier
     d = Beta(a, b)
     if isnothing(rho)
         rhos = log.(clamp!(rand(d, p), 0, max_corr))
     else
-        abs(rho) > 1 || error("rho $rho must be a correlation between -1 and 1")
+        abs(rho) > 1 && error("rho must be a correlation between -1 and 1")
         rhos = log.([rho for _ in 1:p])
     end
     rhos[1] = 0
@@ -446,6 +451,10 @@ Interleaves the original PLINK genotypes with its knockoff into a single PLINK f
 + `xfull`: A `n × 2p` array of original and knockoff genotypes. 
 + `original`: Indices of original genotypes. `original[i]` is the column number for the `i`th SNP. 
 + `knockoff`: Indices of knockoff genotypes. `knockoff[i]` is the column number for the `i`th SNP. 
+
+# todo
++ Handle for >1 knockoffs per feature
++ Also need to output groups membership vector
 """
 function merge_knockoffs_with_original(
     xdata::SnpData,
@@ -496,6 +505,9 @@ end
     merge_knockoffs_with_original(X, X̃)
 
 Merges the original variables `X` with its knockoffs `X̃`, shuffling their index. 
+This is done because, in Lasso, when 2 variables are highly correlated, the one 
+listed first tends to get selected. This shuffle helps ensure the Wj statistics 
+in Knockoffs satisfy the flip sign property. 
 """
 function merge_knockoffs_with_original(
     X::AbstractMatrix{T},
@@ -521,7 +533,7 @@ function merge_knockoffs_with_original(
             push!(knockoff, knoc)
         end
     end
-    return Xfull, original, knockoff
+    return MergedKnockoff(Xfull, original, knockoff, m, p)
 end
 
 """
@@ -648,7 +660,6 @@ function simulate_block_covariance(
     ρ::T, # within group correlation 
     γ::T # between group correlation
     ) where T <: AbstractFloat
-    p = length(groups)
     issorted(groups) || error("groups needs to be a sorted vector (i.e. continuous)")
     # form block diagonals to handle within group correlation
     Σ = Matrix{Float64}[]
@@ -679,26 +690,34 @@ function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Abst
     #     conj!(v)
     # end
 
+    early_term = 0
     idx_start = something(findfirst(!iszero, v))
     @inbounds for i = idx_start:n
 
         # Compute Givens rotation
         c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
-        abs(s) < 1e-10 && break # early terminate
+
+        # check for early termination
+        if abs(s) < 1e-15
+            early_term += 1
+            early_term > 10 && break
+        else
+            early_term = 0
+        end
 
         # Store new diagonal element
         A[i,i] = r
 
         # Update remaining elements in row/column
         if C.uplo == 'U'
-            @turbo for j = i + 1:n
+            for j = i + 1:n
                 Aij = A[i,j]
                 vj  = v[j]
                 A[i,j]  =   c*Aij + s*vj
                 v[j]    = -s*Aij + c*vj
             end
         else
-            @turbo for j = i + 1:n
+            for j = i + 1:n
                 Aji = A[j,i]
                 vj  = v[j]
                 A[j,i]  =   c*Aji + s*vj
@@ -725,6 +744,7 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
     #     conj!(v)
     # end
 
+    early_term = 0
     idx_start = something(findfirst(!iszero, v))
     @inbounds for i = idx_start:n
 
@@ -737,21 +757,28 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
             throw(LinearAlgebra.PosDefException(i))
         end
         c = sqrt(1 - abs2(s))
-        abs(s) < 1e-10 && break # early termination
+
+        # check for early termination
+        if abs(s) < 1e-15
+            early_term += 1
+            early_term > 10 && break
+        else
+            early_term = 0
+        end
 
         # Store new diagonal element
         A[i,i] = c*Aii
 
         # Update remaining elements in row/column
         if C.uplo == 'U'
-            @turbo for j = i + 1:n
+            for j = i + 1:n
                 vj = v[j]
                 Aij = (A[i,j] - s*vj)/c
                 A[i,j] = Aij
                 v[j] = -s*Aij + c*vj
             end
         else
-            @turbo for j = i + 1:n
+            for j = i + 1:n
                 vj = v[j]
                 Aji = (A[j,i] - s*vj)/c
                 A[j,i] = Aji
