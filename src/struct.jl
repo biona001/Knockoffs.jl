@@ -23,7 +23,7 @@ struct ApproxGaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S<:Symmetric}
     X::M # n × p design matrix
     X̃::Matrix{T} # n × p knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
-    Σ::BlockDiagonal{T, S} # p × p block-diagonal covariance matrix. 
+    Σ::S # p × p block-diagonal covariance matrix. 
     method::Symbol # method for solving s
 end
 

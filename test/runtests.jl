@@ -201,11 +201,12 @@ end
     # merge_knockoffs_with_original
     X = randn(500, 200)
     X̃ = randn(500, 800)
-    Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
-    @test size(Xfull) == (500, 1000)
-    @test length(original) == 200
-    @test length(knockoff) == 800
-    @test all(Xfull[:, original] .== X)
+    # Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
+    merged = merge_knockoffs_with_original(X, X̃)
+    @test size(merged.XX̃) == (500, 1000)
+    @test length(merged.original) == 200
+    @test length(merged.knockoff) == 800
+    @test all(merged.XX̃[:, merged.original] .== X)
 end
 
 @testset "coefficient_diff" begin
@@ -309,9 +310,9 @@ end
     @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
 
     # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
-    @time sdp_filter = fit_lasso(y, Xko_sdp.X, Xko_sdp.X̃, debias=nothing)
-    @time mvr_filter = fit_lasso(y, Xko_mvr.X, Xko_mvr.X̃, debias=nothing)
-    @time me_filter = fit_lasso(y, Xko_maxent.X, Xko_maxent.X̃, debias=nothing)
+    @time sdp_filter = fit_lasso(y, X, Xko_sdp, debias=nothing)
+    @time mvr_filter = fit_lasso(y, X, Xko_mvr, debias=nothing)
+    @time me_filter = fit_lasso(y, X, Xko_maxent, debias=nothing)
 
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
     for i in eachindex(sdp_filter.fdr_target)
@@ -399,9 +400,9 @@ end
 
     # run lasso, followed up by debiasing
     Random.seed!(seed)
-    @time nodebias = fit_lasso(y, Xko.X, Xko.X̃, debias=nothing)
+    @time nodebias = fit_lasso(y, X, Xko, debias=nothing)
     Random.seed!(seed)
-    @time yesdebias = fit_lasso(y, Xko.X, Xko.X̃, debias=:ls)
+    @time yesdebias = fit_lasso(y, X, Xko, debias=:ls)
 
     # check that debiased result have same support as not debiasing
     for i in eachindex(nodebias.fdr_target)
@@ -552,9 +553,9 @@ end
     @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
 
     # simulate some data
-    m = 200 # number of groups
+    m = 100 # number of groups
     pi = 5  # features per group
-    k = 20  # number of causal groups
+    k = 10  # number of causal groups
     ρ = 0.4 # within group correlation
     γ = 0.2 # between group correlation
     p = m * pi # number of features
@@ -567,33 +568,39 @@ end
     zscore!(X, mean(X, dims=1), std(X, dims=1));
 
     # exact group knockoffs
-    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi, Σ, true_mu)
-    S = ko_equi.S
-    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
-    @test all(x -> x == (pi, pi), size.(S.blocks))
+    m = 5 # 5 knockoffs per feature
 
-    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp, Σ, true_mu)
-    S = ko_sdp.S
-    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
-    @test all(x -> x == (pi, pi), size.(S.blocks))
+    @time equi = modelX_gaussian_group_knockoffs(X, :equi, groups, true_mu, Σ, m=m)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - equi.S))
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(equi.S))
+
+    @time sdp = modelX_gaussian_group_knockoffs(X, :sdp, groups, true_mu, Σ, m=m)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp.S))
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp.S))
+
+    @time mvr = modelX_gaussian_group_knockoffs(X, :mvr, groups, true_mu, Σ, m=m, tol=0.001, verbose=true)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - mvr.S))
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(mvr.S))
+
+    @time me = modelX_gaussian_group_knockoffs(X, :maxent, groups, true_mu, Σ, m=m, tol=0.001, verbose=true)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - me.S))
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(me.S))
 
     # second order knockoffs
-    @time ko_equi = modelX_gaussian_group_knockoffs(X, groups, :equi)
-    S = ko_equi.S
-    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
-    @test all(x -> x == (pi, pi), size.(S.blocks))
+    @time equi = modelX_gaussian_group_knockoffs(X, :equi, groups, m=m)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - equi.S))
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(equi.S))
 
-    @time ko_sdp = modelX_gaussian_group_knockoffs(X, groups, :sdp)
-    S = ko_sdp.S
-    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Matrix(2Σ - S)))
-    @test all(x -> x == (pi, pi), size.(S.blocks))
+    @time me = modelX_gaussian_group_knockoffs(X, :maxent, groups, m=m)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - me.S))
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(me.S))
 end
 
 @testset "group fit_lasso" begin
     # simulate some data
-    m = 200 # number of groups
+    m = 100 # number of groups
     pi = 5  # features per group
-    k = 20  # number of causal groups
+    k = 10  # number of causal groups
     ρ = 0.4 # within group correlation
     γ = 0.2 # between group correlation
     p = m * pi # number of features
@@ -651,11 +658,11 @@ end
     shuffle!(βtrue)
     correct_position = findall(!iszero, βtrue)
     y = X * βtrue + randn(n)
-    @time mvr_filter = fit_lasso(y, X, method=:mvr, m=3)
-    @time me_filter = fit_lasso(y, X, method=:maxent, m=5)
+    @time mvr_filter = fit_lasso(y, X, method=:mvr, m=3, filter_method=:knockoff_plus)
+    @time me_filter = fit_lasso(y, X, method=:maxent, m=5, filter_method=:knockoff_plus)
 
     @test size(mvr_filter.X) == (n, p)
-    @test size(mvr_filter.X̃) == (n, 3p)
+    @test size(mvr_filter.ko.X̃) == (n, 3p)
     @test size(me_filter.X) == (n, p)
-    @test size(me_filter.X̃) == (n, 5p)
+    @test size(me_filter.ko.X̃) == (n, 5p)
 end

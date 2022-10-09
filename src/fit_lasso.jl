@@ -27,7 +27,7 @@ function fit_lasso(
     m::Int = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff,
+    filter_method::Symbol = :knockoff_plus,
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
@@ -47,7 +47,7 @@ function fit_lasso(
     m::Int = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff,
+    filter_method::Symbol = :knockoff_plus,
     debias::Union{Nothing, Symbol} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T

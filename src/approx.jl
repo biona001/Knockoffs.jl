@@ -54,6 +54,7 @@ function approx_modelX_gaussian_knockoffs(
         covariance_approximator=covariance_approximator, kwargs...)
 end
 
+# todo: make sure Σ can stay as block diagonal
 function approx_modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
     method::Symbol,
@@ -82,7 +83,7 @@ function approx_modelX_gaussian_knockoffs(
         next!(pmeter)
     end
     # assemble block Σ, s, and mean components
-    Σ = BlockDiagonal(block_covariances)
+    Σ = BlockDiagonal(block_covariances) |> Matrix
     μ = vec(mean(X, dims=1))
     s = vcat(block_s...)
     # bisection search over γ ∈ [0, 1] to ensure diag(γs) ≤ 2Σ
