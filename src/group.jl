@@ -287,7 +287,7 @@ function solve_group_MVR_full(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                abs(δ) < 1e-15 && continue
+                abs(δ) < 1e-15 || isnan(δ) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
@@ -439,7 +439,7 @@ function solve_group_max_entropy_full(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                abs(δ) < 1e-15 && continue
+                abs(δ) < 1e-15 || isnan(δ) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
