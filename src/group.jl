@@ -177,7 +177,7 @@ function solve_group_MVR_full(
     tol=1e-6, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
-    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
@@ -337,7 +337,7 @@ function solve_group_max_entropy_full(
     tol=1e-6, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
-    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
