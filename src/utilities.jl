@@ -127,9 +127,13 @@ function solve_MVR(
     tol=1e-6, # converges when changes in s are all smaller than tol
     m::Int = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
+    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
@@ -152,7 +156,7 @@ function solve_MVR(
             s[j] += δj
             # rank 1 update to cholesky factor
             ej[j] = sqrt(abs(δj))
-            δj > 0 ? lowrankdowndate_turbo!(L, ej) : lowrankupdate_turbo!(L, ej)
+            δj > 0 ? choldowndate!(L, ej) : cholupdate!(L, ej)
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
         end
@@ -213,9 +217,13 @@ function solve_max_entropy(
     tol=1e-6, # converges when changes in s are all smaller than tol
     m::Int = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
+    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
@@ -242,7 +250,7 @@ function solve_max_entropy(
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankdowndate_turbo!(L, x) : lowrankupdate_turbo!(L, x)
+            δ > 0 ? choldowndate!(L, x) : cholupdate!(L, x)
             # update convergence tol
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
@@ -268,10 +276,14 @@ function solve_sdp_fast(
     μ::T = 0.8, # decay parameter
     niter::Int = 100,
     tol=1e-6, # converges when lambda < tol?
+    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     0 ≤ μ ≤ 1 || error("Decay parameter μ must be in [0, 1] but was $μ")
     0 < λ || error("Barrier coefficient λ must be > 0 but was $λ")
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     p = size(Σ, 1)
     s = zeros(T, p)
@@ -299,7 +311,7 @@ function solve_sdp_fast(
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? lowrankupdate_turbo!(L, x) : lowrankdowndate_turbo!(L, x)
+            δ > 0 ? cholupdate!(L, x) : choldowndate!(L, x)
         end
         # check convergence 
         λ *= μ
