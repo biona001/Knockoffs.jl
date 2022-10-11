@@ -128,7 +128,7 @@ function solve_MVR(
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
-    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
@@ -222,7 +222,7 @@ function solve_max_entropy(
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
-    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
@@ -288,7 +288,7 @@ function solve_sdp_fast(
     μ::T = 0.8, # decay parameter
     niter::Int = 100,
     tol=1e-6, # converges when lambda < tol?
-    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     0 ≤ μ ≤ 1 || error("Decay parameter μ must be in [0, 1] but was $μ")
