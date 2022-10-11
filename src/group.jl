@@ -185,7 +185,7 @@ function solve_group_MVR_full(
     group_sizes = size.(Sblocks.blocks, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S = convert(Matrix{T}, S + λmin*I)
@@ -345,7 +345,7 @@ function solve_group_max_entropy_full(
     group_sizes = size.(Sblocks.blocks, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S = convert(Matrix{T}, S + λmin*I)

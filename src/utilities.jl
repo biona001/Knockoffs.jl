@@ -125,6 +125,7 @@ function solve_MVR(
     Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -133,10 +134,10 @@ function solve_MVR(
     p = size(Σ, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -152,6 +153,9 @@ function solve_MVR(
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j], m)
+            # ensure s[j] + δj is in feasible region
+            ub = 1 / cd - λmin
+            δj > ub && (δj = ub)
             abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
@@ -215,6 +219,7 @@ function solve_max_entropy(
     Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -223,10 +228,10 @@ function solve_max_entropy(
     p = size(Σ, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + 0.00001I)
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -244,8 +249,15 @@ function solve_max_entropy(
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # solve optimality condition in eq 75 of spector et al 2020
             sj_new = ((m+1)/m * Σ[j, j] - c) / 2
+            # ensure new s[j] is in feasible region
+            fill!(x, 0)
+            x[j] = 1
+            ldiv!(ỹ, UpperTriangular(L.factors)', x) # non-allocating version of ldiv!(ỹ, L.L, x)
+            ub = 1 / sum(abs2, ỹ) - λmin
             δ = sj_new - s[j]
+            δ > ub && (δ = ub)
             abs(δ) < 1e-15 && continue
+            # update s
             s[j] = sj_new
             # rank 1 update to cholesky factor
             fill!(x, 0)
@@ -283,7 +295,7 @@ function solve_sdp_fast(
     0 < λ || error("Barrier coefficient λ must be > 0 but was $λ")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     p = size(Σ, 1)
     s = zeros(T, p)
