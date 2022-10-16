@@ -462,7 +462,8 @@ end
 normalize_col(X) = normalize_col!(copy(X))
 
 """
-    merge_knockoffs_with_original(xdata, x̃data; des::AbstractString = "knockoff")
+    merge_knockoffs_with_original(xdata::SnpData, x̃data::SnpData; des::AbstractString = "knockoff")
+    merge_knockoffs_with_original(xdata::AbstractString, x̃data::AbstractString; des::AbstractString = "knockoff")
 
 Interleaves the original PLINK genotypes with its knockoff into a single PLINK file.
 
@@ -530,8 +531,17 @@ end
 
 Merges the original variables `X` with its knockoffs `X̃`, shuffling their index. 
 This is done because, in Lasso, when 2 variables are highly correlated, the one 
-listed first tends to get selected. This shuffle helps ensure the Wj statistics 
-in Knockoffs satisfy the flip sign property. 
+listed first tends to get selected. Shuffling the original and knockoff indicies
+helps ensure the Wj statistics in Knockoffs satisfy the flip sign property. 
+
+# Input
++ `X`: n × p matrix where each column is a feature
++ `X̃`: n × mp matrix, here `X̃ = [X̃1 X̃2 ... X̃m]`
+
+# Output
++ A `MergedKnockoff` struct. Here `MergedKnockoff.XX̃` is the n × (m+1)p matrix where
+    the first m+1 columns stores the first feature and its knockoffs, the next m+1
+    columns stores the 2nd feature and its m knockoffs...etc
 """
 function merge_knockoffs_with_original(
     X::AbstractMatrix{T},
@@ -540,7 +550,7 @@ function merge_knockoffs_with_original(
     n, p = size(X)
     m = Int(size(X̃, 2) / p) # number of knockoffs per feature
     Xfull = zeros(n, (m + 1) * p)
-    original, knockoff = sizehint!(Int[], p), sizehint!(Int[], m * p)
+    original, knockoff = sizehint!(Int[], p), [sizehint!(Int[], m) for _ in 1:p]
     cur_range = zeros(Int, m + 1)
     for i in 1:p
         # fill next m + 1 columns of Xfull with the ith feature and its m knockoffs
@@ -554,7 +564,7 @@ function merge_knockoffs_with_original(
         for j in 1:m
             knoc = cur_range[j + 1]
             Xfull[:, knoc] .= @view(X̃[:, p * (j - 1) + i])
-            push!(knockoff, knoc)
+            push!(knockoff[i], knoc)
         end
     end
     return MergedKnockoff(Xfull, original, knockoff, m, p)

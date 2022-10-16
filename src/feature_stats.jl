@@ -1,41 +1,123 @@
 """
     select_features(β, original, knockoff, fdr, [method])
+    select_features(β, original, knockoff, groups, fdr, [method])
 
-Returns a `Vector{Int}` that includes the selected variables
+Returns a `Vector{Int}` that includes the selected variables. 
 
 # Inputs
 + `β`: mp × 1 vector of estimated beta for the original and knockoff features
 + `original`: p × 1 vector of indices storing which columns of XX̃ contains the original features
-+ `knockoff`: mp × 1 vector of indices storing which columns of XX̃ contains the knockoff features
++ `knockoff`: p × 1 vector of where knockoff[i] is a length m vector storing which 
+    columns of XX̃ contains the `i`th knockoffs
++ `groups`: mp × 1 vector of indices storing group membership for each column of XX̃
 + `fdr`: Target FDR level, a number between 0 and 1
-+ `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default) 
++ `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default)
++ `mk_filter`: Choices are `Statistics.median` (default) or `maximum`. The original paper by Gimenez 
+    and Zou uses `maximum` but He et al (https://www.nature.com/articles/s41467-021-22889-4)
+    propose uses median which seems to be more stable in practice
 """
 function select_features(
     β::AbstractVector{T}, 
     original::AbstractVector{Int}, 
-    knockoff::AbstractVector{Int},
+    knockoff::Vector{Vector{Int}},
     fdr::Number;
-    filter_method::Symbol=:knockoff_plus
+    filter_method::Symbol=:knockoff_plus,
+    mk_filter = Statistics.median
     ) where T
-    p = length(original)
-    length(β) == p + length(knockoff) || 
+    p = length(knockoff)
+    m = length(knockoff[1])
+    length(original) == p || error("Expected length(original) == length(knockoff)")
+    length(β) == (m + 1) * p || 
         error("β should contain effect sizes of original variables and their knockoffs")
-    m = Int(length(knockoff) / p)
     if m == 1 # single knockoff uses coefficient-difference statistic
-        W = coefficient_diff(β, original, knockoff)
+        W = coefficient_diff(β, original, vcat(knockoff...))
         τ = threshold(W, fdr, filter_method)
         return findall(x -> x ≥ τ, W)
     end
     # multiple simultaneous knockoffs
-    κ, τ = zeros(Int, p), zeros(T, p)
-    importance_scores = zeros(T, m + 1) # first entry stores score for the original feature
+    κ = zeros(Int, p) # κ[i] stores which of m knockoffs has largest importance score (κ[i]==0 if original variable has largest score)
+    τ = zeros(T, p)   # τ[i] stores (T0 - mk_filter(T1,...,Tm)) where T0,...,Tm are ordered statistics
+    W = zeros(T, p)   # W[i] stores (original_effect - mk_filter(importance scores of knockoffs)) * I(original beta has largest effect compared to all its knockoffs)
+    T̃ = zeros(T, m)   # preallocated vector storing feature importance score for knockoff
+    ordered = zeros(T, m + 1) # preallocated vector storing ordered statistics of the m+1 variables
     for i in 1:p
-        importance_scores[1] = abs(β[original[i]])
+        # compute importance score of original feature and its m knockoffs
+        original_effect = abs(β[original[i]])
         for j in 1:m
-            importance_scores[j + 1] = abs(β[knockoff[p * (j - 1) + i]])
+            T̃[j] = abs(β[knockoff[i][j]])
         end
-        κ[i] = argmax(importance_scores)
-        τ[i] = maximum(importance_scores) - importance_scores[partialsortperm(importance_scores, 2, rev=true)]
+        # find index of largest importance score among m+1 (original + m knockoff) features
+        T̃max, max_idx = findmax(T̃)
+        if T̃max > original_effect
+            κ[i] = max_idx
+        end
+        # compute ordered statistic among the original feature and its m knockoffs
+        ordered[1] = original_effect
+        ordered[2:end] .= T̃
+        sort!(ordered, rev=true)
+        # compute importance statistic for current feature
+        T0 = ordered[1]
+        τ[i] = T0 - mk_filter(@view(ordered[2:end]))
+        W[i] = (original_effect - mk_filter(T̃)) * (original_effect ≥ T̃max)
+    end
+    # compute multi-knockoff selection threshold
+    τ̂ = mk_threshold(τ, κ, m, fdr, filter_method)
+    # compute selected indices based on τ̂
+    selected = Int[]
+    for i in 1:p
+        if W[i] ≥ τ̂
+            push!(selected, i)
+        end
+    end
+    return selected
+end
+
+function select_features(
+    β::AbstractVector{T}, # length (m+1)×p  (first m+1 entries are feature 1 and its m knockoffs...etc)
+    original::AbstractVector{Int}, # length p
+    knockoff::Vector{Vector{Int}}, # length p where each knockoff[i] is length m
+    groups::AbstractVector{Int}, # length (m+1)×p
+    fdr::Number;
+    filter_method::Symbol=:knockoff_plus,
+    mk_filter = Statistics.median
+    ) where T
+    unique_groups = unique(groups)
+    p = length(knockoff) # number of features
+    m = length(knockoff[1]) # number of knockoffs per feature
+    g = length(unique_groups) # number of groups
+    length(original) == p || error("Expected length(original) == length(knockoff)")
+    length(β) == (m + 1) * p || 
+        error("β should contain effect sizes of original variables and their knockoffs")
+    if m == 1 # single knockoff uses coefficient-difference statistic
+        W = coefficient_diff(β, groups, original, vcat(knockoff...))
+        τ = threshold(W, fdr, filter_method)
+        return findall(x -> x ≥ τ, W) # returns selected groups
+    end
+    # multiple simultaneous knockoffs
+    κ = zeros(Int, g) # κ[i] stores which of m knockoff groups has largest importance score (κ[i]==0 if original group has largest score)
+    τ = zeros(T, g)   # τ[i] stores (T0 - median(T1,...,Tm)) (in Gimenez and Zou, the max function is used instead of median)
+    W = zeros(T, g)   # W[i] stores τ[i] * I(T0 > max(T1,...,Tm))
+    T̃ = zeros(T, m)   # preallocated vector, it stores feature importance score for knockoff
+    for i in unique_groups
+        # compute importance score of group i's original features
+        T0 = zero(T)
+        for j in findall(x -> x == i, groups) ∩ original
+            T0 += abs(β[j])
+        end
+        # compute importance score of group i's knockoffs
+        # for j in 1:m
+        #     for jj in 
+        #         T̃[j] = abs(β[knockoff[i][j]])
+        #     end
+        # end
+        # find index of largest importance score among m+1 (original + m knockoff) features
+        T̃max, max_idx = findmax(T̃)
+        if T̃max > T0
+            κ[i] = max_idx
+        end
+        # compute importance statistic for current feature
+        τ[i] = (T0 - mk_filter(T̃))
+        W[i] = τ[i] * (T0 ≥ T̃max)
     end
     τ̂ = mk_threshold(τ, κ, m, fdr, filter_method) # multi-knockoff selection threshold
     selected = Int[]
@@ -96,14 +178,14 @@ function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
 end
 
 """
-    extract_beta(β̂_knockoff::Vector, fdr::Number, original::Vector{Int}, knockoff::Vector{Int}, method=:knockoff)
-    extract_beta(β̂_knockoff::Vector, fdr::Number, groups::Vector{Int}, original::Vector{Int}, knockoff::Vector{Int}, method=:knockoff)
+    extract_beta(β̂_knockoff::Vector, fdr::Number, original::Vector{Int}, knockoff::Vector{Vector{Int}}, method=:knockoff)
+    extract_beta(β̂_knockoff::Vector, fdr::Number, groups::Vector{Int}, original::Vector{Int}, knockoff::Vector{Vector{Int}}, method=:knockoff)
 
 Given estimated β of original variables and their knockoffs in `β̂_knockoff`, 
 zeros out the effect of non-selected features. 
 """
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, 
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int},
+    original::AbstractVector{Int}, knockoff::Vector{Vector{Int}},
     filter_method::Symbol=:knockoff_plus
     ) where T <: AbstractFloat
     # first handle errors
@@ -119,19 +201,16 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     return β
 end
 
-# todo: make this work for multiple group knockoffs
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int}, filter_method=:knockoff_plus
+    original::AbstractVector{Int}, knockoff::Vector{Vector{Int}}, filter_method=:knockoff_plus
     ) where T <: AbstractFloat
     # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
-    # extract feature importance statistic
-    W = coefficient_diff(β̂_knockoff, groups, original, knockoff)
-    # find knockoff-filter threshold
-    τ = threshold(W, fdr, filter_method)
+    # select variables using knockoff filter
+    selected_groups = select_features(β̂_knockoff, original, knockoff, groups, fdr, filter_method=filter_method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, length(β̂_knockoff))
-    for g in findall(W .≥ τ)
+    for g in selected_groups
         group_idx = findall(x -> x == g, groups)
         β[group_idx] .= @view(β̂_knockoff[group_idx])
     end
