@@ -517,6 +517,7 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
++ `kwargs`: Extra keyword arguments for `solve_s_group`
 
 # Reference
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
@@ -525,14 +526,15 @@ function modelX_gaussian_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
     groups::AbstractVector{Int};
+    m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs...
+    kwargs... # extra arguments for solve_s_group
     ) where T
     # approximate covariance matrix
     Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox)
+    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox; m=m, kwargs...)
 end
 
 function modelX_gaussian_group_knockoffs(
@@ -541,6 +543,7 @@ function modelX_gaussian_group_knockoffs(
     groups::AbstractVector{Int},
     μ::AbstractVector{T},
     Σ::AbstractMatrix{T};
+    m::Int = 1,
     kwargs...
     ) where T
     # first check errors
@@ -551,11 +554,11 @@ function modelX_gaussian_group_knockoffs(
     iscor = all(x -> x ≈ 1, σs)
     Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
     # compute S matrix using the specified knockoff method
-    S, γs = solve_s_group(Σcor, groups, method; kwargs...)
+    S, γs = solve_s_group(Σcor, groups, method; m=m, kwargs...)
     # rescale S back to the result for a covariance matrix   
     iscor || StatsBase.cor2cov!(S, σs)
     # generate knockoffs
-    X̃ = condition(X, μ, Σ, S)
+    X̃ = condition(X, μ, Σ, S; m=m)
     return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
 end
 
@@ -626,7 +629,7 @@ function modelX_gaussian_group_knockoffs(
         Sblock_diag = BlockDiagonal(Sblocks)
         # compute block diagonal S matrix using the specified knockoff method
         @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
-        # rescale S back to the result for a covariance matrix   
+        # rescale S back to the result for a covariance matrix
         for (i, idx) in enumerate(group_ranges)
             StatsBase.cor2cov!(S.blocks[i], @view(σs[idx]))
         end

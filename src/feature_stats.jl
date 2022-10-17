@@ -95,34 +95,48 @@ function select_features(
     end
     # multiple simultaneous knockoffs
     κ = zeros(Int, g) # κ[i] stores which of m knockoff groups has largest importance score (κ[i]==0 if original group has largest score)
-    τ = zeros(T, g)   # τ[i] stores (T0 - median(T1,...,Tm)) (in Gimenez and Zou, the max function is used instead of median)
-    W = zeros(T, g)   # W[i] stores τ[i] * I(T0 > max(T1,...,Tm))
-    T̃ = zeros(T, m)   # preallocated vector, it stores feature importance score for knockoff
+    τ = zeros(T, g)   # τ[i] stores (T0 - median(T1,...,Tm)) where T0,...,Tm are ordered statistics
+    W = zeros(T, g)   # W[i] stores (original_effect - mk_filter(importance scores of knockoffs)) * I(original beta has largest effect compared to all its knockoffs)
+    T̃ = zeros(T, m)   # preallocated vector storing feature importance score for knockoff
+    ordered = zeros(T, m + 1) # preallocated vector storing ordered statistics of the m+1 variables
+    original_variable_groups = groups[original]
     for i in unique_groups
+        group_idx = findall(x -> x == i, groups)
         # compute importance score of group i's original features
-        T0 = zero(T)
-        for j in findall(x -> x == i, groups) ∩ original
-            T0 += abs(β[j])
+        original_effect = zero(T)
+        for j in group_idx ∩ original
+            original_effect += abs(β[j])
         end
         # compute importance score of group i's knockoffs
-        # for j in 1:m
-        #     for jj in 
-        #         T̃[j] = abs(β[knockoff[i][j]])
-        #     end
-        # end
+        # todo: make a better version of this stupid logic
+        fill!(T̃, 0)
+        group_var = findall(x -> x == i, original_variable_groups) # group_var are original variables that belong to current group
+        for j in group_var
+            # @show j
+            # @show knockoff[j]
+            for (idx, jj) in enumerate(knockoff[j])
+                # @show jj
+                T̃[idx] += abs(β[jj])
+            end
+        end
         # find index of largest importance score among m+1 (original + m knockoff) features
         T̃max, max_idx = findmax(T̃)
-        if T̃max > T0
+        if T̃max > original_effect
             κ[i] = max_idx
         end
+        # compute ordered statistic among the original feature and its m knockoffs
+        ordered[1] = original_effect
+        ordered[2:end] .= T̃
+        sort!(ordered, rev=true)
         # compute importance statistic for current feature
-        τ[i] = (T0 - mk_filter(T̃))
-        W[i] = τ[i] * (T0 ≥ T̃max)
+        T0 = ordered[1]
+        τ[i] = T0 - mk_filter(@view(ordered[2:end]))
+        W[i] = (original_effect - mk_filter(T̃)) * (original_effect ≥ T̃max)
     end
     τ̂ = mk_threshold(τ, κ, m, fdr, filter_method) # multi-knockoff selection threshold
     selected = Int[]
-    for i in 1:p
-        if τ[i] ≥ τ̂ && κ[i] == 1
+    for i in 1:g
+        if W[i] ≥ τ̂
             push!(selected, i)
         end
     end
