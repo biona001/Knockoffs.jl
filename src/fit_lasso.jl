@@ -28,7 +28,7 @@ function fit_lasso(
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff_plus,
-    debias::Union{Nothing, Symbol} = :ls,
+    debias::Union{Nothing, Symbol} = nothing,
     kwargs..., # arguments for glmnetcv
     ) where T
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
@@ -65,7 +65,7 @@ function fit_lasso(
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
-    debias::Union{Nothing, Symbol} = :ls,
+    debias::Union{Nothing, Symbol} = nothing,
     stringent::Bool = false,
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat

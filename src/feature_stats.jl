@@ -114,6 +114,9 @@ function select_features(
         for j in group_var
             # @show j
             # @show knockoff[j]
+
+            # todo: this might be wrong, because I shuffled the index of knockoffs
+            #       I think we need to ensure jj index over the order of the original variables
             for (idx, jj) in enumerate(knockoff[j])
                 # @show jj
                 T̃[idx] += abs(β[jj])

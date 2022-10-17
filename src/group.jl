@@ -287,7 +287,7 @@ function solve_group_MVR_full(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                abs(δ) < 1e-15 || isnan(δ) && continue
+                (abs(δ) < 1e-15 || isnan(δ)) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
@@ -324,7 +324,10 @@ function solve_group_MVR_full(
             end
             offset += group_sizes[b]
         end
-        verbose && println("Iter $l: δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        if verbose
+            obj = m^2*tr(inv(C.L * C.U)) + tr(inv(L.L * L.U))
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        end
         max_delta < tol && break 
     end
     return S, Float64[]
@@ -439,7 +442,7 @@ function solve_group_max_entropy_full(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                abs(δ) < 1e-15 || isnan(δ) && continue
+                (abs(δ) < 1e-15 || isnan(δ)) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
@@ -476,7 +479,10 @@ function solve_group_max_entropy_full(
             end
             offset += group_sizes[b]
         end
-        verbose && println("Iter $l: δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        if verbose
+            obj = logdet(L) + m*logdet(C)
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        end
         max_delta < tol && break 
     end
     return S, Float64[]
