@@ -49,7 +49,7 @@ function solve_s_group(
         S, γs = solve_group_equi(Σ, Sblocks; m=m)
     elseif method == :sdp_subopt
         S, γs = solve_group_SDP_subopt(Σ, Sblocks; m=m)
-    elseif method == :sdp_block
+    elseif method == :sdp
         S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
     elseif method == :sdp_full
         S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
@@ -870,6 +870,45 @@ function modelX_gaussian_group_knockoffs(
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
     return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
+end
+
+"""
+    partition_groups(X; [covariance_approximator], [cutoff])
+
+Computes a group partition based on input matrix `X` using single-linkage
+hierarchical clustering. We use a shrunken empirical correlation matrix as
+the distance matrix.
+
+# Inputs
++ `X`: Data matrix, each column is a feature
++ `covariance_approximator`: A covariance estimator, defaults to 
+    `LinearShrinkage(DiagonalUnequalVariance(), :lw)` which tends to give good
+    empirical performance when p>n. See CovarianceEstimation.jl for more options.
++ `cutoff`: Height value for which the clustering result is cut, between 0 and 1
+    (default 0.7). 1 recovers ungrouped structure, 0 corresponds to everything 
+    in a single group. 
++ `min_clusters`: The desired number of clusters. 
+
+If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
+number of clusters is not less than `min_clusters` and their height is not 
+above `cutoff`.
+"""
+function partition_groups(
+    X::AbstractMatrix;
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    cutoff = 0.7,
+    min_clusters = 1
+    )
+    # approximate correlation matrix
+    distmat = cov(covariance_approximator, X)
+    StatsBase.cov2cor!(distmat.data, sqrt.(diag(distmat.data)))
+    # convert correlation matrix to a distance matrix
+    @inbounds @simd for i in eachindex(distmat.data)
+        distmat.data[i] = 1 - distmat.data[i]
+    end
+    # hierarchical clustering
+    cluster_result = hclust(distmat; linkage=:single)
+    return cutree(cluster_result, h=1-cutoff, k=min_clusters)
 end
 
 # every `windowsize` SNPs form a group

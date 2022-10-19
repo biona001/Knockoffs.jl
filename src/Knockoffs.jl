@@ -26,6 +26,7 @@ using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
 using Ipopt
 using SCS
 using Optim: optimize, Brent # for group knockoffs
+using Clustering: hclust, cutree
 
 @reexport using GLM
 
@@ -60,7 +61,7 @@ export knockoff_filter,
     # utilities
     merge_knockoffs_with_original, simulate_AR1,
     download_1000genomes,
-    simulate_block_covariance
+    simulate_block_covariance, partition_groups
 
 include("struct.jl")
 include("fixed.jl")
