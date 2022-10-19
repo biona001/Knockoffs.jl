@@ -47,14 +47,18 @@ function solve_s_group(
     # solve optimization problem
     if method == :equi
         S, γs = solve_group_equi(Σ, Sblocks; m=m)
-    elseif method == :sdp
+    elseif method == :sdp_subopt
         S, γs = solve_group_SDP(Σ, Sblocks; m=m)
+    elseif method == :sdp_block
+        S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
     elseif method == :sdp_full
         S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
     elseif method == :mvr
-        S, γs = solve_group_MVR_full(Σ, Sblocks; m=m, kwargs...)
+        S, γs = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
     elseif method == :maxent
-        S, γs = solve_group_max_entropy_full(Σ, Sblocks; m=m, kwargs...)
+        S, γs = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
+    elseif method == :maxent_subopt
+        S, γs = solve_group_max_entropy_suboptimal(Σ, Sblocks)
     else
         error("Method can only be :equi, :sdp, or :maxent, but was $method")
     end
@@ -132,45 +136,141 @@ function solve_group_SDP(
     return S, γs
 end
 
-function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
-    model = Model(() -> Hypatia.Optimizer(verbose=false))
-    # model = Model(() -> SCS.Optimizer())
-    T = eltype(Σ)
-    p = size(Σ, 1)
-    group_sizes = size.(Σblocks.blocks, 1)
-    # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
-    @variable(model, S[1:p, 1:p], Symmetric)
-    # fix everything
-    for j in 1:p, i in j:p
-        fix(S[i, j], zero(T))
+"""
+    solve_group_SDP_single_block(Σ11, ub)
+
+Solves a single block of the fully general group SDP problem. The objective is
+    min  sum_{i,j} |Σ[i,j] - S[i,j]|
+    s.t. 0 ⪯ S ⪯ A11 - [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+
+# Inputs
++ `Σ11`: The block corresponding to the current group. Must be a correlation matrix. 
++ `ub`: The matrix defined as A11 - [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
++ `optm`: Any solver compatible with JuMP.jl
+"""
+function solve_group_SDP_single_block(
+    Σ11::AbstractMatrix,
+    ub::AbstractMatrix;  # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    optm=Hypatia.Optimizer(verbose=false) # Any solver compatible with JuMP
+    )
+    # Build model via JuMP
+    p = size(Σ11, 1)
+    model = Model(() -> optm)
+    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
+    # slack variables to handle absolute value in obj 
+    @variable(model, U[1:p, 1:p], Symmetric)
+    for i in 1:p, j in i:p
+        @constraint(model, Σ11[i, j] - S[i, j] ≤ U[i, j])
+        @constraint(model, -U[i, j] ≤ Σ11[i, j] - S[i, j])
     end
-    # free pertinent variables
-    idx = 0
-    for g in group_sizes
-        for j in 1:g, i in j:g
-            unfix(S[i + idx, j + idx])
-            set_lower_bound(S[i + idx, j + idx], zero(T))
-            set_upper_bound(S[i + idx, j + idx], one(T))
-        end
-        idx += g
-    end
-    @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
-    # @objective(model, Max, tr(S))
-    @objective(model, Max, sum(S))
+    @objective(model, Min, sum(U))
+    # SDP constraints
+    @constraint(model, S in PSDCone())
+    @constraint(model, ub - S in PSDCone())
+    # solve and return
     JuMP.optimize!(model)
-    check_model_solution(model)
-    # construct block diagonal S
-    Sm = convert(Matrix{T}, clamp!(JuMP.value.(S), 0, 1))
-    Sdata = Matrix{T}[]
-    idx = 0
-    for g in group_sizes
-        push!(Sdata, Symmetric(Sm[idx+1 : idx+g, idx+1 : idx+g]))
-        idx += g
-    end
-    return BlockDiagonal(Sdata), T[]
+    return JuMP.value.(S)
 end
 
-function solve_group_MVR_full(
+function solve_group_SDP_block_update(
+    Σ::AbstractMatrix, 
+    Sblocks::BlockDiagonal;
+    m::Int = 1,
+    tol=1e-6, # converges when changes in s are all smaller than tol
+    niter = 100, # max number of cyclic block updates
+    optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
+    verbose::Bool = false,
+    )
+    p = size(Σ, 1)
+    blocks = nblocks(Sblocks)
+    group_sizes = size.(Sblocks.blocks, 1)
+    perm = collect(1:p)
+    # initialize S/A/D matrices
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    A = (m+1)/m * Σ
+    D = A - S
+    for l in 1:niter
+        offset = 0
+        max_delta = zero(eltype(Σ))
+        for b in 1:blocks
+            # permute current group variables to upper left corner
+            g = group_sizes[b]
+            cur_idx = offset + 1:offset + g
+            perm[1:g] .= cur_idx
+            perm[cur_idx] .= 1:g
+            S .= @view(S[perm, perm])
+            A .= @view(A[perm, perm])
+            D .= @view(D[perm, perm])
+            # update constraints
+            Σ11 = @view(Σ[1:g, 1:g])
+            A11 = @view(A[1:g, 1:g])
+            D12 = @view(D[1:g, g + 1:end])
+            D22 = @view(D[g + 1:end, g + 1:end])
+            ub = A11 - D12 * inv(D22) * D12' # (todo: somehow avoid reallocating ub every iteration)
+            # solve SDP problem for current block (todo: warmstart, avoid reallocating S1_new)
+            S1_new = solve_group_SDP_single_block(Σ11, ub)
+            S1_old = @view(S[1:g, 1:g])
+            for i in eachindex(S1_new)
+                if abs(S1_new[i] - S1_old[i]) > max_delta
+                    max_delta = abs(S1_new[i] - S1_old[i])
+                end
+            end
+            S1_old .= S1_new
+            # repermute columns/rows of S back 
+            perm[1:g] .= 1:g
+            perm[cur_idx] .= cur_idx
+            @assert issorted(perm) "perm not sorted! Shouldn't happen!"
+            S .= @view(S[perm, perm])
+            A .= @view(A[perm, perm])
+            D .= @view(D[perm, perm])
+            offset += g
+        end
+        verbose && println("Iter $l δ = $max_delta")
+        max_delta < tol && break 
+    end
+    return S, Float64[]
+end
+
+# this code solves every variable in S simultaneously, i.e. not fixing any block 
+# function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
+#     model = Model(() -> Hypatia.Optimizer(verbose=false))
+#     # model = Model(() -> SCS.Optimizer())
+#     T = eltype(Σ)
+#     p = size(Σ, 1)
+#     group_sizes = size.(Σblocks.blocks, 1)
+#     # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
+#     @variable(model, S[1:p, 1:p], Symmetric)
+#     # fix everything
+#     for j in 1:p, i in j:p
+#         fix(S[i, j], zero(T))
+#     end
+#     # free pertinent variables
+#     idx = 0
+#     for g in group_sizes
+#         for j in 1:g, i in j:g
+#             unfix(S[i + idx, j + idx])
+#             set_lower_bound(S[i + idx, j + idx], zero(T))
+#             set_upper_bound(S[i + idx, j + idx], one(T))
+#         end
+#         idx += g
+#     end
+#     @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
+#     # @objective(model, Max, tr(S))
+#     @objective(model, Max, sum(S))
+#     JuMP.optimize!(model)
+#     check_model_solution(model)
+#     # construct block diagonal S
+#     Sm = convert(Matrix{T}, clamp!(JuMP.value.(S), 0, 1))
+#     Sdata = Matrix{T}[]
+#     idx = 0
+#     for g in group_sizes
+#         push!(Sdata, Symmetric(Sm[idx+1 : idx+g, idx+1 : idx+g]))
+#         idx += g
+#     end
+#     return BlockDiagonal(Sdata), T[]
+# end
+
+function solve_group_MVR_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
@@ -303,7 +403,7 @@ function solve_group_MVR_full(
     return S, Float64[]
 end
 
-function solve_group_max_entropy_full(
+function solve_group_max_entropy_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
@@ -637,6 +737,41 @@ function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldownda
         end
     end
     return failed ? 0 : δ
+end
+
+# SDP construction by choosing S_g = γ_g * Σ_{g,g}
+function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+    p = size(Σ, 1)
+    G = length(Σblocks.blocks)
+    group_sizes = size.(Σblocks.blocks, 1)
+    # calculate Db = bdiag(Σ_{11}^{-1/2}, ..., Σ_{GG}^{-1/2})
+    Db = Matrix{eltype(Σ)}[]
+    for Σbi in Σblocks.blocks
+        push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
+    end
+    Db = BlockDiagonal(Db)
+    λ = Symmetric(2Db * Σ * Db) |> eigvals
+    reverse!(λ)
+    # solve non-linear objective using Ipopt
+    model = Model(() -> Ipopt.Optimizer())
+    set_optimizer_attribute(model, "print_level", 0)
+    variant_to_group = zeros(Int, p)
+    offset = 1
+    for (idx, g) in enumerate(group_sizes)
+        variant_to_group[offset:offset+g-1] .= idx
+        offset += g
+    end
+    @variable(model, 0 <= γ[1:G] <= minimum(λ)) # todo: should this be γ[g] ≤ the corresponding λ?
+    @NLobjective(model, Max, 
+        sum(group_sizes[g] * log(γ[g]) for g in 1:G) + 
+        sum(log(λ[i] - γ[variant_to_group[i]]) for i in 1:p)
+    )
+    JuMP.optimize!(model)
+    check_model_solution(model)
+    # convert solution to vector and return resulting block diagonal matrix
+    γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
+    S = BlockDiagonal(γs[1] .* Σblocks.blocks)
+    return S, γs
 end
 
 """
