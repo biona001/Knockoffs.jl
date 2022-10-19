@@ -48,7 +48,7 @@ function solve_s_group(
     if method == :equi
         S, γs = solve_group_equi(Σ, Sblocks; m=m)
     elseif method == :sdp_subopt
-        S, γs = solve_group_SDP(Σ, Sblocks; m=m)
+        S, γs = solve_group_SDP_subopt(Σ, Sblocks; m=m)
     elseif method == :sdp_block
         S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
     elseif method == :sdp_full
@@ -115,7 +115,7 @@ multiplies Σ_jj. In the equi-correlated setting, all `γ[j]` is forced to be eq
 Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
 """
-function solve_group_SDP(
+function solve_group_SDP_subopt(
     Σ::AbstractMatrix, 
     Σblocks::BlockDiagonal; 
     m::Int = 1,
@@ -189,11 +189,15 @@ function solve_group_SDP_block_update(
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     A = (m+1)/m * Σ
     D = A - S
+    # compute initial objective value
+    objective_values = group_sdp_objective(Σ, S, group_sizes)
+    verbose && println("Init obj = $(sum(objective_values))")
+    verbose && println("Init block objs = $objective_values")
+    # begin block updates
     for l in 1:niter
         offset = 0
         max_delta = zero(eltype(Σ))
         for b in 1:blocks
-            # permute current group variables to upper left corner
             g = group_sizes[b]
             cur_idx = offset + 1:offset + g
             perm[1:g] .= cur_idx
@@ -205,8 +209,9 @@ function solve_group_SDP_block_update(
             Σ11 = @view(Σ[1:g, 1:g])
             A11 = @view(A[1:g, 1:g])
             D12 = @view(D[1:g, g + 1:end])
+            D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
-            ub = A11 - D12 * inv(D22) * D12' # (todo: somehow avoid reallocating ub every iteration)
+            ub = Symmetric(A11 - D12 * inv(D22) * D21) # (todo: somehow avoid reallocating ub every iteration)
             # solve SDP problem for current block (todo: warmstart, avoid reallocating S1_new)
             S1_new = solve_group_SDP_single_block(Σ11, ub)
             S1_old = @view(S[1:g, 1:g])
@@ -215,20 +220,49 @@ function solve_group_SDP_block_update(
                     max_delta = abs(S1_new[i] - S1_old[i])
                 end
             end
+            # @show group_sdp_objective_single_block(Σ11, S1_old)
+            # @show group_sdp_objective_single_block(Σ11, S1_new)
+            # update block
             S1_old .= S1_new
+            block_obj = group_sdp_objective_single_block(Σ11, S1_new)
+            println("Iter $l block $b old objective = $(objective_values[b]) and new obj = $block_obj")
+            objective_values[b] = block_obj
             # repermute columns/rows of S back 
-            perm[1:g] .= 1:g
-            perm[cur_idx] .= cur_idx
-            @assert issorted(perm) "perm not sorted! Shouldn't happen!"
-            S .= @view(S[perm, perm])
-            A .= @view(A[perm, perm])
-            D .= @view(D[perm, perm])
+            iperm = invperm(perm) # todo: modify https://github.com/JuliaLang/julia/blob/36034abf26062acad4af9dcec7c4fc53b260dbb4/base/combinatorics.jl#L278
+            S .= @view(S[iperm, iperm])
+            A .= @view(A[iperm, iperm])
+            D .= @view(D[iperm, iperm])
+            sort!(perm)
             offset += g
         end
-        verbose && println("Iter $l δ = $max_delta")
+        verbose && println("Iter $l δ = $max_delta, obj = $(sum(objective_values))")
         max_delta < tol && break 
     end
     return S, Float64[]
+end
+
+# this assumes groups are contiguous, and each group's size is stored in group_sizes
+function group_sdp_objective(Σ, S, group_sizes)
+    blocks = length(group_sizes)
+    objective_values, offset = zeros(blocks), 0
+    for b in 1:blocks
+        cur_idx = offset + 1:offset + group_sizes[b]
+        objective_values[b] = group_sdp_objective_single_block(
+            @view(Σ[cur_idx, cur_idx]), @view(S[cur_idx, cur_idx])
+        )
+        offset += group_sizes[b]
+    end
+    return objective_values # returns sum | Σij - Sij | for each group
+end
+
+function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMatrix{T}) where T
+    p = size(Σg, 1)
+    size(Σg) == size(Sg) || error("group_sdp_objective_single_block: Expected size of Σg and Sg to be equal")
+    obj = zero(T)
+    for j in 1:p, i in 1:p
+        obj += abs(Σg[i, j] - Sg[i, j])
+    end
+    return obj
 end
 
 # this code solves every variable in S simultaneously, i.e. not fixing any block 
@@ -289,7 +323,7 @@ function solve_group_MVR_ccd(
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S = convert(Matrix{T}, S + λmin*I)
+    S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     verbose && println("initial obj = ", group_mvr_obj(L, C, m))
@@ -422,7 +456,7 @@ function solve_group_max_entropy_ccd(
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S = convert(Matrix{T}, S + λmin*I)
+    S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     verbose && println("initial obj = ", group_maxent_obj(L, C, m))
