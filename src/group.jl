@@ -308,7 +308,7 @@ function solve_group_MVR_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol,
+    tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -441,7 +441,7 @@ function solve_group_max_entropy_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol,
+    tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -610,12 +610,12 @@ function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholup
         fill!(ei, 0)
         fill!(ej, 0)
         ej[j] = ei[j] = sqrt(abs(δj))
-        if δj < 0
-            choldowndate!(L, ej)
-            cholupdate!(C, ei)
-        else
+        if δj > 0
             cholupdate!(L, ej)
             choldowndate!(C, ei)
+        else
+            choldowndate!(L, ej)
+            cholupdate!(C, ei)
         end
     end
     return failed ? 0 : δj
@@ -657,26 +657,26 @@ function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldow
         # undo cholesky update to L
         fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
         storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ < 0
-            choldowndate!(L, storage)
-            cholupdate!(L, ei)
-            cholupdate!(L, ej)
-        else 
-            cholupdate!(L, storage)
-            choldowndate!(L, ei)
+        if δ > 0
             choldowndate!(L, ej)
+            choldowndate!(L, ei)
+            cholupdate!(L, storage)
+        else 
+            cholupdate!(L, ej)
+            cholupdate!(L, ei)
+            choldowndate!(L, storage)
         end
-        # undo cholesky update to C
+        # update cholesky factor C
         fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
         storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ < 0
-            cholupdate!(C, storage)
-            choldowndate!(C, ei)
-            choldowndate!(C, ej)
-        else
-            choldowndate!(C, storage)
-            cholupdate!(C, ei)
+        if δ > 0
             cholupdate!(C, ej)
+            cholupdate!(C, ei)
+            choldowndate!(C, storage)
+        else
+            choldowndate!(C, ej)
+            choldowndate!(C, ei)
+            cholupdate!(C, storage)
         end
     end
     return failed ? 0 : δ
@@ -701,12 +701,12 @@ function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, chol
         S[j, j] -= δ
         fill!(x, 0); fill!(ỹ, 0)
         x[j] = ỹ[j] = sqrt(abs(δ))
-        if δ < 0
-            choldowndate!(L, x)
-            cholupdate!(C, ỹ)
-        else
+        if δ > 0
             cholupdate!(L, x)
             choldowndate!(C, ỹ)
+        else
+            choldowndate!(L, x)
+            cholupdate!(C, ỹ)
         end
     end
     return failed ? 0 : δ
@@ -745,29 +745,29 @@ function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldownda
     if backtrack && failed
         S[i, j] -= δ
         S[j, i] -= δ
-        # undo cholesky update to L
+        # undo update to cholesky factor L
         fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
         x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ < 0
-            choldowndate!(L, x)
-            cholupdate!(L, ei)
-            cholupdate!(L, ej)
-        else 
-            cholupdate!(L, x)
-            choldowndate!(L, ei)
+        if δ > 0
             choldowndate!(L, ej)
+            choldowndate!(L, ei)
+            cholupdate!(L, x)
+        else 
+            cholupdate!(L, ej)
+            cholupdate!(L, ei)
+            choldowndate!(L, x)
         end
-        # undo cholesky update to C
+        # undo update to cholesky factor C
         fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
         x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ < 0
-            cholupdate!(C, x)
-            choldowndate!(C, ei)
-            choldowndate!(C, ej)
-        else
-            choldowndate!(C, x)
-            cholupdate!(C, ei)
+        if δ > 0
             cholupdate!(C, ej)
+            cholupdate!(C, ei)
+            choldowndate!(C, x)
+        else
+            choldowndate!(C, ej)
+            choldowndate!(C, ei)
+            cholupdate!(C, x)
         end
     end
     return failed ? 0 : δ
