@@ -176,8 +176,8 @@ function solve_group_SDP_block_update(
     Σ::AbstractMatrix, 
     Sblocks::BlockDiagonal;
     m::Int = 1,
-    tol=1e-6, # converges when changes in s are all smaller than tol
-    niter = 100, # max number of cyclic block updates
+    tol=0.01, # converges when changes in s are all smaller than tol
+    niter = 10, # max number of cyclic block updates
     optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
     verbose::Bool = false,
     )
@@ -192,13 +192,13 @@ function solve_group_SDP_block_update(
     # compute initial objective value
     objective_values = group_sdp_objective(Σ, S, group_sizes)
     verbose && println("Init obj = $(sum(objective_values))")
-    verbose && println("Init block objs = $objective_values")
     # begin block updates
     for l in 1:niter
         offset = 0
         max_delta = zero(eltype(Σ))
         for b in 1:blocks
             g = group_sizes[b]
+            # permute current block into upper left corner
             cur_idx = offset + 1:offset + g
             perm[1:g] .= cur_idx
             perm[cur_idx] .= 1:g
@@ -206,28 +206,30 @@ function solve_group_SDP_block_update(
             A .= @view(A[perm, perm])
             D .= @view(D[perm, perm])
             # update constraints
+            S11 = @view(S[1:g, 1:g])
             Σ11 = @view(Σ[1:g, 1:g])
             A11 = @view(A[1:g, 1:g])
             D12 = @view(D[1:g, g + 1:end])
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
             ub = Symmetric(A11 - D12 * inv(D22) * D21) # (todo: somehow avoid reallocating ub every iteration)
-            # solve SDP problem for current block (todo: warmstart, avoid reallocating S1_new)
-            S1_new = solve_group_SDP_single_block(Σ11, ub)
-            S1_old = @view(S[1:g, 1:g])
-            for i in eachindex(S1_new)
-                if abs(S1_new[i] - S1_old[i]) > max_delta
-                    max_delta = abs(S1_new[i] - S1_old[i])
+            # solve SDP problem for current block (todo: warmstart, avoid reallocating S1_new, allocate vector of models, use loose convg criteria)
+            S11_new = solve_group_SDP_single_block(Σ11, ub)
+            block_obj = group_sdp_objective_single_block(Σ11, S11_new)
+            # only update if objective decreased
+            if block_obj < objective_values[b]
+                # find max difference between previous block S
+                for i in eachindex(S11_new)
+                    if abs(S11_new[i] - S11[i]) > max_delta
+                        max_delta = abs(S11_new[i] - S11[i])
+                    end
                 end
+                # update relevant blocks
+                S11 .= S11_new
+                D[1:g, 1:g] .= A11 .- S11_new
+                objective_values[b] = block_obj
             end
-            # @show group_sdp_objective_single_block(Σ11, S1_old)
-            # @show group_sdp_objective_single_block(Σ11, S1_new)
-            # update block
-            S1_old .= S1_new
-            block_obj = group_sdp_objective_single_block(Σ11, S1_new)
-            println("Iter $l block $b old objective = $(objective_values[b]) and new obj = $block_obj")
-            objective_values[b] = block_obj
-            # repermute columns/rows of S back 
+            # repermute columns/rows of S back
             iperm = invperm(perm) # todo: modify https://github.com/JuliaLang/julia/blob/36034abf26062acad4af9dcec7c4fc53b260dbb4/base/combinatorics.jl#L278
             S .= @view(S[iperm, iperm])
             A .= @view(A[iperm, iperm])
