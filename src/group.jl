@@ -200,8 +200,10 @@ function solve_group_SDP_block_update(
             g = group_sizes[b]
             # permute current block into upper left corner
             cur_idx = offset + 1:offset + g
+            for i in 1:offset
+                perm[g+i] = i
+            end
             perm[1:g] .= cur_idx
-            perm[cur_idx] .= 1:g
             S .= @view(S[perm, perm])
             A .= @view(A[perm, perm])
             D .= @view(D[perm, perm])
