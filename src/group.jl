@@ -885,12 +885,10 @@ the distance matrix.
 
 # Inputs
 + `X`: Data matrix, each column is a feature
-+ `covariance_approximator`: A covariance estimator, defaults to 
-    `LinearShrinkage(DiagonalUnequalVariance(), :lw)` which tends to give good
-    empirical performance when p>n. See CovarianceEstimation.jl for more options.
 + `cutoff`: Height value for which the clustering result is cut, between 0 and 1
-    (default 0.7). 1 recovers ungrouped structure, 0 corresponds to everything 
-    in a single group. 
+    (default 0.7). This ensures that no variables between 2 groups have correlation
+    greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
+    everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
 
 If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
@@ -899,16 +897,15 @@ above `cutoff`.
 """
 function partition_groups(
     X::AbstractMatrix;
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     cutoff = 0.7,
     min_clusters = 1
     )
     # approximate correlation matrix
-    distmat = cov(covariance_approximator, X)
-    StatsBase.cov2cor!(distmat.data, sqrt.(diag(distmat.data)))
+    distmat = cov(X)
+    StatsBase.cov2cor!(distmat, sqrt.(diag(distmat)))
     # convert correlation matrix to a distance matrix
-    @inbounds @simd for i in eachindex(distmat.data)
-        distmat.data[i] = 1 - distmat.data[i]
+    @inbounds @simd for i in eachindex(distmat)
+        distmat[i] = 1 - abs(distmat[i])
     end
     # hierarchical clustering
     cluster_result = hclust(distmat; linkage=:single)
