@@ -166,21 +166,22 @@ function solve_group_SDP_subopt_correct(
     blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
     @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
     @constraint(model, Symmetric(blocks) in PSDCone())
+    # slack variables
+    @variable(model, U[1:sum(block_sizes.^2)])
     # loop over each block
-    offset = 0
+    offset = 0 # allows indexing over blocks of S
+    Uidx = 1   # index of U if U were treated as a matrix, i.e index of U[i, j]
     for g in 1:n
         G = block_sizes[g] # g is group idx, G is size of group g
         cur_idx = offset + 1:offset + G
-        @variable(model, Ug[1:G, 1:G])
         for i in cur_idx, j in cur_idx
-            @constraint(model, Σ[i, j] - γ[g]*Σ[i, j] ≤ Ug[i, j])
-            @constraint(model, -Ug[i, j] ≤ Σ[i, j] - γ[g]*Σ[i, j])
+            @constraint(model, Σ[i, j] - γ[g]*Σ[i, j] ≤ U[Uidx])
+            @constraint(model, -U[Uidx] ≤ Σ[i, j] - γ[g]*Σ[i, j])
+            Uidx += 1
         end
         offset += G
     end
-
-
-    @objective(model, Min, sum(Ug for g in 1:n))
+    @objective(model, Min, sum(U))
     JuMP.optimize!(model)
     success = check_model_solution(model)
     if !success
