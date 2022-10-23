@@ -37,30 +37,44 @@ function solve_s_group(
         Σ .= @view(Σ[perm, perm])
         permuted = true
     end
-    # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg, for other cases we initialize with equi solution
-    blocks = Matrix{T}[]
-    for g in unique(groups)
-        idx = findall(x -> x == g, groups)
-        push!(blocks, Σ[idx, idx])
-    end
-    Sblocks = BlockDiagonal(blocks)
-    # solve optimization problem
-    if method == :equi
-        S, γs = solve_group_equi(Σ, Sblocks; m=m)
-    elseif method == :sdp_subopt
-        S, γs = solve_group_SDP_subopt(Σ, Sblocks; m=m)
-    elseif method == :sdp
-        S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
-    elseif method == :sdp_full
-        S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
-    elseif method == :mvr
-        S, γs = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
-    elseif method == :maxent
-        S, γs = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
-    elseif method == :maxent_subopt
-        S, γs = solve_group_max_entropy_suboptimal(Σ, Sblocks)
+    unique_groups = unique(groups)
+    if length(unique_groups) == length(groups)
+        # solve ungroup knockoff problem
+        s = solve_s(Symmetric(Σ), 
+            method == :sdp_subopt ? :sdp : method;
+            m=m, kwargs...
+        )
+        S = Diagonal(s) |> Matrix
+        γs = T[]
     else
-        error("Method can only be :equi, :sdp, or :maxent, but was $method")
+        # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg
+        # for other cases we initialize with equi solution
+        blocks = Matrix{T}[]
+        for g in unique_groups
+            idx = findall(x -> x == g, groups)
+            push!(blocks, Σ[idx, idx])
+        end
+        Sblocks = BlockDiagonal(blocks)
+        # solve optimization problem
+        if method == :equi
+            S, γs = solve_group_equi(Σ, Sblocks; m=m)
+        elseif method == :sdp_subopt
+            S, γs = solve_group_SDP_subopt(Σ, Sblocks; m=m)
+        elseif method == :sdp_subopt_correct
+            S, γs = solve_group_SDP_subopt_correct(Σ, Sblocks; m=m)
+        elseif method == :sdp
+            S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :sdp_full
+            S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
+        elseif method == :mvr
+            S, γs = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :maxent
+            S, γs = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :maxent_subopt
+            S, γs = solve_group_max_entropy_suboptimal(Σ, Sblocks)
+        else
+            error("Method can only be :equi, :sdp, or :maxent, but was $method")
+        end
     end
     # permuate S back to the original noncontiguous group structure
     if permuted
@@ -130,8 +144,49 @@ function solve_group_SDP_subopt(
     @objective(model, Max, block_sizes' * γ)
     @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
     JuMP.optimize!(model)
-    check_model_solution(model)
+    success = check_model_solution(model)
+    if !success
+        @warn "Optimization unsuccessful, solution may be inaccurate"
+    end
     γs = clamp!(JuMP.value.(γ), 0, 1)
+    S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
+    return S, γs
+end
+
+function solve_group_SDP_subopt_correct(
+    Σ::AbstractMatrix, 
+    Σblocks::BlockDiagonal; 
+    m::Int = 1,
+    verbose=false
+    )
+    model = Model(() -> Hypatia.Optimizer(verbose=verbose))
+    n = nblocks(Σblocks)
+    block_sizes = size.(Σblocks.blocks, 1)
+    @variable(model, γ[1:n])
+    blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
+    @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
+    @constraint(model, Symmetric(blocks) in PSDCone())
+    # loop over each block
+    offset = 0
+    for g in 1:n
+        G = block_sizes[g] # g is group idx, G is size of group g
+        cur_idx = offset + 1:offset + G
+        @variable(model, Ug[1:G, 1:G])
+        for i in cur_idx, j in cur_idx
+            @constraint(model, Σ[i, j] - γ[g]*Σ[i, j] ≤ Ug[i, j])
+            @constraint(model, -Ug[i, j] ≤ Σ[i, j] - γ[g]*Σ[i, j])
+        end
+        offset += G
+    end
+
+
+    @objective(model, Min, sum(Ug for g in 1:n))
+    JuMP.optimize!(model)
+    success = check_model_solution(model)
+    if !success
+        @warn "Optimization unsuccessful, solution may be inaccurate"
+    end
+    γs = JuMP.value.(γ)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
     return S, γs
 end
@@ -150,8 +205,8 @@ Solves a single block of the fully general group SDP problem. The objective is
 """
 function solve_group_SDP_single_block(
     Σ11::AbstractMatrix,
-    ub::AbstractMatrix;  # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    optm=Hypatia.Optimizer(verbose=false) # Any solver compatible with JuMP
+    ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
     )
     # Build model via JuMP
     p = size(Σ11, 1)
@@ -169,9 +224,21 @@ function solve_group_SDP_single_block(
     @constraint(model, ub - S in PSDCone())
     # solve and return
     JuMP.optimize!(model)
-    return JuMP.value.(S)
+    success = check_model_solution(model)
+    return JuMP.value.(S), success
 end
 
+"""
+# Todo
++ somehow avoid reallocating ub every iteration
++ When solving each individual block,
+    - warmstart
+    - avoid reallocating S1_new
+    - allocate vector of models
+    - use loose convergence criteria
++ Avoid allocating iperm in each iter by modifying https://github.com/JuliaLang/julia/blob/36034abf26062acad4af9dcec7c4fc53b260dbb4/base/combinatorics.jl#L278
++ For singleton groups, don't use JuMP and directly update
+"""
 function solve_group_SDP_block_update(
     Σ::AbstractMatrix, 
     Sblocks::BlockDiagonal;
@@ -200,13 +267,14 @@ function solve_group_SDP_block_update(
             g = group_sizes[b]
             # permute current block into upper left corner
             cur_idx = offset + 1:offset + g
-            for i in 1:offset
+            @inbounds @simd for i in 1:offset
                 perm[g+i] = i
             end
             perm[1:g] .= cur_idx
             S .= @view(S[perm, perm])
             A .= @view(A[perm, perm])
             D .= @view(D[perm, perm])
+            Σ .= @view(Σ[perm, perm])
             # update constraints
             S11 = @view(S[1:g, 1:g])
             Σ11 = @view(Σ[1:g, 1:g])
@@ -214,12 +282,12 @@ function solve_group_SDP_block_update(
             D12 = @view(D[1:g, g + 1:end])
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
-            ub = Symmetric(A11 - D12 * inv(D22) * D21) # (todo: somehow avoid reallocating ub every iteration)
-            # solve SDP problem for current block (todo: warmstart, avoid reallocating S1_new, allocate vector of models, use loose convg criteria)
-            S11_new = solve_group_SDP_single_block(Σ11, ub)
+            ub = Symmetric(A11 - D12 * inv(D22) * D21)
+            # solve SDP problem for current block
+            S11_new, success = solve_group_SDP_single_block(Σ11, ub)
             block_obj = group_sdp_objective_single_block(Σ11, S11_new)
-            # only update if objective decreased
-            if block_obj < objective_values[b]
+            # only update if objective decreased and optimization was successful
+            if success && block_obj < objective_values[b]
                 # find max difference between previous block S
                 for i in eachindex(S11_new)
                     if abs(S11_new[i] - S11[i]) > max_delta
@@ -232,10 +300,11 @@ function solve_group_SDP_block_update(
                 objective_values[b] = block_obj
             end
             # repermute columns/rows of S back
-            iperm = invperm(perm) # todo: modify https://github.com/JuliaLang/julia/blob/36034abf26062acad4af9dcec7c4fc53b260dbb4/base/combinatorics.jl#L278
+            iperm = invperm(perm)
             S .= @view(S[iperm, iperm])
             A .= @view(A[iperm, iperm])
             D .= @view(D[iperm, iperm])
+            Σ .= @view(Σ[iperm, iperm])
             sort!(perm)
             offset += g
         end
@@ -805,7 +874,10 @@ function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockD
         sum(log(λ[i] - γ[variant_to_group[i]]) for i in 1:p)
     )
     JuMP.optimize!(model)
-    check_model_solution(model)
+    success = check_model_solution(model)
+    if !success
+        @warn "Optimization unsuccessful, solution may be inaccurate"
+    end
     # convert solution to vector and return resulting block diagonal matrix
     γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
     S = BlockDiagonal(γs[1] .* Σblocks.blocks)

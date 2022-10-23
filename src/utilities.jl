@@ -836,6 +836,7 @@ Triangular number n * (n+1) / 2. Type ◺ by `<backslash>lltriangle<tab>`
 After solving a JuMP model, checks if the solution is accurate. 
 """
 function check_model_solution(model; verbose=false)
+    success = true
     if termination_status(model) == OPTIMAL
         verbose && println("Solution is optimal")
     elseif termination_status(model) == LOCALLY_SOLVED
@@ -845,13 +846,8 @@ function check_model_solution(model; verbose=false)
     elseif termination_status(model) == TIME_LIMIT && has_values(model)
         verbose && println("Solution is suboptimal due to a time limit, but a primal solution is available")
     else
-        error("The model was not solved correctly.")
+        success = false
+        verbose && println("The model was not solved correctly.")
     end
-    verbose && println("  objective value = ", objective_value(model))
-    if primal_status(model) == FEASIBLE_POINT
-        verbose && println("  primal solution: x = ", value(x))
-    end
-    if dual_status(model) == FEASIBLE_POINT
-        verbose && println("  dual solution: c1 = ", dual(c1))
-    end
+    return success
 end
