@@ -387,7 +387,7 @@ function solve_group_MVR_ccd(
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false,
-    backtrack::Bool = true
+    backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
@@ -664,7 +664,7 @@ function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
 end
 
 function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack = true)
-    obj_old = group_mvr_obj(L, C, m)
+    backtrack && (obj_old = group_mvr_obj(L, C, m))
     fill!(ei, 0)
     fill!(ej, 0)
     ej[j] = ei[j] = sqrt(abs(δj))
@@ -696,7 +696,7 @@ function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholup
 end
 
 function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    obj_old = group_mvr_obj(L, C, m)
+    backtrack && (obj_old = group_mvr_obj(L, C, m))
     # update cholesky factor L
     fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
     storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
@@ -757,7 +757,7 @@ function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldow
 end
 
 function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    obj_old = group_maxent_obj(L, C, m)
+    backtrack && (obj_old = group_maxent_obj(L, C, m))
     fill!(x, 0); fill!(ỹ, 0)
     x[j] = ỹ[j] = sqrt(abs(δ))
     if δ > 0
@@ -787,7 +787,7 @@ function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, chol
 end
 
 function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    obj_old = group_maxent_obj(L, C, m)
+    backtrack && (obj_old = group_maxent_obj(L, C, m))
     # update cholesky factor L
     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
