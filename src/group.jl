@@ -219,7 +219,7 @@ function solve_group_SDP_single_block(
         @constraint(model, Σ11[i, j] - S[i, j] ≤ U[i, j])
         @constraint(model, -U[i, j] ≤ Σ11[i, j] - S[i, j])
     end
-    @objective(model, Min, sum(U))
+    @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ11 - S)))
     # SDP constraints
     @constraint(model, S in PSDCone())
     @constraint(model, ub - S in PSDCone())
@@ -283,7 +283,7 @@ function solve_group_SDP_block_update(
             D12 = @view(D[1:g, g + 1:end])
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
-            ub = Symmetric(A11 - D12 * inv(D22) * D21)
+            ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
             # solve SDP problem for current block
             S11_new, success = solve_group_SDP_single_block(Σ11, ub)
             block_obj = group_sdp_objective_single_block(Σ11, S11_new)
@@ -340,43 +340,45 @@ function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMa
 end
 
 # this code solves every variable in S simultaneously, i.e. not fixing any block 
-# function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
-#     model = Model(() -> Hypatia.Optimizer(verbose=false))
-#     # model = Model(() -> SCS.Optimizer())
-#     T = eltype(Σ)
-#     p = size(Σ, 1)
-#     group_sizes = size.(Σblocks.blocks, 1)
-#     # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
-#     @variable(model, S[1:p, 1:p], Symmetric)
-#     # fix everything
-#     for j in 1:p, i in j:p
-#         fix(S[i, j], zero(T))
-#     end
-#     # free pertinent variables
-#     idx = 0
-#     for g in group_sizes
-#         for j in 1:g, i in j:g
-#             unfix(S[i + idx, j + idx])
-#             set_lower_bound(S[i + idx, j + idx], zero(T))
-#             set_upper_bound(S[i + idx, j + idx], one(T))
-#         end
-#         idx += g
-#     end
-#     @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
-#     # @objective(model, Max, tr(S))
-#     @objective(model, Max, sum(S))
-#     JuMP.optimize!(model)
-#     check_model_solution(model)
-#     # construct block diagonal S
-#     Sm = convert(Matrix{T}, clamp!(JuMP.value.(S), 0, 1))
-#     Sdata = Matrix{T}[]
-#     idx = 0
-#     for g in group_sizes
-#         push!(Sdata, Symmetric(Sm[idx+1 : idx+g, idx+1 : idx+g]))
-#         idx += g
-#     end
-#     return BlockDiagonal(Sdata), T[]
-# end
+function solve_group_SDP_full(
+    Σ::AbstractMatrix, 
+    Σblocks::BlockDiagonal; 
+    m::Int = 1,
+    optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
+    )
+    model = Model(() -> optm)
+    T = eltype(Σ)
+    p = size(Σ, 1)
+    group_sizes = size.(Σblocks.blocks, 1)
+    # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
+    @variable(model, S[1:p, 1:p], Symmetric)
+    # fix everything
+    for j in 1:p, i in j:p
+        fix(S[i, j], zero(T))
+    end
+    # free pertinent variables
+    idx = 0
+    for g in group_sizes
+        for j in 1:g, i in j:g
+            unfix(S[i + idx, j + idx])
+            set_lower_bound(S[i + idx, j + idx], zero(T))
+            set_upper_bound(S[i + idx, j + idx], one(T))
+        end
+        idx += g
+    end
+    @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
+    @constraint(model, Symmetric(S) in PSDCone())
+    # slack variables to handle absolute value in obj 
+    @variable(model, U[1:p, 1:p], Symmetric)
+    for i in 1:p, j in i:p
+        @constraint(model, Σ[i, j] - S[i, j] ≤ U[i, j])
+        @constraint(model, -U[i, j] ≤ Σ[i, j] - S[i, j])
+    end
+    @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
+    JuMP.optimize!(model)
+    check_model_solution(model)
+    return JuMP.value.(S), T[]
+end
 
 function solve_group_MVR_ccd(
     Σ::AbstractMatrix{T}, 
