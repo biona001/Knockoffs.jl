@@ -25,8 +25,6 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 """
 function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     m < 1 && error("m should be 1 or larger but was $m.")
-    m > 1 && method ∈ [:sdp_fast] && 
-        error("Currently :sdp_fast does not support multiple knockoffs!")
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
@@ -41,7 +39,7 @@ function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     elseif method == :maxent
         s = solve_max_entropy(Σcor; m=m, kwargs...)
     elseif method == :sdp_fast
-        s = solve_sdp_fast(Σcor; kwargs...)
+        s = solve_sdp_fast(Σcor; m=m, kwargs...)
     else
         error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
     end
@@ -287,6 +285,7 @@ function solve_sdp_fast(
     λ::T = 0.5, # barrier coefficient
     μ::T = 0.8, # decay parameter
     niter::Int = 100,
+    m::Int = 1, # number of knockoffs per variable
     tol=1e-6, # converges when lambda < tol?
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -299,24 +298,24 @@ function solve_sdp_fast(
     # initialize s vector and compute initial cholesky factor
     p = size(Σ, 1)
     s = zeros(T, p)
-    L = cholesky(Symmetric(2Σ))
+    L = cholesky(Symmetric((m+1)/m*Σ))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
         verbose && println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
         for j in 1:p
             @simd for i in 1:p
-                ỹ[i] = 2Σ[i, j]
+                ỹ[i] = (m+1)/m * Σ[i, j]
             end
             ỹ[j] = 0
             # compute c as the solution to L*x = ỹ
             ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
             x_l2sum = sum(abs2, x)
             # compute zeta and c as in alg 2.2 of askari et al
-            ζ = 2Σ[j, j] - s[j]
+            ζ = (m+1)/m*Σ[j, j] - s[j]
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # 1st order optimality condition
-            sj_new = clamp(2Σ[j, j] - c - λ, 0, 1)
+            sj_new = clamp((m+1)/m*Σ[j, j] - c - λ, 0, 1)
             δ = s[j] - sj_new
             abs(δ) < 1e-15 && continue
             s[j] = sj_new
