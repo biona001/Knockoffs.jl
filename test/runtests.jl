@@ -207,6 +207,15 @@ end
     @test length(merged.original) == 200
     @test length(merged.knockoff) == 800
     @test all(merged.XX̃[:, merged.original] .== X)
+
+    # partition_groups
+    p = 100
+    Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1))))
+    L = cholesky(Σ).L
+    X = randn(p, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    @test all(partition_groups(X, cutoff=1) .== collect(1:p))
+    @test all(partition_groups(X, cutoff=0) .== 1)
+    @test issorted(partition_groups(X, cutoff=0.7))
 end
 
 @testset "coefficient_diff" begin
@@ -650,6 +659,12 @@ end
     @test eigmin(4/3 * Σ - Diagonal(mvr_multiple.s)) ≥ 0
     me_multiple = modelX_gaussian_knockoffs(X, :maxent, μ, Σ, m=5)
     @test eigmin(6/5 * Σ - Diagonal(me_multiple.s)) ≥ 0
+    sdp_multiple = modelX_gaussian_knockoffs(X, :sdp, μ, Σ, m=5)
+    λmin = eigmin(6/5 * Σ - Diagonal(sdp_multiple.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+    sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_fast, μ, Σ, m=5)
+    λmin = eigmin(6/5 * Σ - Diagonal(sdp_fast_multiple.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
     # Check lasso runs with multiple knockoffs
     k = 15
@@ -665,4 +680,37 @@ end
     @test size(mvr_filter.ko.X̃) == (n, 3p)
     @test size(me_filter.X) == (n, p)
     @test size(me_filter.ko.X̃) == (n, 5p)
+end
+
+@testset "block descent SDP group knockoff" begin
+    p = 15
+    group_sizes = [5 for i in 1:div(p, 5)] # each group has 5 variables
+    groups = vcat([i*ones(g) for (i, g) in enumerate(group_sizes)]...) |> Vector{Int}
+    Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1)))) # true covariance matrix
+
+    # make just 1 knockoff per variable
+    m = 1
+
+    # initialize with equicorrelated solution
+    Sequi, γ = solve_s_group(Σ, groups, :equi)
+    
+    # form constraints for block 1
+    Σ11 = Σ[1:5, 1:5]
+    A = (m+1)/m * Σ
+    D = A - Sequi
+    A11 = @view(A[1:5, 1:5])
+    D12 = @view(D[1:5, 6:end])
+    D22 = @view(D[6:end, 6:end])
+    ub = A11 - D12 * inv(D22) * D12'
+    
+    # solve 
+    @time S1_new, U = Knockoffs.solve_group_SDP_block_update(Σ11, ub)
+    λmin = eigmin(S1_new)
+    @test λ ≥ 0 || isapprox(λ, 0, atol=1e-8)
+    λmin = eigmin(ub - S1_new)
+    @test λ ≥ 0 || isapprox(λ, 0, atol=1e-8)
+
+    # eyeball result
+    # @show S1_new
+    # @show sum(abs.(Σ11 - S1_new))
 end
