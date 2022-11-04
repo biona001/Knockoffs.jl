@@ -952,28 +952,40 @@ function modelX_gaussian_group_knockoffs(
 end
 
 """
-    partition_groups(X; [covariance_approximator], [cutoff])
+    partition_groups(X; [cutoff], [min_clusters])
 
 Computes a group partition based on input matrix `X` using single-linkage
 hierarchical clustering. We use a shrunken empirical correlation matrix as
 the distance matrix.
 
 # Inputs
-+ `X`: Data matrix, each column is a feature
++ `X`: `n × p` Data matrix, each column is a feature
 + `cutoff`: Height value for which the clustering result is cut, between 0 and 1
     (default 0.7). This ensures that no variables between 2 groups have correlation
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
++ `nrep`: Number of representative per group. Defaults 1. Group representatives 
+    will be selected by computing which element has the smallest distance to all
+    other elements in the cluster, i.e. the mediod. 
 
 If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
 number of clusters is not less than `min_clusters` and their height is not 
 above `cutoff`.
+
+# Outputs
++ `groups`: Length `p` vector of group membership for each variable
++ `mediods`: Length `G` vector, where `G` is number of unique groups. `mediods[i]`
+    is the column of `X` that is most representative of group `i`.
+
+# todo:
+add option to enforce adjacency constraint
 """
 function partition_groups(
     X::AbstractMatrix;
     cutoff = 0.7,
-    min_clusters = 1
+    min_clusters = 1,
+    nrep = 1,
     )
     # approximate correlation matrix
     distmat = cov(X)
@@ -984,7 +996,18 @@ function partition_groups(
     end
     # hierarchical clustering
     cluster_result = hclust(distmat; linkage=:single)
-    return cutree(cluster_result, h=1-cutoff, k=min_clusters)
+    groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
+    # compute medoids (i.e. select nrep representatives from each group)
+    mediods = Int[]
+    for g in unique(groups)
+        group_idx = findall(x -> x == g, groups)
+        @views colsum = sum(distmat[group_idx, group_idx], dims=1) |> vec
+        perm = partialsortperm(colsum, 1:min(length(group_idx), nrep))
+        for p in perm
+            push!(mediods, group_idx[p])
+        end
+    end
+    return groups, mediods
 end
 
 # every `windowsize` SNPs form a group
