@@ -37,7 +37,7 @@ since `isposdef(cov(X))` is typically false. For comparison of various estimator
 https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
 function modelX_gaussian_knockoffs(
-    X::Matrix, 
+    X::AbstractMatrix, 
     method::Symbol;
     m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
@@ -51,7 +51,7 @@ function modelX_gaussian_knockoffs(
 end
 
 function modelX_gaussian_knockoffs(
-    X::Matrix, 
+    X::AbstractMatrix, 
     method::Symbol, 
     μ::AbstractVector, 
     Σ::AbstractMatrix; 

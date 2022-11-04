@@ -47,6 +47,7 @@ function solve_s_group(
         S = Diagonal(s) |> Matrix
         γs = T[]
     else
+        # solve group knockoff problem
         # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg
         # for other cases we initialize with equi solution
         blocks = Matrix{T}[]
@@ -73,7 +74,7 @@ function solve_s_group(
         elseif method == :maxent_subopt
             S, γs = solve_group_max_entropy_suboptimal(Σ, Sblocks)
         else
-            error("Method can only be :equi, :sdp, or :maxent, but was $method")
+            error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
     end
     # permuate S back to the original noncontiguous group structure
@@ -949,6 +950,38 @@ function modelX_gaussian_group_knockoffs(
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
     return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
+end
+
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol;
+    nrep::Int = 1,
+    cutoff::Number = 0.7,
+    m::Int = 1,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs... # extra arguments for solve_s
+    ) where T
+    groups, group_reps = partition_groups(X, cutoff=cutoff, nrep=nrep)
+    return modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; m=m, 
+        covariance_approximator=covariance_approximator, kwargs...)
+end
+
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    groups::AbstractVector{Int},
+    group_reps::AbstractVector{Int};
+    m::Int = 1,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs... # extra arguments for solve_s
+    ) where T
+    method in REP_GROUP_KNOCKOFFS || error("method must be one of $REP_GROUP_KNOCKOFFS but was $method")
+    rep_method = string(method)[2:end] |> Symbol
+    Xrep = @view(X[:, group_reps])               # restrict X to representative columns 
+    Σapprox = cov(covariance_approximator, Xrep) # approximate covariance matrix
+    μ = vec(mean(Xrep, dims=1))                  # mean component is just column means
+    ko = modelX_gaussian_knockoffs(Xrep, rep_method, μ, Σapprox; m=m, kwargs...)
+    return GaussianRepGroupKnockoff(X, ko, groups, group_reps)
 end
 
 """

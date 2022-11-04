@@ -37,6 +37,13 @@ struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric}
     method::Symbol # method for solving s
 end
 
+struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff
+    X::Matrix{T} # original n × p design matrix
+    X̃::GaussianKnockoff # knockoff of the representative variants
+    groups::Vector{Int} # p × 1 vector of group membership
+    groups_reps::Vector{Int} # vector of group representatives
+end
+
 struct MergedKnockoff{T} <: Knockoff
     XX̃::Matrix{T} # n × (m+1)p matrix of original+knockoff features. The first m+1 variables are the first feature and its knockoffs shuffled...etc
     original::Vector{Int} # p × 1 vector of indices storing which columns of XX̃ contains the original features

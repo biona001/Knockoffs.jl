@@ -38,6 +38,7 @@ export knockoff_filter,
     approx_modelX_gaussian_knockoffs,
     ghost_knockoffs,
     modelX_gaussian_group_knockoffs,
+    modelX_gaussian_rep_group_knockoffs,
     solve_s, solve_s_group,
     # constructors
     knockoff,
@@ -78,6 +79,10 @@ include("approx.jl")
 include("ghost.jl")
 include("predict.jl")
 include("group.jl")
+
+const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_fast]
+const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_full, :mvr, :maxent, :maxent_subopt]
+const REP_GROUP_KNOCKOFFS = [:rmvr, :rmaxent, :requi, :rsdp, :rsdp_fast]
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    

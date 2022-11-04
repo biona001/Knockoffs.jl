@@ -41,7 +41,7 @@ function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     elseif method == :sdp_fast
         s = solve_sdp_fast(Σcor; m=m, kwargs...)
     else
-        error("Method can only be :equi, :sdp, :mvr, :maxent, or :sdp_fast but was $method")
+        error("Method must be one of $SINGLE_KNOCKOFFS but was $method")
     end
     # rescale s back to the result for a covariance matrix   
     iscor || (s .*= σs.^2)
