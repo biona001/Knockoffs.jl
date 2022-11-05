@@ -975,12 +975,32 @@ function modelX_gaussian_rep_group_knockoffs(
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs... # extra arguments for solve_s
     ) where T
-    method in REP_GROUP_KNOCKOFFS || error("method must be one of $REP_GROUP_KNOCKOFFS but was $method")
-    rep_method = string(method)[2:end] |> Symbol
     Xrep = @view(X[:, group_reps])               # restrict X to representative columns 
     Σapprox = cov(covariance_approximator, Xrep) # approximate covariance matrix
     μ = vec(mean(Xrep, dims=1))                  # mean component is just column means
-    ko = modelX_gaussian_knockoffs(Xrep, rep_method, μ, Σapprox; m=m, kwargs...)
+    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, groups, group_reps;
+        m=m, kwargs...)
+end
+
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    μ::AbstractVector, 
+    Σ::AbstractMatrix,
+    groups::AbstractVector{Int},
+    group_reps::AbstractVector{Int};
+    m::Int = 1,
+    kwargs... # extra arguments for solve_s
+    ) where T
+    # first check for errors
+    method in REP_GROUP_KNOCKOFFS || error("method must be one of $REP_GROUP_KNOCKOFFS but was $method")
+    rep_method = string(method)[2:end] |> Symbol
+    length(μ) == length(group_reps) || error("Expected length(μ) == length(group_reps)")
+    size(Σ, 1) == size(Σ, 2) == length(group_reps) || 
+        error("Expected size(Σ, 1) == size(Σ, 2) == length(group_reps)")
+    # generate (non-grouped) knockoff of X restricted to representative columns
+    Xrep = @view(X[:, group_reps])
+    ko = modelX_gaussian_knockoffs(Xrep, rep_method, μ, Matrix(Σ); m=m, kwargs...)
     return GaussianRepGroupKnockoff(X, ko, groups, group_reps)
 end
 
