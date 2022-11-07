@@ -65,6 +65,8 @@ function solve_s_group(
             S, γs = solve_group_SDP_subopt_correct(Σ, Sblocks; m=m)
         elseif method == :sdp
             S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :sdp_ccd
+            S, γs = solve_group_SDP_ccd(Σ, Sblocks; m=m, kwargs...)
         elseif method == :sdp_full
             S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
         elseif method == :mvr
@@ -390,6 +392,116 @@ function solve_group_SDP_full(
     return JuMP.value.(S), T[]
 end
 
+function solve_group_SDP_ccd(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol,
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false,
+    backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
+    ) where T
+    p = size(Σ, 1)
+    blocks = nblocks(Sblocks)
+    group_sizes = size.(Sblocks.blocks, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # initialize S matrix and compute initial cholesky factor
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += λmin*I
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    C = cholesky(Symmetric(S))
+    verbose && println("initial obj = ", sum(group_sdp_objective(Σ, S, group_sizes)))
+    # some timers
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    t3 = zero(T) # time for solving offdiag 1D optimization problems
+    # preallocated vectors for efficiency
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    x, ỹ, storage = zeros(p), zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        offset = 0
+        for b in 1:blocks
+            #
+            # optimize diagonal entries
+            #
+            for idx in 1:group_sizes[b]
+                j = idx + offset
+                # compute feasible region
+                fill!(ej, 0)
+                ej[j] = 1
+                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
+                t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
+                ub = 1 / sum(abs2, u) - λmin
+                lb = -1 / sum(abs2, v) + λmin
+                lb ≥ ub && continue
+                # compute new δ, making sure it is in feasible region
+                δj = clamp(Σ[j, j] - S[j, j], lb, ub)
+                abs(δj) < 1e-15 && continue
+                # update S
+                S[j, j] += δj
+                # rank 1 update to cholesky factor
+                t1 += @elapsed δj = update_diag_chol_sdp!(
+                    S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholupdate!, backtrack
+                )
+                # update convergence tol
+                abs(δj) > max_delta && (max_delta = abs(δj))
+            end
+            #
+            # optimize off-diagonal entries
+            #
+            for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
+                i, j = idx2 + offset, idx1 + offset
+                fill!(ej, 0); fill!(ei, 0)
+                ej[j], ei[i] = 1, 1
+                # compute aii, ajj, aij, bii, bjj, bij
+                t2 += @elapsed begin
+                    ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ei)
+                    ldiv!(v, UpperTriangular(L.factors)', ej)
+                    aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
+                    ldiv!(u, UpperTriangular(C.factors)', ei)
+                    ldiv!(v, UpperTriangular(C.factors)', ej)
+                    bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
+                end
+                # compute (mathematical) feasible region
+                s1 = (aij - sqrt(aii*ajj)) / (aij^2 - aii * ajj)
+                s2 = (aij + sqrt(aii*ajj)) / (aij^2 - aii * ajj)
+                d1 = (-bij - sqrt(bii*bjj)) / (bij^2 - bii * bjj)
+                d2 = (-bij + sqrt(bii*bjj)) / (bij^2 - bii * bjj)
+                s1 > s2 && ((s1, s2) = (s2, s1))
+                d1 > d2 && ((d1, d2) = (d2, d1))
+                # feasible region criteria due to computational reasons
+                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
+                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
+                lb ≥ ub && continue
+                # find δ ∈ [lb, ub] that maximizes objective
+                δ = clamp(Σ[i, j] - S[i, j], lb, ub)
+                (abs(δ) < 1e-15 || isnan(δ)) && continue
+                # update S
+                S[i, j] += δ
+                S[j, i] += δ
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
+                t1 += @elapsed δ = update_offdiag_chol_sdp!(
+                    S, Σ, L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!, backtrack
+                )
+                # update convergence tol
+                abs(δ) > max_delta && (max_delta = abs(δ))
+            end
+            offset += group_sizes[b]
+        end
+        if verbose
+            obj = sum(group_sdp_objective(Σ, S, group_sizes))
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        end
+        max_delta < tol && break 
+    end
+    return S, Float64[]
+end
+
 function solve_group_MVR_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
@@ -505,7 +617,7 @@ function solve_group_MVR_ccd(
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors (this also undos the update if objective doesn't increase)
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
                 t1 += @elapsed δ = update_offdiag_chol_mvr!(
                     S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
                 )
@@ -632,7 +744,7 @@ function solve_group_max_entropy_ccd(
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors (this also undos the update if objective doesn't increase)
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
                 t1 += @elapsed δ = update_offdiag_chol_maxent!(
                     S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
                 )
@@ -673,6 +785,65 @@ end
 
 function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
     return logdet(L) + m*logdet(C)
+end
+
+function update_diag_chol_sdp!(S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholupdate!, backtrack = true)
+    obj_old = abs(Σ[j, j] - S[j, j])
+    new_obj = abs(Σ[j, j] - S[j, j] - δj)
+    if backtrack && new_obj > obj_old
+        # undo the update if objective got worse
+        println("reached here1")
+        S[j, j] -= δj
+        return zero(typeof(δj))
+    end
+    # update cholesky factors
+    fill!(ei, 0)
+    fill!(ej, 0)
+    ej[j] = ei[j] = sqrt(abs(δj))
+    if δj > 0
+        choldowndate!(L, ej)
+        cholupdate!(C, ei)
+    else
+        cholupdate!(L, ej)
+        choldowndate!(C, ei)
+    end
+    return δj
+end
+
+function update_offdiag_chol_sdp!(S, Σ, L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!, backtrack = true)
+    obj_old = abs(Σ[i, j] - S[i, j])
+    new_obj = abs(Σ[i, j] - S[i, j] - δ)
+    if backtrack && new_obj > obj_old
+        # undo the update if objective got worse
+        S[i, j] -= δ
+        S[j, i] -= δ
+        return zero(typeof(δj))
+    end
+    # update cholesky factor L
+    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        choldowndate!(L, storage)
+        cholupdate!(L, ei)
+        cholupdate!(L, ej)
+    else 
+        cholupdate!(L, storage)
+        choldowndate!(L, ei)
+        choldowndate!(L, ej)
+    end
+    # update cholesky factor C
+    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        cholupdate!(C, storage)
+        choldowndate!(C, ei)
+        choldowndate!(C, ej)
+    else
+        choldowndate!(C, storage)
+        cholupdate!(C, ei)
+        cholupdate!(C, ej)
+    end
+    return δ
 end
 
 function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack = true)
