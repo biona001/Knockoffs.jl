@@ -209,7 +209,16 @@ function solve_group_SDP_single_block(
     Σ11::AbstractMatrix,
     ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
     optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
+    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
+    # quick return for singleton groups
+    if size(ub) == (1, 1)
+        if Σ11[1] ≤ ub[1]
+            return Σ11, true
+        else
+            return ub .- 1e-6, true
+        end
+    end
     # Build model via JuMP
     p = size(Σ11, 1)
     model = Model(() -> optm)
