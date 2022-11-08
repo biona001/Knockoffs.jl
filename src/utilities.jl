@@ -362,7 +362,8 @@ function simulate_AR1(p::Int; a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
     corr_matrix = exp.(log_corrs)
 
     # Ensure PSD-ness
-    corr_matrix = cov2cor(shift_until_PSD!(corr_matrix, tol))
+    shifted = shift_until_PSD!(corr_matrix, tol)
+    corr_matrix = cov2cor(shifted, sqrt.(diag(shifted)))
 
     return corr_matrix
 end
@@ -378,8 +379,6 @@ function shift_until_PSD!(Σ::AbstractMatrix, tol=1e-4)
     end
     return Σ
 end
-
-cov2cor(C) = cov2cor(C, sqrt.(diag(C)))
 
 """
     compare_correlation()
