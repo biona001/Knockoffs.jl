@@ -209,13 +209,23 @@ end
     @test all(merged.XX̃[:, merged.original] .== X)
 
     # partition_groups
-    p = 100
+    p = 500
     Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1))))
     L = cholesky(Σ).L
     X = randn(p, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
-    @test all(partition_groups(X, cutoff=1) .== collect(1:p))
-    @test all(partition_groups(X, cutoff=0) .== 1)
-    @test issorted(partition_groups(X, cutoff=0.7))
+    groups, rep_variables = partition_groups(X, cutoff=1)
+    @test all(groups .== collect(1:p))
+    groups, rep_variables = partition_groups(X, cutoff=0)
+    @test all(groups .== 1)
+    groups, rep_variables = partition_groups(X, cutoff=0.7)
+    @test length(groups) == length(rep_variables)
+
+    nrep = 2
+    groups, distinct_rep_variables = partition_groups(X, rep_method=:distinct, nrep=nrep)
+    groups, similar_rep_variables = partition_groups(X, rep_method=:similar, nrep=nrep)
+    groups, random_rep_variables = partition_groups(X, rep_method=:random, nrep=nrep)
+    @test length(distinct_rep_variables) == length(similar_rep_variables) == 
+        length(random_rep_variables)
 end
 
 @testset "coefficient_diff" begin

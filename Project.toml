@@ -6,6 +6,7 @@ version = "0.3.0"
 [deps]
 BlockDiagonals = "0a1fb500-61f7-11e9-3c65-f5ef3456f9f0"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+Clustering = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
 CovarianceEstimation = "587fd27a-f159-11e8-2dae-1979310e6154"
 CpuId = "adafc99b-e345-5852-983c-f28acb93d879"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"

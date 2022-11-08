@@ -28,7 +28,7 @@ function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor(Σ.data, σs)
+    Σcor = iscor ? Σ : cov2cor(Σ.data, σs)
     # solve optimization problem
     if method == :equi
         s = solve_equi(Σcor; m=m)
@@ -379,7 +379,7 @@ function shift_until_PSD!(Σ::AbstractMatrix, tol=1e-4)
     return Σ
 end
 
-cov2cor(C) = StatsBase.cov2cor(C, sqrt.(diag(C)))
+cov2cor(C) = cov2cor(C, sqrt.(diag(C)))
 
 """
     compare_correlation()

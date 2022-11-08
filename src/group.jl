@@ -1122,11 +1122,11 @@ function modelX_gaussian_group_knockoffs(
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
+    Σcor = iscor ? Σ : cov2cor!(Matrix(Σ), σs)
     # compute S matrix using the specified knockoff method
     S, γs = solve_s_group(Σcor, groups, method; m=m, kwargs...)
     # rescale S back to the result for a covariance matrix   
-    iscor || StatsBase.cor2cov!(S, σs)
+    iscor || cor2cov!(S, σs)
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
     return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
@@ -1185,22 +1185,28 @@ function modelX_gaussian_rep_group_knockoffs(
 end
 
 """
-    partition_groups(X; [cutoff], [min_clusters])
+    partition_groups(X; [rep_method], [cutoff], [min_clusters], [nrep])
 
 Computes a group partition based on input matrix `X` using single-linkage
-hierarchical clustering. We use a shrunken empirical correlation matrix as
-the distance matrix.
+hierarchical clustering. By default, a list of variables most representative
+of each group will also be computed.
 
 # Inputs
 + `X`: `n × p` Data matrix, each column is a feature
++ `rep_method`: Method for selecting top `nrep` representative variables from 
+    each group. If not using `:random`, the first representative will be
+    selected by computing which element has the smallest distance to all
+    other elements in the cluster, i.e. the mediod. Other representatives are
+    selected based on specific method chosies
+    - `:distinct`: Will choose representatives that are as distinct as possible (default)
+    - `:similar`: will choose representatives that are as similar as possible
+    - `:random`: will choose representatives (including the first) uniformly randomly
 + `cutoff`: Height value for which the clustering result is cut, between 0 and 1
     (default 0.7). This ensures that no variables between 2 groups have correlation
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
-+ `nrep`: Number of representative per group. Defaults 1. Group representatives 
-    will be selected by computing which element has the smallest distance to all
-    other elements in the cluster, i.e. the mediod. 
++ `nrep`: Number of representative per group. Defaults 1. 
 
 If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
 number of clusters is not less than `min_clusters` and their height is not 
@@ -1208,21 +1214,22 @@ above `cutoff`.
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `mediods`: Length `G` vector, where `G` is number of unique groups. `mediods[i]`
-    is the column of `X` that is most representative of group `i`.
++ `rep_variables`: Variables most representative of X. These are typically used
+    to compare group knockoff vs representative group knockoff
 
 # todo:
 add option to enforce adjacency constraint
 """
 function partition_groups(
     X::AbstractMatrix;
+    rep_method::Symbol = :distinct,
     cutoff = 0.7,
     min_clusters = 1,
     nrep = 1,
     )
     # approximate correlation matrix
     distmat = cov(X)
-    StatsBase.cov2cor!(distmat, sqrt.(diag(distmat)))
+    cov2cor!(distmat, sqrt.(diag(distmat)))
     # convert correlation matrix to a distance matrix
     @inbounds @simd for i in eachindex(distmat)
         distmat[i] = 1 - abs(distmat[i])
@@ -1230,17 +1237,76 @@ function partition_groups(
     # hierarchical clustering
     cluster_result = hclust(distmat; linkage=:single)
     groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
-    # compute medoids (i.e. select nrep representatives from each group)
-    mediods = Int[]
+    if rep_method == :distinct
+        rep_variables = distinct_reps(distmat, groups; nrep=nrep)
+    elseif rep_method == :similar
+        rep_variables = similar_reps(distmat, groups; nrep=nrep)
+    elseif rep_method == :random
+        rep_variables = random_reps(groups; nrep=nrep)
+    else
+        error("rep_method must be :distinct, :similar, or :random but was $rep_method")
+    end
+    return groups, rep_variables
+end
+
+function distinct_reps(distmat::AbstractMatrix, groups::AbstractVector; nrep = 1)
+    group_reps = Int[]
+    cur_reps = Int[]
+    for g in unique(groups)
+        group_idx = findall(x -> x == g, groups)
+        sub_distmat = @views(distmat[group_idx, group_idx])
+        empty!(cur_reps)
+        # select first representative
+        colsum = sum(sub_distmat, dims=1) |> vec
+        _, r1 = findmin(colsum)
+        push!(group_reps, group_idx[r1])
+        push!(cur_reps, r1)
+        # if >1 representative are desired, choose ones most different than the selected ones
+        reps = min(length(group_idx), nrep)
+        for i in 2:reps
+            ri, max_dist = 0, typemin(eltype(sub_distmat))
+            for j in 1:length(group_idx)
+                j ∈ cur_reps && continue
+                dist_j = zero(eltype(sub_distmat))
+                for k in cur_reps
+                    dist_j += sub_distmat[k, j]
+                end
+                if dist_j > max_dist
+                    ri = j
+                    max_dist = dist_j
+                end
+            end
+            push!(group_reps, group_idx[ri])
+            push!(cur_reps, ri)
+        end
+    end
+    return sort!(group_reps)
+end
+
+function similar_reps(distmat::AbstractMatrix, groups::AbstractVector; nrep = 1)
+    group_reps = Int[]
     for g in unique(groups)
         group_idx = findall(x -> x == g, groups)
         @views colsum = sum(distmat[group_idx, group_idx], dims=1) |> vec
+        # compute top nrep variables that are closest to other variables
         perm = partialsortperm(colsum, 1:min(length(group_idx), nrep))
         for p in perm
-            push!(mediods, group_idx[p])
+            push!(group_reps, group_idx[p])
         end
     end
-    return groups, mediods
+    return sort!(group_reps)
+end
+
+function random_reps(groups::AbstractVector; nrep = 1)
+    group_reps = Int[]
+    for g in unique(groups)
+        group_idx = findall(x -> x == g, groups)
+        reps = min(length(group_idx), nrep)
+        for p in sample(1:length(group_idx), reps, replace=false)
+            push!(group_reps, group_idx[p])
+        end
+    end
+    return sort!(group_reps)
 end
 
 # every `windowsize` SNPs form a group
@@ -1298,7 +1364,7 @@ function modelX_gaussian_group_knockoffs(
         # approximate covariance matrix and scale it to correlation matrix
         @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
         σs = sqrt.(diag(Σapprox))
-        Σcor = StatsBase.cov2cor!(Σapprox.data, σs)
+        Σcor = cov2cor!(Σapprox.data, σs)
         # define group-blocks
         groups = partition_group(1:length(cur_range); windowsize=10)
         empty!(group_ranges); empty!(Sblocks)
@@ -1312,7 +1378,7 @@ function modelX_gaussian_group_knockoffs(
         @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
         # rescale S back to the result for a covariance matrix
         for (i, idx) in enumerate(group_ranges)
-            StatsBase.cor2cov!(S.blocks[i], @view(σs[idx]))
+            cor2cov!(S.blocks[i], @view(σs[idx]))
         end
         # generate knockoffs
         μ = vec(mean(X, dims=1))
