@@ -565,7 +565,7 @@ function merge_knockoffs_with_original(
             push!(knockoff[i], knoc)
         end
     end
-    return MergedKnockoff(Xfull, original, knockoff, m, p)
+    return MergedKnockoff(Xfull, original, knockoff, p, m)
 end
 
 """

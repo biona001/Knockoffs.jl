@@ -107,18 +107,11 @@ function select_features(
         for j in group_idx ∩ original
             original_effect += abs(β[j])
         end
-        # compute importance score of group i's knockoffs
-        # todo: make a better version of this stupid logic
+        # compute importance score of group i's m knockoffs
         fill!(T̃, 0)
-        group_var = findall(x -> x == i, original_variable_groups) # group_var are original variables that belong to current group
-        for j in group_var
-            # @show j
-            # @show knockoff[j]
-
-            # todo: this might be wrong, because I shuffled the index of knockoffs
-            #       I think we need to ensure jj index over the order of the original variables
+        group_members = findall(x -> x == i, original_variable_groups) # group_members are original variables that belong to current group
+        for j in group_members
             for (idx, jj) in enumerate(knockoff[j])
-                # @show jj
                 T̃[idx] += abs(β[jj])
             end
         end

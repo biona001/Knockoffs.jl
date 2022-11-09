@@ -136,7 +136,7 @@ function fit_lasso(
     βs, a0s = Vector{T}[], T[]
     for fdr in fdrs
         # apply knockoff-filter based on target fdr
-        β_filtered= extract_beta(βestim, fdr, merged_ko.original, merged_ko.knockoff, filter_method)
+        β_filtered = extract_beta(βestim, fdr, merged_ko.original, merged_ko.knockoff, filter_method)
         # debias the estimates if requested
         if !isnothing(debias) && count(!iszero, β_filtered) > 0
             a0 = debias!(β_filtered, ko.ko.X, y; method=debias, d=d, kwargs...)
