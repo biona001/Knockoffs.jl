@@ -39,7 +39,7 @@ end
 
 struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff
     X::Matrix{T} # original n × p design matrix
-    ko::GaussianKnockoff # knockoff struct of the representative variants
+    ko::Union{GaussianKnockoff, GaussianGroupKnockoff} # knockoff struct of the representative variants
     groups::Vector{Int} # p × 1 vector of group membership
     groups_reps::Vector{Int} # vector of group representatives
 end

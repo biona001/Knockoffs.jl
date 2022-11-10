@@ -103,7 +103,7 @@ function solve_equi(
     Σ::AbstractMatrix{T}; # correlation matrix
     m::Int = 1 # number of multiple knockoffs to generate
     ) where T
-    λmin = eigmin(Σ)
+    λmin = eigvals(Σ) |> minimum
     sj = min(1, (m+1)/m * λmin)
     return fill(sj, size(Σ, 1))
 end

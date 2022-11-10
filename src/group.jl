@@ -1133,10 +1133,12 @@ function modelX_gaussian_group_knockoffs(
 end
 
 """
-    modelX_gaussian_rep_group_knockoffs()
+    modelX_gaussian_rep_group_knockoffs(X, method; [nrep], [cutoff], [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ; [nrep], [cutoff], [m], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
 
 Selects `nrep` variables from each group and generate group knockoffs based on the 
-smaller set of variants. 
+smaller set of variants. If `nrep=1`, we generate (non-grouped) knockoffs.
 """
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
@@ -1147,26 +1149,25 @@ function modelX_gaussian_rep_group_knockoffs(
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
-    Σ = cov(X)
-    groups, group_reps = hc_partition_groups(Σ, cutoff=cutoff, nrep=nrep)
-    return modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; m=m, 
-        covariance_approximator=covariance_approximator, kwargs...)
+    Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
+    μ = vec(mean(X, dims=1))                  # mean component is just column means
+    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox; m=m, 
+        nrep=nrep, curoff=cutoff, kwargs...)
 end
 
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
-    groups::AbstractVector{Int},
-    group_reps::AbstractVector{Int};
+    μ::AbstractVector, 
+    Σ::AbstractMatrix;
+    nrep::Int = 1,
     m::Int = 1,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    cutoff::Number = 0.7,
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
-    Xrep = @view(X[:, group_reps])               # restrict X to representative columns 
-    Σapprox = cov(covariance_approximator, Xrep) # approximate covariance matrix
-    μ = vec(mean(Xrep, dims=1))                  # mean component is just column means
-    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, groups, group_reps;
-        m=m, kwargs...)
+    groups, group_reps = hc_partition_groups(cov(X), cutoff=cutoff, nrep=nrep)
+    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps;
+        m=m, nrep=nrep, kwargs...)
 end
 
 function modelX_gaussian_rep_group_knockoffs(
@@ -1176,18 +1177,24 @@ function modelX_gaussian_rep_group_knockoffs(
     Σ::AbstractMatrix,
     groups::AbstractVector{Int},
     group_reps::AbstractVector{Int};
+    nrep::Int = 1,
     m::Int = 1,
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
-    # first check for errors
-    method in REP_GROUP_KNOCKOFFS || error("method must be one of $REP_GROUP_KNOCKOFFS but was $method")
-    rep_method = string(method)[2:end] |> Symbol
-    length(μ) == length(group_reps) || error("Expected length(μ) == length(group_reps)")
-    size(Σ, 1) == size(Σ, 2) == length(group_reps) || 
-        error("Expected size(Σ, 1) == size(Σ, 2) == length(group_reps)")
-    # generate (non-grouped) knockoff of X restricted to representative columns
-    Xrep = @view(X[:, group_reps])
-    ko = modelX_gaussian_knockoffs(Xrep, rep_method, μ, Matrix(Σ); m=m, kwargs...)
+    # note: these cannot be views because in the resulting struct requires concrete types not subarrays
+    μrep = μ[group_reps]
+    Σrep = Σ[group_reps, group_reps]
+    Xrep = X[:, group_reps]
+    if nrep == 1
+        # generate (non-grouped) knockoff of X restricted to representative columns
+        ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
+    else
+        # generate (smaller) group knockoffs of X
+        Xrep_groups = groups[group_reps]
+        ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
+            m=m, kwargs...)
+    end
+
     return GaussianRepGroupKnockoff(X, ko, groups, group_reps)
 end
 
