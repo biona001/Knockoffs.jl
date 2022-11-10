@@ -11,9 +11,9 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
-    * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
+    * `:sdp_ccd` fast SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
     + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
-        [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+        [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
@@ -38,8 +38,8 @@ function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
         s = solve_MVR(Σcor; m=m, kwargs...)
     elseif method == :maxent
         s = solve_max_entropy(Σcor; m=m, kwargs...)
-    elseif method == :sdp_fast
-        s = solve_sdp_fast(Σcor; m=m, kwargs...)
+    elseif method == :sdp_ccd
+        s = solve_sdp_ccd(Σcor; m=m, kwargs...)
     else
         error("Method must be one of $SINGLE_KNOCKOFFS but was $method")
     end
@@ -272,7 +272,7 @@ function solve_max_entropy(
 end
 
 """
-    solve_sdp_fast(Σ::AbstractMatrix)
+    solve_sdp_ccd(Σ::AbstractMatrix)
 
 Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent, 
 given correlation matrix Σ. Users should call `solve_s` instead of this function. 
@@ -280,7 +280,7 @@ given correlation matrix Σ. Users should call `solve_s` instead of this functio
 # Reference
 Algorithm 2.2 from "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function solve_sdp_fast(
+function solve_sdp_ccd(
     Σ::AbstractMatrix{T};
     λ::T = 0.5, # barrier coefficient
     μ::T = 0.8, # decay parameter
