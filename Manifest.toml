@@ -9,6 +9,12 @@ git-tree-sha1 = "6252039f98492252f9e47c312c8ffda0e3b9e78d"
 uuid = "ae81ac8f-d209-56e5-92de-9978fef736f9"
 version = "0.1.3+0"
 
+[[deps.AbstractFFTs]]
+deps = ["ChainRulesCore", "LinearAlgebra"]
+git-tree-sha1 = "69f7020bd72f069c219b5e8c236c1fa90d2cb409"
+uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
+version = "1.2.1"
+
 [[deps.Adapt]]
 deps = ["LinearAlgebra"]
 git-tree-sha1 = "195c5505521008abea5aee4f96930717958eac6f"
@@ -307,6 +313,18 @@ git-tree-sha1 = "d1933fd3e53e01e2d0ae98b8f7f65784e2d5430b"
 uuid = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"
 version = "1.2.10"
 
+[[deps.FFTW]]
+deps = ["AbstractFFTs", "FFTW_jll", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
+git-tree-sha1 = "90630efff0894f8142308e334473eba54c433549"
+uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+version = "1.5.0"
+
+[[deps.FFTW_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "c6033cc3892d0ef5bb9cd29b7f2f0331ea5184ea"
+uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
+version = "3.3.10+0"
+
 [[deps.FilePathsBase]]
 deps = ["Compat", "Dates", "Mmap", "Printf", "Test", "UUIDs"]
 git-tree-sha1 = "e27c4ebe80e8699540f2d6c805cc12203b614f12"
@@ -540,6 +558,12 @@ git-tree-sha1 = "62b252d7993067154c0fb5c345842df0194c3e3b"
 uuid = "bdcacae8-1622-11e9-2a5c-532679323890"
 version = "0.12.138"
 
+[[deps.LowRankApprox]]
+deps = ["FFTW", "FillArrays", "LinearAlgebra", "Nullables", "Random", "SparseArrays", "Test"]
+git-tree-sha1 = "dd3ad841e372861781af2326e467bb46709408f0"
+uuid = "898213cb-b102-5a47-900c-97e73b919f73"
+version = "0.5.2"
+
 [[deps.METIS_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "1fd0a97409e418b78c53fac671cf4622efdf0f21"
@@ -621,6 +645,11 @@ version = "0.4.12"
 
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
+
+[[deps.Nullables]]
+git-tree-sha1 = "8f87854cc8f3685a60689d8edecaa29d2251979b"
+uuid = "4d1e1d77-625e-5b40-9113-a560ec7a8ecd"
+version = "1.0.0"
 
 [[deps.OffsetArrays]]
 deps = ["Adapt"]

@@ -1132,6 +1132,12 @@ function modelX_gaussian_group_knockoffs(
     return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
 end
 
+"""
+    modelX_gaussian_rep_group_knockoffs()
+
+Selects `nrep` variables from each group and generate group knockoffs based on the 
+smaller set of variants. 
+"""
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol;
@@ -1139,10 +1145,10 @@ function modelX_gaussian_rep_group_knockoffs(
     cutoff::Number = 0.7,
     m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs... # extra arguments for solve_s
+    kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
     Σ = cov(X)
-    groups, group_reps = partition_groups(Σ, cutoff=cutoff, nrep=nrep)
+    groups, group_reps = hc_partition_groups(Σ, cutoff=cutoff, nrep=nrep)
     return modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; m=m, 
         covariance_approximator=covariance_approximator, kwargs...)
 end
@@ -1154,7 +1160,7 @@ function modelX_gaussian_rep_group_knockoffs(
     group_reps::AbstractVector{Int};
     m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs... # extra arguments for solve_s
+    kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
     Xrep = @view(X[:, group_reps])               # restrict X to representative columns 
     Σapprox = cov(covariance_approximator, Xrep) # approximate covariance matrix
@@ -1171,7 +1177,7 @@ function modelX_gaussian_rep_group_knockoffs(
     groups::AbstractVector{Int},
     group_reps::AbstractVector{Int};
     m::Int = 1,
-    kwargs... # extra arguments for solve_s
+    kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
     # first check for errors
     method in REP_GROUP_KNOCKOFFS || error("method must be one of $REP_GROUP_KNOCKOFFS but was $method")
@@ -1186,7 +1192,7 @@ function modelX_gaussian_rep_group_knockoffs(
 end
 
 """
-    partition_groups(Σ; [rep_method], [cutoff], [min_clusters], [nrep])
+    hc_partition_groups(Σ; [rep_method], [cutoff], [min_clusters], [nrep])
 
 Computes a group partition based on correlation matrix `Σ` using single-linkage
 hierarchical clustering. By default, a list of variables most representative
@@ -1194,20 +1200,15 @@ of each group will also be computed.
 
 # Inputs
 + `Σ`: `p × p` correlation matrix
-+ `rep_method`: Method for selecting top `nrep` representative variables from 
-    each group. If not using `:random`, the first representative will be
-    selected by computing which element has the smallest distance to all
-    other elements in the cluster, i.e. the mediod. Other representatives are
-    selected based on specific method chosies
-    - `:distinct`: Will choose representatives that are as distinct as possible (default)
-    - `:similar`: will choose representatives that are as similar as possible
-    - `:random`: will choose representatives (including the first) uniformly randomly
 + `cutoff`: Height value for which the clustering result is cut, between 0 and 1
     (default 0.7). This ensures that no variables between 2 groups have correlation
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
-+ `nrep`: Number of representative per group. Defaults 1. 
++ `nrep`: Number of representative per group. Defaults 1. If `nrep=1`, the 
+    representative will be selected by computing which element has the smallest
+    distance to all other elements in the cluster, i.e. the mediod. Otherise, 
+    we will run interpolative decomposition to select representatives
 
 If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
 number of clusters is not less than `min_clusters` and their height is not 
@@ -1221,9 +1222,8 @@ above `cutoff`.
 # todo:
 add option to enforce adjacency constraint
 """
-function partition_groups(
+function hc_partition_groups(
     Σ::AbstractMatrix;
-    rep_method::Symbol = :distinct,
     cutoff = 0.7,
     min_clusters = 1,
     nrep = 1,
@@ -1240,76 +1240,58 @@ function partition_groups(
     # hierarchical clustering
     cluster_result = hclust(distmat; linkage=:single)
     groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
-    if rep_method == :distinct
-        rep_variables = distinct_reps(distmat, groups; nrep=nrep)
-    elseif rep_method == :similar
-        rep_variables = similar_reps(distmat, groups; nrep=nrep)
-    elseif rep_method == :random
-        rep_variables = random_reps(groups; nrep=nrep)
+    # select representatives
+    if nrep == 1
+        rep_variables = top_rep(distmat, groups)
     else
-        error("rep_method must be :distinct, :similar, or :random but was $rep_method")
+        rep_variables = id_reps(Σ, groups, nrep)
     end
     return groups, rep_variables
 end
 
-function distinct_reps(distmat::AbstractMatrix, groups::AbstractVector; nrep = 1)
-    group_reps = Int[]
-    cur_reps = Int[]
-    for g in unique(groups)
-        group_idx = findall(x -> x == g, groups)
-        sub_distmat = @views(distmat[group_idx, group_idx])
-        empty!(cur_reps)
-        # select first representative
-        colsum = sum(sub_distmat, dims=1) |> vec
-        _, r1 = findmin(colsum)
-        push!(group_reps, group_idx[r1])
-        push!(cur_reps, r1)
-        # if >1 representative are desired, choose ones most different than the selected ones
-        reps = min(length(group_idx), nrep)
-        for i in 2:reps
-            ri, max_dist = 0, typemin(eltype(sub_distmat))
-            for j in 1:length(group_idx)
-                j ∈ cur_reps && continue
-                dist_j = zero(eltype(sub_distmat))
-                for k in cur_reps
-                    dist_j += sub_distmat[k, j]
-                end
-                if dist_j > max_dist
-                    ri = j
-                    max_dist = dist_j
-                end
-            end
-            push!(group_reps, group_idx[ri])
-            push!(cur_reps, ri)
-        end
-    end
-    return sort!(group_reps)
-end
-
-function similar_reps(distmat::AbstractMatrix, groups::AbstractVector; nrep = 1)
+# computes a single representative from each group
+function top_rep(distmat::AbstractMatrix, groups::AbstractVector)
     group_reps = Int[]
     for g in unique(groups)
         group_idx = findall(x -> x == g, groups)
         @views colsum = sum(distmat[group_idx, group_idx], dims=1) |> vec
-        # compute top nrep variables that are closest to other variables
-        perm = partialsortperm(colsum, 1:min(length(group_idx), nrep))
-        for p in perm
-            push!(group_reps, group_idx[p])
+        _, r1 = findmin(colsum)
+        push!(group_reps, group_idx[r1])
+    end
+    return sort!(group_reps)
+end
+
+function id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
+    group_reps = Int[]
+    for g in unique(groups)
+        group_idx = findall(x -> x == g, groups)
+        Σg = @views(Σ[group_idx, group_idx])
+        rk = min(nrep, length(group_idx))
+        col_selected = interpolative_decomposition(Σg, rk)
+        for c in col_selected
+            push!(group_reps, group_idx[c])
         end
     end
     return sort!(group_reps)
 end
 
-function random_reps(groups::AbstractVector; nrep = 1)
-    group_reps = Int[]
-    for g in unique(groups)
-        group_idx = findall(x -> x == g, groups)
-        reps = min(length(group_idx), nrep)
-        for p in sample(1:length(group_idx), reps, replace=false)
-            push!(group_reps, group_idx[p])
-        end
-    end
-    return sort!(group_reps)
+function interpolative_decomposition(Σ::AbstractMatrix, rk::Int)
+    # check error
+    p = size(Σ, 1)
+    p == size(Σ, 2) || error("Expected size(Σ, 1) == size(Σ, 2)")
+    rk ≤ p || error("maximum rank $rk exceeded dimension of Σ")
+    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    # Run ID
+    A = cholesky(PositiveFactorizations.Positive, Σ).U
+    col_selected, redun_cols, T = id(A, rank=rk)
+    # col_selected = nothing
+    # for rk in 1:max_rank
+    #     col_selected, redun_cols, T = id(A, rank=rk)
+    #     if norm(A[:, redun_cols] - A[:, col_selected]*T) / Anorm > 0.25
+    #         break
+    #     end
+    # end
+    return col_selected
 end
 
 # every `windowsize` SNPs form a group

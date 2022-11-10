@@ -27,6 +27,7 @@ using Ipopt
 using SCS
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
+using LowRankApprox: id
 
 @reexport using GLM
 
@@ -62,7 +63,7 @@ export knockoff_filter,
     # utilities
     merge_knockoffs_with_original, simulate_AR1,
     download_1000genomes,
-    simulate_block_covariance, partition_groups
+    simulate_block_covariance, hc_partition_groups
 
 include("struct.jl")
 include("fixed.jl")
