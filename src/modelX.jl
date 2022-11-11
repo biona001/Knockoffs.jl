@@ -62,7 +62,7 @@ function modelX_gaussian_knockoffs(
     s = solve_s(Symmetric(Σ), method; m=m, kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, Symmetric(Σ), Diagonal(s); m=m)
-    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, m)
 end
 
 """

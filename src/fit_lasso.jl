@@ -64,7 +64,7 @@ end
 function fit_lasso(
     y::AbstractVector{T},
     X::AbstractMatrix{T}, 
-    ko::Knockoff;
+    ko::Knockoff; # GaussianRepGroupKnockoff has specialized fit_lasso
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
@@ -74,7 +74,7 @@ function fit_lasso(
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     X̃ = ko.X̃
-    m = Int(size(X̃, 2) / size(X, 2)) # number of knockoffs per feature
+    m = ko.m # number of knockoffs per feature
     # merge X with its knockoffs X̃ and shuffle around the indices
     merged_ko = merge_knockoffs_with_original(X, X̃)
     # cross validate for λ, then refit Lasso with best λ
@@ -121,11 +121,10 @@ function fit_lasso(
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
-    X̃ = ko.ko.X̃
-    m = Int(size(X̃, 2) / length(ko.groups_reps)) # number of knockoffs per feature
+    m = ko.ko.m # number of knockoffs per feature
     # merge X with its knockoffs X̃ and shuffle around the indices
-    Xrep = @view(X[:, ko.groups_reps])
-    merged_ko = merge_knockoffs_with_original(Xrep, X̃)
+    Xrep = @view(X[:, ko.group_reps])
+    merged_ko = merge_knockoffs_with_original(Xrep, ko.ko.X̃)
     # cross validate for λ, then refit Lasso with best λ
     knockoff_cv = glmnetcv(merged_ko.XX̃, ytmp, d; kwargs...)
     λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
@@ -135,15 +134,19 @@ function fit_lasso(
     # compute feature importance statistics and allocate necessary knockoff-filter variables
     βs, a0s = Vector{T}[], T[]
     for fdr in fdrs
-        # apply knockoff-filter based on target fdr
-        β_filtered = extract_beta(βestim, fdr, merged_ko.original, merged_ko.knockoff, filter_method)
+        if ko.nrep == 1 # single reprensetative from each group: apply standard knockoff filter
+            β_filtered = extract_beta(βestim, fdr, merged_ko.original, merged_ko.knockoff, filter_method)
+        else # multiple reprensetative from each group: apply group knockoff filter
+            groups_full = repeat(ko.groups[ko.group_reps], inner=m+1)
+            β_filtered = extract_beta(βestim, fdr, groups_full, merged_ko.original, merged_ko.knockoff, filter_method)
+        end
         # debias the estimates if requested
         if !isnothing(debias) && count(!iszero, β_filtered) > 0
             a0 = debias!(β_filtered, ko.ko.X, y; method=debias, d=d, kwargs...)
         end
         # save beta and intercept
         β_filtered_full = zeros(T, size(X, 2))
-        β_filtered_full[ko.groups_reps] .= β_filtered
+        β_filtered_full[ko.group_reps] .= β_filtered
         push!(βs, β_filtered_full)
         push!(a0s, a0)
     end

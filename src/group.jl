@@ -1129,7 +1129,7 @@ function modelX_gaussian_group_knockoffs(
     iscor || cor2cov!(S, σs)
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
-    return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
+    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method)
 end
 
 """
@@ -1185,6 +1185,7 @@ function modelX_gaussian_rep_group_knockoffs(
     μrep = μ[group_reps]
     Σrep = Σ[group_reps, group_reps]
     Xrep = X[:, group_reps]
+
     if nrep == 1
         # generate (non-grouped) knockoff of X restricted to representative columns
         ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
@@ -1195,7 +1196,7 @@ function modelX_gaussian_rep_group_knockoffs(
             m=m, kwargs...)
     end
 
-    return GaussianRepGroupKnockoff(X, ko, groups, group_reps)
+    return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
 end
 
 """

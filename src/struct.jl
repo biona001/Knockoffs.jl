@@ -5,34 +5,29 @@ abstract type Knockoff end
 
 struct GaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S <: Symmetric} <: Knockoff
     X::M # n × p design matrix
-    X̃::Matrix{T} # n × p knockoff of X
+    X̃::Matrix{T} # n × mp knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
-end
-
-function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, method::Symbol) where T
-    GaussianKnockoff(X, X̃, T[], Symmetric(Matrix{T}(undef, 0, 0)), method)
-end
-
-function gaussian_knockoff(X::AbstractMatrix{T}, X̃::AbstractMatrix{T}, s::AbstractVector{T}, method::Symbol) where T
-    GaussianKnockoff(X, X̃, s, Symmetric(Matrix{T}(undef, 0, 0)), method)
+    m::Int # number of knockoffs per feature generated
 end
 
 struct ApproxGaussianKnockoff{T<:AbstractFloat, M<:AbstractMatrix, S<:Symmetric} <: Knockoff
     X::M # n × p design matrix
-    X̃::Matrix{T} # n × p knockoff of X
+    X̃::Matrix{T} # n × mp knockoff of X
     s::Vector{T} # p × 1 vector. Diagonal(s) and 2Σ - Diagonal(s) are both psd
     Σ::S # p × p block-diagonal covariance matrix. 
     method::Symbol # method for solving s
+    m::Int # number of knockoffs per feature generated
 end
 
 struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric} <: Knockoff
     X::Matrix{T} # n × p design matrix
-    X̃::Matrix{T} # n × p knockoff of X
+    X̃::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
     S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
     γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
+    m::Int # number of knockoffs per feature generated
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
 end
@@ -41,7 +36,8 @@ struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff
     X::Matrix{T} # original n × p design matrix
     ko::Union{GaussianKnockoff, GaussianGroupKnockoff} # knockoff struct of the representative variants
     groups::Vector{Int} # p × 1 vector of group membership
-    groups_reps::Vector{Int} # vector of group representatives
+    group_reps::Vector{Int} # vector of representative variables (i.e. columns of X)
+    nrep::Int # number of representatives per group
 end
 
 struct MergedKnockoff{T} <: Knockoff
