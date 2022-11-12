@@ -1199,6 +1199,60 @@ function modelX_gaussian_rep_group_knockoffs(
     return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
 end
 
+function id_partition_groups(
+    Σ::AbstractMatrix;
+    nrep = 1,
+    target = 0.25,
+    verbose=false
+    )
+    p = size(A, 1)
+    @time A = cholesky(PositiveFactorizations.Positive, Σ).U
+    @time sk, rd, T = id(A)
+    @time rk = search_rank(A, sk, target, verbose)
+    group_reps = sort(sk[1:rk])
+    # todo: bin non-represented members
+    non_rep = setdiff(1:p, group_reps)
+end
+
+function test_residuals(not_selected, A::AbstractMatrix{T}, selected, target=0.25) where T
+    S = selected
+    k = length(S)
+    success = true
+    invΣ = inv(Σ[S, S])
+    storage = zeros(T, k)
+    for j in not_selected
+        @views begin
+#             beta = A[:, S] \ A[:, j]
+#             rss = sum(abs2, (A[:, j] - A[:, S]*beta))
+            mul!(storage, invΣ, Σ[S, j])
+            rss = Σ[j, j] - dot(Σ[j, S], storage)
+        end
+        if rss > target
+            success = false
+        end
+    end
+    return success
+end
+
+# note: we cannot do binary search because large ranks can increase residuals
+function search_rank(A::AbstractMatrix, sk::Vector{Int}, target=0.25, verbose=false)
+    p = size(A, 1)
+    rk = 0
+    for k in 1:p
+        selected = @view(sk[1:k])
+        not_selected = @view(sk[k+1:end])
+        success = test_residuals(not_selected, A, selected, target)
+        if success
+            rk = k
+            break
+        end
+        # if mod(k, 10) == 0
+        #     verbose && println("Current rank = $k")
+        # end
+    end
+    return rk
+end
+
 """
     hc_partition_groups(Σ; [rep_method], [cutoff], [min_clusters], [nrep])
 
