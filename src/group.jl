@@ -1218,11 +1218,11 @@ features are assigned to groups according to rule `by`.
     has the largest correlation with it. 
 """
 function id_partition_groups(
-    Σ::AbstractMatrix{T};
+    Σ::AbstractMatrix;
     nrep = 1,
     target = 0.25,
     by = :cor # :cor or :cor_adj
-    ) where T
+    )
     p = size(Σ, 1)
     # compute most reprensentative columns using interpolative decomposition
     A = cholesky(PositiveFactorizations.Positive, Σ).U
@@ -1240,13 +1240,21 @@ function id_partition_groups(
     else
         error("Expected `by` to be :cor or :cor_abs")
     end
-    if nrep == 1
-        group_reps = centers
-    else
-        #todo
+    # pick reprensetatives for each group, centers are always selected
+    group_reps = centers
+    if nrep > 1
+        for g in 1:rk
+            group_idx = findall(x -> x == g, groups) # all variables in this group
+            group_members = setdiff!(group_idx, centers) # remove the representative
+            length(group_members) == 0 && continue
+            Σg = @view(Σ[group_members, group_members])
+            rep_variables = interpolative_decomposition(Σg, nrep - 1)
+            for rep in rep_variables
+                push!(group_reps, group_members[rep])
+            end
+        end
     end
-
-    return groups, group_reps
+    return groups, sort!(group_reps)
 end
 
 function assign_members_cor!(groups, Σ, non_rep, centers)
@@ -1265,20 +1273,27 @@ function assign_members_cor!(groups, Σ, non_rep, centers)
     return groups
 end
 
-function assign_members_cor_adj!(groups, Σ, non_rep, centers)
-    issorted(centers) || error("Expected centers to be sorted")
+function assign_members_cor_adj!(groups, Σ, non_rep, rep_columns)
+    issorted(rep_columns) || error("Expected rep_columns to be sorted")
     for j in non_rep
-        right_idx = searchsortedfirst(centers, j)
-        if right_idx > length(centers) # j is after last center
-            center = centers[end]
-        elseif right_idx == 1 # j is before first center
-            center = centers[1]
+        group_on_right = searchsortedfirst(rep_columns, j)
+        if group_on_right > length(rep_columns) # no group on the right
+            nearest_rep = rep_columns[end]
+        elseif group_on_right == 1 # j comes before the first group
+            nearest_rep = rep_columns[1]
         else # test which of the nearest representative is more correlated with j
-            left, right = centers[right_idx - 1], centers[right_idx]
-            center = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
+            left, right = rep_columns[group_on_right - 1], rep_columns[group_on_right]
+            nearest_rep = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
         end
         # assign j to the group of its representative
-        groups[j] = groups[center]
+        groups[j] = groups[nearest_rep]
+    end
+    # adhoc: second pass to ensure all groups are sorted, since routine above doesn't guarantee sorted
+    # e.g. [111 22 3 4 55555 6666 5 666] (need to convert 66665666 at the far right to a 66666666)
+    prev_group = 1
+    for i in eachindex(groups)
+        (groups[i] < prev_group) && (groups[i] = prev_group)
+        (groups[i] > prev_group) && (prev_group = groups[i])
     end
     return groups
 end
@@ -1311,8 +1326,8 @@ function search_rank(Σ::AbstractMatrix, A::AbstractMatrix, sk::Vector{Int}, tar
             Z = inv(Σ[sk[k], sk[k]])
             μ = Z - dot(δ, invΣ, δ)
             invΣδ = invΣ * δ
-            invΣ = [ invΣ.+(invΣδ*invΣδ')/μ  -invΣδ/μ
-                        -invΣδ'/μ                1/μ ]
+            invΣ = [ invΣ.+(invΣδ*invΣδ')/μ  -invΣδ/μ;
+                        -invΣδ'/μ                1/μ  ]
             # invΣ_correct = inv(Σ[selected, selected])
             # @show all(invΣ .≈ invΣ_correct)
         end
@@ -1414,13 +1429,17 @@ function top_rep(distmat::AbstractMatrix, groups::AbstractVector)
     return sort!(group_reps)
 end
 
+"""
+    id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
+
+Selects `nrep` variables for each group
+"""
 function id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
     group_reps = Int[]
     for g in unique(groups)
         group_idx = findall(x -> x == g, groups)
         Σg = @views(Σ[group_idx, group_idx])
-        rk = min(nrep, length(group_idx))
-        col_selected = interpolative_decomposition(Σg, rk)
+        col_selected = interpolative_decomposition(Σg, nrep)
         for c in col_selected
             push!(group_reps, group_idx[c])
         end
@@ -1428,22 +1447,23 @@ function id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
     return sort!(group_reps)
 end
 
-function interpolative_decomposition(Σ::AbstractMatrix, rk::Int)
+"""
+    interpolative_decomposition(Σg::AbstractMatrix, rk::Int)
+
+Computes the interpolative decomposition of Σg with rank `rk`
+and returns the top `rk` most representative columns of `Σg`
+"""
+function interpolative_decomposition(Σg::AbstractMatrix, rk::Int)
     # check error
-    p = size(Σ, 1)
-    p == size(Σ, 2) || error("Expected size(Σ, 1) == size(Σ, 2)")
-    rk ≤ p || error("maximum rank $rk exceeded dimension of Σ")
-    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    p = size(Σg, 1)
+    p == size(Σg, 2) || error("Expected size(Σg, 1) == size(Σg, 2)")
+    all(x -> x ≈ 1, diag(Σg)) || error("Σg must be scaled to a correlation matrix first.")
+    # quick return
+    rk > p && return collect(1:p)
+    length(Σg) == 1 && return [1]
     # Run ID
-    A = cholesky(PositiveFactorizations.Positive, Σ).U
+    A = cholesky(PositiveFactorizations.Positive, Σg).U
     col_selected, redun_cols, T = id(A, rank=rk)
-    # col_selected = nothing
-    # for rk in 1:max_rank
-    #     col_selected, redun_cols, T = id(A, rank=rk)
-    #     if norm(A[:, redun_cols] - A[:, col_selected]*T) / Anorm > 0.25
-    #         break
-    #     end
-    # end
     return col_selected
 end
 
