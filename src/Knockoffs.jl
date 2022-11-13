@@ -63,7 +63,7 @@ export knockoff_filter,
     # utilities
     merge_knockoffs_with_original, simulate_AR1,
     download_1000genomes,
-    simulate_block_covariance, hc_partition_groups
+    simulate_block_covariance, hc_partition_groups, id_partition_groups
 
 include("struct.jl")
 include("fixed.jl")

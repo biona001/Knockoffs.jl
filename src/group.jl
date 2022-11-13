@@ -1152,7 +1152,7 @@ function modelX_gaussian_rep_group_knockoffs(
     Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
     μ = vec(mean(X, dims=1))                  # mean component is just column means
     return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox; m=m, 
-        nrep=nrep, curoff=cutoff, kwargs...)
+        nrep=nrep, cutoff=cutoff, kwargs...)
 end
 
 function modelX_gaussian_rep_group_knockoffs(
@@ -1205,52 +1205,74 @@ function id_partition_groups(
     target = 0.25,
     verbose=false
     )
-    p = size(A, 1)
     @time A = cholesky(PositiveFactorizations.Positive, Σ).U
     @time sk, rd, T = id(A)
-    @time rk = search_rank(A, sk, target, verbose)
+    @time rk = search_rank(Σ, A, sk, target, verbose)
     group_reps = sort(sk[1:rk])
     # todo: bin non-represented members
+    p = size(A, 1)
     non_rep = setdiff(1:p, group_reps)
 end
 
-function test_residuals(not_selected, A::AbstractMatrix{T}, selected, target=0.25) where T
+"""
+    search_rank(A::AbstractMatrix, sk::Vector{Int}, target=0.25, verbose=false)
+
+Finds the rank (number of columns of A) that best approximates the remaining columns
+such that regressing each remaining variable on those selected has RSS less than some
+target. 
+
++ `Σ`: Original (p × p) correlation matrix
++ `A`: The (upper triangular) cholesky factor of Σ
++ `sk`: The (unsorted) columns of A, earlier ones are more important
++ `target`: Target residual level
+
+note: we cannot do binary search because large ranks can increase residuals
+"""
+function search_rank(Σ::AbstractMatrix, A::AbstractMatrix, sk::Vector{Int}, target=0.25)
+    p = size(A, 1)
+    rk = 0
+    invΣ = inv(Σ[sk[1], sk[1]])
+    for k in 1:p
+        selected = @view(sk[1:k])
+        not_selected = @view(sk[k+1:end])
+        # compute inv(Σ_SS) using block matrix inverse trick
+        # https://math.stackexchange.com/questions/182309/block-inverse-of-symmetric-matrices
+        if k > 1
+            δ = @view(Σ[sk[1:k-1], sk[k]])
+            Z = inv(Σ[sk[k], sk[k]])
+            μ = Z - dot(δ, invΣ, δ)
+            invΣδ = invΣ * δ
+            invΣ = [ invΣ.+(invΣδ*invΣδ')/μ  -invΣδ/μ
+                        -invΣδ'/μ                1/μ ]
+            # invΣ_correct = inv(Σ[selected, selected])
+            # @show all(invΣ .≈ invΣ_correct)
+        end
+        # check if residuals of remaining columns are lower than threshold
+        success = test_residuals(invΣ, Σ, not_selected, selected, target)
+        if success
+            rk = k
+            break
+        end
+    end
+    return rk
+end
+
+function test_residuals(invΣ, Σ::AbstractMatrix{T}, not_selected, selected, target=0.25) where T
     S = selected
     k = length(S)
     success = true
-    invΣ = inv(Σ[S, S])
     storage = zeros(T, k)
     for j in not_selected
         @views begin
-#             beta = A[:, S] \ A[:, j]
-#             rss = sum(abs2, (A[:, j] - A[:, S]*beta))
             mul!(storage, invΣ, Σ[S, j])
             rss = Σ[j, j] - dot(Σ[j, S], storage)
         end
         if rss > target
             success = false
+            break
         end
     end
     return success
-end
-
-# note: we cannot do binary search because large ranks can increase residuals
-function search_rank(A::AbstractMatrix, sk::Vector{Int}, target=0.25, verbose=false)
-    p = size(A, 1)
-    rk = 0
-    for k in 1:p
-        selected = @view(sk[1:k])
-        not_selected = @view(sk[k+1:end])
-        success = test_residuals(not_selected, A, selected, target)
-        if success
-            rk = k
-            break
-        end
-        # if mod(k, 10) == 0
-        #     verbose && println("Current rank = $k")
-        # end
-    end
-    return rk
 end
 
 """
