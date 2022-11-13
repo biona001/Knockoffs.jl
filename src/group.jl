@@ -1199,19 +1199,88 @@ function modelX_gaussian_rep_group_knockoffs(
     return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
 end
 
+"""
+    id_partition_groups(Σ; [nrep], [target], [by])
+
+Compute group members based on interpolative decompositions. An initial pass 
+first selects the most representative features such that regressing each 
+non-represented feature on the selected will have residual less than `target`.
+The selected features are then defined as group centers and the remaining 
+features are assigned to groups according to rule `by`.
+
+# Inputs
++ `Σ`: Correlation matrix of `p` features
++ `nrep`: Number of representative per group. Initial group representatives are
+    guaranteed to be selected
++ `target`: Target residual level for the first pass
++ `by`: Either `:cor` (variants are assigned to the center with largest correlation) 
+    or `:cor_adj` where variants are assigned its left or right center, whichever
+    has the largest correlation with it. 
+"""
 function id_partition_groups(
-    Σ::AbstractMatrix;
+    Σ::AbstractMatrix{T};
     nrep = 1,
     target = 0.25,
-    verbose=false
-    )
-    @time A = cholesky(PositiveFactorizations.Positive, Σ).U
-    @time sk, rd, T = id(A)
-    @time rk = search_rank(Σ, A, sk, target, verbose)
-    group_reps = sort(sk[1:rk])
-    # todo: bin non-represented members
-    p = size(A, 1)
-    non_rep = setdiff(1:p, group_reps)
+    by = :cor # :cor or :cor_adj
+    ) where T
+    p = size(Σ, 1)
+    # compute most reprensentative columns using interpolative decomposition
+    A = cholesky(PositiveFactorizations.Positive, Σ).U
+    sk, _, _ = id(A)
+    rk = search_rank(Σ, A, sk, target)
+    centers = sort(sk[1:rk])
+    # bin non-represented members
+    groups = zeros(Int, p)
+    groups[centers] .= 1:rk
+    non_rep = setdiff(1:p, centers)
+    if by == :cor
+        assign_members_cor!(groups, Σ, non_rep, centers)
+    elseif by == :cor_adj
+        assign_members_cor_adj!(groups, Σ, non_rep, centers)
+    else
+        error("Expected `by` to be :cor or :cor_abs")
+    end
+    if nrep == 1
+        group_reps = centers
+    else
+        #todo
+    end
+
+    return groups, group_reps
+end
+
+function assign_members_cor!(groups, Σ, non_rep, centers)
+    for j in non_rep
+        center, best_dist = 0, typemin(eltype(Σ))
+        # find which of the representatives have largest absolute correlation with j
+        for c in centers
+            if abs(Σ[c, j]) > best_dist
+                center = c
+                best_dist = abs(Σ[c, j])
+            end
+        end
+        # assign j to the group of its representative
+        groups[j] = groups[center]
+    end
+    return groups
+end
+
+function assign_members_cor_adj!(groups, Σ, non_rep, centers)
+    issorted(centers) || error("Expected centers to be sorted")
+    for j in non_rep
+        right_idx = searchsortedfirst(centers, j)
+        if right_idx > length(centers) # j is after last center
+            center = centers[end]
+        elseif right_idx == 1 # j is before first center
+            center = centers[1]
+        else # test which of the nearest representative is more correlated with j
+            left, right = centers[right_idx - 1], centers[right_idx]
+            center = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
+        end
+        # assign j to the group of its representative
+        groups[j] = groups[center]
+    end
+    return groups
 end
 
 """
