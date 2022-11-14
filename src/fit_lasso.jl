@@ -123,8 +123,7 @@ function fit_lasso(
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     m = ko.ko.m # number of knockoffs per feature
     # merge X with its knockoffs X̃ and shuffle around the indices
-    Xrep = @view(X[:, ko.group_reps])
-    merged_ko = merge_knockoffs_with_original(Xrep, ko.ko.X̃)
+    merged_ko = merge_knockoffs_with_original(ko.ko.X, ko.ko.X̃)
     # cross validate for λ, then refit Lasso with best λ
     knockoff_cv = glmnetcv(merged_ko.XX̃, ytmp, d; kwargs...)
     λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]

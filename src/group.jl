@@ -1200,7 +1200,7 @@ function modelX_gaussian_rep_group_knockoffs(
 end
 
 """
-    id_partition_groups(Σ; [nrep], [target], [by])
+    id_partition_groups(Σ; [nrep], [target], [force_contiguous])
 
 Compute group members based on interpolative decompositions. An initial pass 
 first selects the most representative features such that regressing each 
@@ -1209,19 +1209,22 @@ The selected features are then defined as group centers and the remaining
 features are assigned to groups according to rule `by`.
 
 # Inputs
-+ `Σ`: Correlation matrix of `p` features
++ `Σ`: Correlation or covariance matrix of `p` features
 + `nrep`: Number of representative per group. Initial group representatives are
     guaranteed to be selected
 + `target`: Target residual level for the first pass
-+ `by`: Either `:cor` (variants are assigned to the center with largest correlation) 
-    or `:cor_adj` where variants are assigned its left or right center, whichever
-    has the largest correlation with it. 
++ `force_contiguous`: Whether groups are forced to be contiguous. If true,
+    variants are assigned its left or right center, whichever
+    has the largest correlation with it without breaking contiguity.
+
+Note: interpolative decomposition is a stochastic algorithm. See a seed to
+guarantee reproducible results. 
 """
 function id_partition_groups(
     Σ::AbstractMatrix;
     nrep = 1,
     target = 0.25,
-    by = :cor # :cor or :cor_adj
+    force_contiguous = false
     )
     p = size(Σ, 1)
     # compute most reprensentative columns using interpolative decomposition
@@ -1233,13 +1236,8 @@ function id_partition_groups(
     groups = zeros(Int, p)
     groups[centers] .= 1:rk
     non_rep = setdiff(1:p, centers)
-    if by == :cor
-        assign_members_cor!(groups, Σ, non_rep, centers)
-    elseif by == :cor_adj
-        assign_members_cor_adj!(groups, Σ, non_rep, centers)
-    else
-        error("Expected `by` to be :cor or :cor_abs")
-    end
+    force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
+                       assign_members_cor!(groups, Σ, non_rep, centers)
     # pick reprensetatives for each group, centers are always selected
     group_reps = centers
     if nrep > 1
