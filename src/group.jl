@@ -79,11 +79,12 @@ function solve_s_group(
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
     end
-    # permuate S back to the original noncontiguous group structure
+    # permuate S and Σ back to the original noncontiguous group structure
     if permuted
         invpermute!(groups, perm)
         iperm = invperm(perm)
         S .= @view(S[iperm, iperm])
+        Σ .= @view(Σ[iperm, iperm])
     end
     return S, γs
 end
