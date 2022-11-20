@@ -112,7 +112,6 @@ end
 # for group representative variant method
 function fit_lasso(
     y::AbstractVector{T},
-    X::AbstractMatrix{T}, 
     ko::GaussianRepGroupKnockoff;
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
@@ -122,6 +121,7 @@ function fit_lasso(
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     m = ko.ko.m # number of knockoffs per feature
+    p = size(ko.X, 2) # total number of features (before choosing representatives)
     # merge X with its knockoffs X̃ and shuffle around the indices
     merged_ko = merge_knockoffs_with_original(ko.ko.X, ko.ko.X̃)
     # cross validate for λ, then refit Lasso with best λ
@@ -144,12 +144,12 @@ function fit_lasso(
             a0 = debias!(β_filtered, ko.ko.X, y; method=debias, d=d, kwargs...)
         end
         # save beta and intercept
-        β_filtered_full = zeros(T, size(X, 2))
+        β_filtered_full = zeros(T, p)
         β_filtered_full[ko.group_reps] .= β_filtered
         push!(βs, β_filtered_full)
         push!(a0s, a0)
     end
-    return KnockoffFilter(y, X, ko, merged_ko, m, βs, a0s, fdrs, d, debias)
+    return KnockoffFilter(y, ko.X, ko, merged_ko, m, βs, a0s, fdrs, d, debias)
 end
 
 function debias!(

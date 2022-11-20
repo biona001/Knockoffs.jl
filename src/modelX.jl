@@ -89,7 +89,7 @@ and Entropy Maximization" by Gimenez and Zou.
     and the next `p` columns store the second knockoff...etc
 
 # Todo
-efficiency
+When s is the zero vector, X̃ should be identical to X but it isn't
 """
 function condition(
     X::AbstractMatrix, 
