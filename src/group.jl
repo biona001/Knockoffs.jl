@@ -1233,7 +1233,7 @@ function id_partition_groups(
     )
     p = size(Σ, 1)
     target ≥ 0 || error("Expected target to be > 0.")
-    # compute most reprensentative columns using interpolative decomposition
+    # step 1: compute most reprensentative columns using interpolative decomposition
     A = cholesky(PositiveFactorizations.Positive, Σ).U
     sk, _, _ = id(A)
     rk = search_rank(Σ, A, sk, target)
@@ -1244,15 +1244,17 @@ function id_partition_groups(
     non_rep = setdiff(1:p, centers)
     force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
                        assign_members_cor!(groups, Σ, non_rep, centers)
-    # pick reprensetatives for each group, centers are always selected
+    # step 2: pick reprensetatives for each group. Centers are always selected
     group_reps = centers
     if nrep > 1
         for g in 1:rk
             group_idx = findall(x -> x == g, groups) # all variables in this group
             group_members = setdiff!(group_idx, centers) # remove the representative
             length(group_members) == 0 && continue
+            # apply ID to given group
             Σg = @view(Σ[group_members, group_members])
-            rep_variables = interpolative_decomposition(Σg, nrep - 1)
+            A = cholesky(PositiveFactorizations.Positive, Σg).U
+            rep_variables = interpolative_decomposition(A, nrep - 1)
             for rep in rep_variables
                 push!(group_reps, group_members[rep])
             end
@@ -1272,7 +1274,7 @@ function id_partition_groups(
     # get empirical covariance matrix and scale it to correlation matrix
     Σ = cov(X)
     cov2cor!(Σ, sqrt.(diag(Σ)))
-    # compute most reprensentative columns using interpolative decomposition
+    # step 1: compute most reprensentative columns using interpolative decomposition
     sk, _, _ = id(X)
     rk = search_rank(Σ, X, sk, target)
     centers = sort(sk[1:rk])
@@ -1282,7 +1284,7 @@ function id_partition_groups(
     non_rep = setdiff(1:p, centers)
     force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
                        assign_members_cor!(groups, Σ, non_rep, centers)
-    # pick reprensetatives for each group, centers are always selected
+    # step 2: pick reprensetatives for each group. Centers are always selected
     group_reps = centers
     if nrep > 1
         for g in 1:rk
@@ -1474,14 +1476,18 @@ end
 """
     id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
 
-Selects `nrep` variables for each group
+Selects `nrep` variables for each group. Σ is assumed a correlation matrix
 """
 function id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
+    all(x -> x ≈ 1, diag(Σ)) || error("Σg must be scaled to a correlation matrix first.")
     group_reps = Int[]
     for g in unique(groups)
         group_idx = findall(x -> x == g, groups)
+        # apply ID to given group
         Σg = @views(Σ[group_idx, group_idx])
-        col_selected = interpolative_decomposition(Σg, nrep)
+        A = cholesky(PositiveFactorizations.Positive, Σg).U
+        col_selected = interpolative_decomposition(A, nrep)
+        # save reps
         for c in col_selected
             push!(group_reps, group_idx[c])
         end
@@ -1490,21 +1496,17 @@ function id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
 end
 
 """
-    interpolative_decomposition(Σg::AbstractMatrix, rk::Int)
+    interpolative_decomposition(A::AbstractMatrix, rk::Int)
 
-Computes the interpolative decomposition of Σg with rank `rk`
-and returns the top `rk` most representative columns of `Σg`
+Computes the interpolative decomposition of A with rank `rk`
+and returns the top `rk` most representative columns of `A`
 """
-function interpolative_decomposition(Σg::AbstractMatrix, rk::Int)
-    # check error
-    p = size(Σg, 1)
-    p == size(Σg, 2) || error("Expected size(Σg, 1) == size(Σg, 2)")
-    all(x -> x ≈ 1, diag(Σg)) || error("Σg must be scaled to a correlation matrix first.")
+function interpolative_decomposition(A::AbstractMatrix, rk::Int)
+    p = size(A, 1)
     # quick return
     rk > p && return collect(1:p)
-    length(Σg) == 1 && return [1]
+    length(A) == 1 && return [1]
     # Run ID
-    A = cholesky(PositiveFactorizations.Positive, Σg).U
     col_selected, redun_cols, T = id(A, rank=rk)
     return col_selected
 end
