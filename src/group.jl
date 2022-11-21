@@ -1201,7 +1201,8 @@ function modelX_gaussian_rep_group_knockoffs(
 end
 
 """
-    id_partition_groups(Σ; [nrep], [target], [force_contiguous])
+    id_partition_groups(Σ::Symmetric; [nrep], [target], [force_contiguous])
+    id_partition_groups(X::AbstractMatrix; [nrep], [target], [force_contiguous])
 
 Compute group members based on interpolative decompositions. An initial pass 
 first selects the most representative features such that regressing each 
@@ -1210,10 +1211,13 @@ The selected features are then defined as group centers and the remaining
 features are assigned to groups according to rule `by`.
 
 # Inputs
-+ `Σ`: Correlation or covariance matrix of `p` features
++ `Σ`: p × p correlation or covariance matrix of features, must be wrapped in
+    `Symmetric` keyword
++ `X`: n × p data matrix, each column is a feature
 + `nrep`: Number of representative per group. Initial group representatives are
     guaranteed to be selected
-+ `target`: Target residual level for the first pass
++ `target`: Target residual level (greater than 0) for the first pass, smaller
+    means more groups
 + `force_contiguous`: Whether groups are forced to be contiguous. If true,
     variants are assigned its left or right center, whichever
     has the largest correlation with it without breaking contiguity.
@@ -1222,12 +1226,13 @@ Note: interpolative decomposition is a stochastic algorithm. See a seed to
 guarantee reproducible results. 
 """
 function id_partition_groups(
-    Σ::AbstractMatrix;
+    Σ::Symmetric;
     nrep = 1,
     target = 0.25,
     force_contiguous = false
     )
     p = size(Σ, 1)
+    target ≥ 0 || error("Expected target to be > 0.")
     # compute most reprensentative columns using interpolative decomposition
     A = cholesky(PositiveFactorizations.Positive, Σ).U
     sk, _, _ = id(A)
@@ -1248,6 +1253,44 @@ function id_partition_groups(
             length(group_members) == 0 && continue
             Σg = @view(Σ[group_members, group_members])
             rep_variables = interpolative_decomposition(Σg, nrep - 1)
+            for rep in rep_variables
+                push!(group_reps, group_members[rep])
+            end
+        end
+    end
+    return groups, sort!(group_reps)
+end
+
+function id_partition_groups(
+    X::AbstractMatrix; # X is n × p (i.e. indiviual level data)
+    nrep = 1,
+    target = 0.25,
+    force_contiguous = false
+    )
+    p = size(X, 2)
+    target ≥ 0 || error("Expected target to be > 0.")
+    # get empirical covariance matrix and scale it to correlation matrix
+    Σ = cov(X)
+    cov2cor!(Σ, sqrt.(diag(Σ)))
+    # compute most reprensentative columns using interpolative decomposition
+    sk, _, _ = id(X)
+    rk = search_rank(Σ, X, sk, target)
+    centers = sort(sk[1:rk])
+    # bin non-represented members
+    groups = zeros(Int, p)
+    groups[centers] .= 1:rk
+    non_rep = setdiff(1:p, centers)
+    force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
+                       assign_members_cor!(groups, Σ, non_rep, centers)
+    # pick reprensetatives for each group, centers are always selected
+    group_reps = centers
+    if nrep > 1
+        for g in 1:rk
+            group_idx = findall(x -> x == g, groups) # all variables in this group
+            group_members = setdiff!(group_idx, centers) # remove the representative
+            length(group_members) == 0 && continue
+            Xg = @view(X[:, group_members])
+            rep_variables = interpolative_decomposition(Xg, nrep - 1)
             for rep in rep_variables
                 push!(group_reps, group_members[rep])
             end
