@@ -1404,13 +1404,15 @@ function test_residuals(invΣ, Σ::AbstractMatrix{T}, not_selected, selected, ta
 end
 
 """
-    hc_partition_groups(Σ; [rep_method], [cutoff], [min_clusters], [nrep])
+    hc_partition_groups(X::AbstractMatrix; [rep_method], [cutoff], [min_clusters], [nrep])
+    hc_partition_groups(Σ::Symmetric; [rep_method], [cutoff], [min_clusters], [nrep])
 
-Computes a group partition based on correlation matrix `Σ` using single-linkage
-hierarchical clustering. By default, a list of variables most representative
-of each group will also be computed.
+Computes a group partition based on individual level data `X` or correlation 
+matrix `Σ` using single-linkage hierarchical clustering. By default, a list of
+variables most representative of each group will also be computed.
 
 # Inputs
++ `X`: `n × p` data matrix. Each row is a sample
 + `Σ`: `p × p` correlation matrix
 + `cutoff`: Height value for which the clustering result is cut, between 0 and 1
     (default 0.7). This ensures that no variables between 2 groups have correlation
@@ -1435,17 +1437,26 @@ above `cutoff`.
 add option to enforce adjacency constraint
 """
 function hc_partition_groups(
-    Σ::AbstractMatrix;
+    X::AbstractMatrix;
     cutoff = 0.7,
     min_clusters = 1,
     nrep = 1,
     )
-    # check error
-    p = size(Σ, 1)
-    p == size(Σ, 2) || error("Expected size(Σ, 1) == size(Σ, 2)")
+    Σ = cov(X)
+    cov2cor!(Σ, sqrt.(diag(Σ)))
+    return hc_partition_groups(
+        Symmetric(Σ), cutoff=cutoff, min_clusters=min_clusters, nrep=nrep)
+end
+
+function hc_partition_groups(
+    Σ::Symmetric;
+    cutoff = 0.7,
+    min_clusters = 1,
+    nrep = 1,
+    )
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     # convert correlation matrix to a distance matrix
-    distmat = copy(Σ)
+    distmat = copy(Matrix(Σ))
     @inbounds @simd for i in eachindex(distmat)
         distmat[i] = 1 - abs(distmat[i])
     end

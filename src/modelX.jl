@@ -1,6 +1,6 @@
 """
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol; [covariance_approximator], [kwargs...])
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix; [kwargs...])
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol; [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix; [m], [kwargs...])
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions. The true mean `μ` and covariance

@@ -8,43 +8,7 @@ using Distributions
 using ToeplitzMatrices
 # using RCall # for comparing with Matteo's knockoffs
 
-@testset "fixed equi knockoffs" begin
-    Random.seed!(2021)
-
-    # simulate matrix and normalize columns
-    n = 3000
-    p = 1000
-    X = randn(n, p)
-
-    # equi-correlated knockoff
-    @time knockoff = fixed_knockoffs(X, :equi)
-    X = knockoff.X
-    X̃ = knockoff.X̃
-    s = knockoff.s
-    Σ = knockoff.Σ
-
-    @test all(isapprox.(X' * X, Σ, atol=1e-10))
-    @test all(isapprox.(X̃' * X̃, Σ, atol=5e-2)) # numerical accuracy not good?
-    @test all(s .≥ 0)
-    @test all(1 .≥ s)
-    λ = eigvals(2Σ - Diagonal(s))
-    for λi in λ
-        @test λi ≥ 0 || isapprox(λi, 0, atol=1e-8)
-    end
-    # @test all(isapprox.(Ũ' * X, 0, atol=1e-10))
-    for i in 1:p, j in 1:p
-        if i == j
-            # @test isapprox(dot(X[:, i], X[:, i]), 1, atol=1e-1)
-            # @test isapprox(dot(X̃[:, i], X̃[:, i]), 1, atol=1e-1)
-            @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i])
-            @test isapprox(dot(X[:, i], X̃[:, i]), 1 - s[i], atol=5e-2) # numerical accuracy not good?
-        else
-            @test isapprox(dot(X[:, i], X̃[:, j]), dot(X[:, i], X[:, j]), atol=1e-8)
-        end
-    end
-end
-
-@testset "fixed SDP knockoffs" begin
+@testset "fixed knockoffs" begin
     Random.seed!(2021)
 
     # simulate matrix and normalize columns
@@ -87,7 +51,7 @@ end
     # histogram(vec(X̃))
 
     @test all(X' * X .≈ Σ)
-    @test all(isapprox.(X̃' * X̃, Σ, atol=5e-1)) # numerical accuracy not good?
+    @test all(isapprox.(X̃' * X̃, Σ, atol=5e-1))
     @test all(s .≥ 0)
     @test all(1 .≥ s)
     λ = eigvals(2Σ - Diagonal(s))
@@ -116,11 +80,10 @@ end
     p = 200
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
-    L = cholesky(Sigma).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    true_mu = zeros(p)
+    X = rand(MvNormal(true_mu, Sigma), n)' |> Matrix
 
     # generate knockoff
-    true_mu = zeros(p)
     @time knockoff = modelX_gaussian_knockoffs(X, :sdp, true_mu, Sigma)
     X = knockoff.X
     X̃ = knockoff.X̃
@@ -156,11 +119,10 @@ end
     p = 200
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
-    L = cholesky(Sigma).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    true_mu = zeros(p)
+    X = rand(MvNormal(true_mu, Sigma), n)' |> Matrix
 
     # generate knockoff
-    true_mu = zeros(p)
     @time knockoff = modelX_gaussian_knockoffs(X, :sdp)
     X = knockoff.X
     X̃ = knockoff.X̃
@@ -205,27 +167,32 @@ end
     merged = merge_knockoffs_with_original(X, X̃)
     @test size(merged.XX̃) == (500, 1000)
     @test length(merged.original) == 200
-    @test length(merged.knockoff) == 800
+    @test length(merged.knockoff) == 200
     @test all(merged.XX̃[:, merged.original] .== X)
 
-    # partition_groups
+    # hc_partition_groups: based on X or Σ
+    n = 500
     p = 500
-    Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1))))
-    L = cholesky(Σ).L
-    X = randn(p, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
-    groups, rep_variables = partition_groups(X, cutoff=1)
+    Σ = simulate_AR1(p, a=3, b=1)
+    groups, rep_variables = hc_partition_groups(Symmetric(Σ), cutoff=1)
     @test all(groups .== collect(1:p))
-    groups, rep_variables = partition_groups(X, cutoff=0)
+    groups, rep_variables = hc_partition_groups(Symmetric(Σ), cutoff=0)
     @test all(groups .== 1)
-    groups, rep_variables = partition_groups(X, cutoff=0.7)
-    @test length(groups) == length(rep_variables)
+    groups, rep_variables = hc_partition_groups(Symmetric(Σ), cutoff=0.7)
+    @test length(unique(groups)) == length(rep_variables)
+    X = rand(MvNormal(zeros(p), Σ), n)' |> Matrix
+    nrep = 1
+    groups, rep_variables = hc_partition_groups(X, cutoff=0.7, nrep=nrep)
+    @test length(unique(groups)) == length(rep_variables)
+    @test countmap(groups[rep_variables]) |> values |> maximum ≤ nrep
 
+    # id_partition_groups: based on X or Σ
     nrep = 2
-    groups, distinct_rep_variables = partition_groups(X, rep_method=:distinct, nrep=nrep)
-    groups, similar_rep_variables = partition_groups(X, rep_method=:similar, nrep=nrep)
-    groups, random_rep_variables = partition_groups(X, rep_method=:random, nrep=nrep)
-    @test length(distinct_rep_variables) == length(similar_rep_variables) == 
-        length(random_rep_variables)
+    groups, rep_variables = id_partition_groups(Symmetric(Σ), nrep=nrep)
+    @test countmap(groups[rep_variables]) |> values |> maximum ≤ nrep
+    X = rand(MvNormal(zeros(p), Σ), n)' |> Matrix
+    groups, rep_variables = id_partition_groups(X, nrep=nrep)
+    @test countmap(groups[rep_variables]) |> values |> maximum ≤ nrep
 end
 
 @testset "coefficient_diff" begin
@@ -311,8 +278,7 @@ end
     ρ = 0.5
     Σ = (1-ρ) * I + ρ * ones(p, p)
     μ = zeros(p)
-    L = cholesky(Σ).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
 
     # simulate y
     Random.seed!(seed)
@@ -362,11 +328,10 @@ end
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
     mu = zeros(p)
-    L = cholesky(Sigma).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    X = rand(MvNormal(mu, Sigma), n)' |> Matrix
 
     @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, mu, Sigma);
-    @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma)
+    @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_ccd, mu, Sigma)
 
     @test all(isapprox.(Xko_sdp.s, Xko_sdp_fast.s, atol=0.05))
 end
@@ -381,12 +346,11 @@ end
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
     mu = zeros(p)
-    L = cholesky(Sigma).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    X = rand(MvNormal(mu, Sigma), n)' |> Matrix
 
     # try supplying arguments to modelX_gaussian_knockoffs and fixed_knockoffs
-    @time Xko_sdp_fast1 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.7, μ = 0.7)
-    @time Xko_sdp_fast2 = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma, λ = 0.9, μ = 0.9)
+    @time Xko_sdp_fast1 = modelX_gaussian_knockoffs(X, :sdp_ccd, mu, Sigma, λ = 0.7, μ = 0.7)
+    @time Xko_sdp_fast2 = modelX_gaussian_knockoffs(X, :sdp_ccd, mu, Sigma, λ = 0.9, μ = 0.9)
     @test all(isapprox.(Xko_sdp_fast1.s, Xko_sdp_fast2.s, atol=0.05))
 end
 
@@ -400,9 +364,7 @@ end
     ρ = 0.4
     Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
     μ = zeros(p) # true mean parameters
-    L = cholesky(Σ).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
-    # X = zscore(X, mean(X, dims=1), std(X, dims=1)) # center/scale Xj to mean 0 var 1
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
 
     # simulate y
     Random.seed!(seed)
@@ -436,9 +398,8 @@ end
     p = 500
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
-    L = cholesky(Sigma).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
     true_mu = zeros(p)
+    X = rand(MvNormal(true_mu, Sigma), n)' |> Matrix
 
     # ASDP (fixed window ranges)
     @time asdp = approx_modelX_gaussian_knockoffs(X, :sdp, windowsize = 99)
@@ -450,6 +411,14 @@ end
     @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, window_ranges);
     λmin = eigvals(2*amvr.Σ - Diagonal(amvr.s)) |> minimum
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+
+    # AMVR (arbitrary window ranges, m=5)
+    m = 5
+    window_ranges = [1:99, 100:121, 122:444, 445:500]
+    @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, window_ranges, m=m);
+    λmin = eigvals((m+1)/m*amvr.Σ - Diagonal(amvr.s)) |> minimum
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+    @test eigmin(Diagonal(amvr.s)) ≥ 0
 end
 
 @testset "fit lasso Gaussian" begin
@@ -582,8 +551,7 @@ end
     groups = repeat(1:m, inner=5)
     Σ = simulate_block_covariance(groups, ρ, γ)
     true_mu = zeros(p)
-    L = cholesky(Σ).L
-    X = randn(n, p) * L
+    X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1));
 
     # exact group knockoffs
@@ -615,6 +583,33 @@ end
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(me.S))
 end
 
+@testset "group knockoffs based on representatives" begin
+    # simulate data
+    Random.seed!(2022)
+    m = 1
+    p = 500
+    k = 50
+    n = 250
+    Σ = simulate_AR1(p, a=3, b=1)
+    true_mu = zeros(p)
+    X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
+    zscore!(X, mean(X, dims=1), std(X, dims=1))
+    # 
+    # single representative = running single variant knockoffs
+    #
+    nrep = 1
+    groups, group_reps = hc_partition_groups(Σ, cutoff=0.7, nrep=nrep)
+    rme = modelX_gaussian_rep_group_knockoffs(
+        X, :maxent, true_mu, Σ, 
+        groups, group_reps, nrep=nrep
+    )
+    me = modelX_gaussian_knockoffs(
+        X[:,group_reps], :maxent, true_mu[group_reps], Σ[group_reps, group_reps], 
+        verbose=false, # whether to print informative intermediate results
+    )
+    @test all(me.s .≈ rme.ko.s)
+end
+
 @testset "group fit_lasso" begin
     # simulate some data
     m = 100 # number of groups
@@ -628,8 +623,7 @@ end
     groups = repeat(1:m, inner=5)
     Σ = simulate_block_covariance(groups, ρ, γ)
     true_mu = zeros(p)
-    L = cholesky(Σ).L
-    X = randn(n, p) * L
+    X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1));
 
     βtrue = zeros(m*pi)
@@ -661,8 +655,7 @@ end
     ρ = 0.4
     Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
     μ = zeros(p) # true mean parameters
-    L = cholesky(Σ).L
-    X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
 
     # routine for solving s and generating knockoffs satisfy PSD constraint
     mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Σ, m=3)
@@ -672,7 +665,7 @@ end
     sdp_multiple = modelX_gaussian_knockoffs(X, :sdp, μ, Σ, m=5)
     λmin = eigmin(6/5 * Σ - Diagonal(sdp_multiple.s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
-    sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_fast, μ, Σ, m=5)
+    sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m=5)
     λmin = eigmin(6/5 * Σ - Diagonal(sdp_fast_multiple.s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
@@ -697,9 +690,7 @@ end
     group_sizes = [5 for i in 1:div(p, 5)] # each group has 5 variables
     groups = vcat([i*ones(g) for (i, g) in enumerate(group_sizes)]...) |> Vector{Int}
     Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1)))) # true covariance matrix
-
-    # make just 1 knockoff per variable
-    m = 1
+    m = 1 # make just 1 knockoff per variable
 
     # initialize with equicorrelated solution
     Sequi, γ = solve_s_group(Σ, groups, :equi)
@@ -713,12 +704,12 @@ end
     D22 = @view(D[6:end, 6:end])
     ub = A11 - D12 * inv(D22) * D12'
     
-    # solve 
-    @time S1_new, U = Knockoffs.solve_group_SDP_block_update(Σ11, ub)
+    # solve first block
+    @time S1_new, success = Knockoffs.solve_group_SDP_single_block(Σ11, ub)
     λmin = eigmin(S1_new)
-    @test λ ≥ 0 || isapprox(λ, 0, atol=1e-8)
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
     λmin = eigmin(ub - S1_new)
-    @test λ ≥ 0 || isapprox(λ, 0, atol=1e-8)
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
     # eyeball result
     # @show S1_new

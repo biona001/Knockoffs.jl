@@ -1,9 +1,10 @@
 """
-    approx_modelX_gaussian_knockoffs(X, method; [windowsize = 500], [covariance_approximator], kwargs...)
-    approx_modelX_gaussian_knockoffs(X, method, window_ranges; [covariance_approximator], kwargs...)
+    approx_modelX_gaussian_knockoffs(X, method; [m=1], [windowsize = 500], [covariance_approximator], kwargs...)
+    approx_modelX_gaussian_knockoffs(X, method, window_ranges; [m=1], [covariance_approximator], kwargs...)
 
 Generates Gaussian knockoffs by approximating the covariance as a block diagonal matrix. 
-Each block contains `windowsize` consecutive features. 
+Each block contains `windowsize` consecutive features. One could alternatively 
+specify the `window_ranges` argument to construct blocks of different sizes. 
 
 # Inputs
 + `X`: A `n × p` numeric matrix or `SnpArray`. Each row is a sample, and each column is covariate.
@@ -13,6 +14,7 @@ Each block contains `windowsize` consecutive features.
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
++ `m`: Number of knockoff copies per variable to generate, defaults to 1. 
 + `windowsize`: Number of covariates to be included in a block. Each block consists of
     adjacent variables. The last block could contain less than `windowsize` variables. 
 + `window_ranges`: Vector of ranges for each window. e.g. [1:97, 98:200, 201:500]
@@ -35,6 +37,7 @@ https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 function approx_modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
     method::Symbol; 
+    m::Int = 1,
     windowsize::Int = 500,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
@@ -50,7 +53,7 @@ function approx_modelX_gaussian_knockoffs(
             ((window - 1)*windowsize + 1:window * windowsize)
         push!(window_ranges, cur_range)
     end
-    return approx_modelX_gaussian_knockoffs(X, method, window_ranges; 
+    return approx_modelX_gaussian_knockoffs(X, method, window_ranges; m=m,
         covariance_approximator=covariance_approximator, kwargs...)
 end
 
@@ -59,6 +62,7 @@ function approx_modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
     method::Symbol,
     window_ranges::Vector{UnitRange{Int64}};
+    m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
@@ -76,7 +80,7 @@ function approx_modelX_gaussian_knockoffs(
         # approximate a block of Σ
         Σcur = cov(covariance_approximator, Xcur)
         # solve for s vector
-        scur = solve_s(Σcur, method; kwargs...)
+        scur = solve_s(Σcur, method; m=m, kwargs...)
         # save result
         block_covariances[window] = Σcur
         block_s[window] = scur
@@ -87,17 +91,17 @@ function approx_modelX_gaussian_knockoffs(
     μ = vec(mean(X, dims=1))
     s = vcat(block_s...)
     # bisection search over γ ∈ [0, 1] to ensure diag(γs) ≤ 2Σ
-    γ = fzero(γ -> f(γ, s, Σ), 0, 1)
+    γ = fzero(γ -> f(γ, s, Σ, m), 0, 1)
     s .*= γ
     # generate knockoffs
-    X̃ = condition(X, μ, Σ, Diagonal(s))
-    return ApproxGaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
+    X̃ = condition(X, μ, Σ, Diagonal(s), m=m)
+    return ApproxGaussianKnockoff(X, X̃, s, Symmetric(Σ), method, m)
 end
 
 # for bisection search
-function f(γ, s, Σ)
+function f(γ, s, Σ, m)
     D = Diagonal(γ .* s)
-    λ = eigmin(2Σ - D) # can this be more efficient?
+    λ = eigmin((m+1)/m*Σ - D) # can this be more efficient?
     return λ > 0 ? 1 - γ : -Inf
 end
 

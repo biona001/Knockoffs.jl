@@ -1,5 +1,5 @@
 """
-    fixed_knockoffs(X::Matrix{T}; method=:sdp)
+    fixed_knockoffs(X::Matrix{T}; [method], [kwargs...])
 
 Creates fixed-X knockoffs. 
 
@@ -15,8 +15,8 @@ Creates fixed-X knockoffs.
     [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Output
-+ `Knockoff`: A struct containing the original (column-normalized) `X` and its knockoff `X̃`, 
-    in addition to other variables (e.g. `s`)
++ `GaussianKnockoff`: A struct containing the original (column-normalized) `X`
+    and its knockoff `X̃`, in addition to other variables (e.g. `s`)
 
 # Reference
 1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
@@ -47,5 +47,5 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol; kwargs...) where T <: Abs
     C = Diagonal(sqrt.(γ)) * P
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
-    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, 1)
 end
