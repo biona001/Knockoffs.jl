@@ -1,10 +1,12 @@
 """
     fixed_knockoffs(X::Matrix{T}; [method], [kwargs...])
 
-Creates fixed-X knockoffs. 
+Creates fixed-X knockoffs. Internally, `X` will be automatically normalized before
+computing its knockoff. 
 
 # Inputs
-+ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `X`: A column-normalized `n × p` numeric matrix, each row is a sample, and
+    each column is covariate. We will internally normalized `X` if it is not. 
 + `method`: Can be one of the following
     * `:mvr`: Minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
     * `:maxent`: Maximum entropy knockoffs (alg 2 in ref 2)

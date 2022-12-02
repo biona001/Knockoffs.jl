@@ -742,14 +742,14 @@ function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Abst
 
         # Update remaining elements in row/column
         if C.uplo == 'U'
-            for j = i + 1:n
+            @turbo for j = i + 1:n
                 Aij = A[i,j]
                 vj  = v[j]
                 A[i,j]  =   c*Aij + s*vj
                 v[j]    = -s*Aij + c*vj
             end
         else
-            for j = i + 1:n
+            @turbo for j = i + 1:n
                 Aji = A[j,i]
                 vj  = v[j]
                 A[j,i]  =   c*Aji + s*vj
@@ -803,14 +803,14 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
 
         # Update remaining elements in row/column
         if C.uplo == 'U'
-            for j = i + 1:n
+            @turbo for j = i + 1:n
                 vj = v[j]
                 Aij = (A[i,j] - s*vj)/c
                 A[i,j] = Aij
                 v[j] = -s*Aij + c*vj
             end
         else
-            for j = i + 1:n
+            @turbo for j = i + 1:n
                 vj = v[j]
                 Aji = (A[j,i] - s*vj)/c
                 A[j,i] = Aji

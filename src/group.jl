@@ -793,7 +793,6 @@ function update_diag_chol_sdp!(S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholu
     new_obj = abs(Σ[j, j] - S[j, j] - δj)
     if backtrack && new_obj > obj_old
         # undo the update if objective got worse
-        println("reached here1")
         S[j, j] -= δj
         return zero(typeof(δj))
     end

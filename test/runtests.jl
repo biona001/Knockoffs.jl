@@ -583,10 +583,8 @@ end
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(me.S))
 end
 
-@testset "group knockoffs based on representatives" begin
+@testset "representative group knockoffs" begin
     # simulate data
-    Random.seed!(2022)
-    m = 1
     p = 500
     k = 50
     n = 250
