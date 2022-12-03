@@ -1,6 +1,6 @@
 """
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol; [covariance_approximator], [kwargs...])
-    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix; [kwargs...])
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol; [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_knockoffs(X::Matrix, method::Symbol, μ::Vector, Σ::Matrix; [m], [kwargs...])
 
 Creates model-free multivariate normal knockoffs by sequentially sampling from 
 conditional multivariate normal distributions. The true mean `μ` and covariance
@@ -37,7 +37,7 @@ since `isposdef(cov(X))` is typically false. For comparison of various estimator
 https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
 function modelX_gaussian_knockoffs(
-    X::Matrix, 
+    X::AbstractMatrix, 
     method::Symbol;
     m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
@@ -51,7 +51,7 @@ function modelX_gaussian_knockoffs(
 end
 
 function modelX_gaussian_knockoffs(
-    X::Matrix, 
+    X::AbstractMatrix, 
     method::Symbol, 
     μ::AbstractVector, 
     Σ::AbstractMatrix; 
@@ -62,7 +62,7 @@ function modelX_gaussian_knockoffs(
     s = solve_s(Symmetric(Σ), method; m=m, kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, Symmetric(Σ), Diagonal(s); m=m)
-    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, m)
 end
 
 """
@@ -89,7 +89,7 @@ and Entropy Maximization" by Gimenez and Zou.
     and the next `p` columns store the second knockoff...etc
 
 # Todo
-efficiency
+When s is the zero vector, X̃ should be identical to X but it isn't
 """
 function condition(
     X::AbstractMatrix, 

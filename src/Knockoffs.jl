@@ -15,7 +15,7 @@ using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
-using StatsBase
+using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!
 using GLMNet
 using BlockDiagonals
 using Roots: fzero
@@ -26,6 +26,8 @@ using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
 using Ipopt
 using SCS
 using Optim: optimize, Brent # for group knockoffs
+using Clustering: hclust, cutree
+using LowRankApprox: id
 
 @reexport using GLM
 
@@ -37,6 +39,7 @@ export knockoff_filter,
     approx_modelX_gaussian_knockoffs,
     ghost_knockoffs,
     modelX_gaussian_group_knockoffs,
+    modelX_gaussian_rep_group_knockoffs,
     solve_s, solve_s_group,
     # constructors
     knockoff,
@@ -60,7 +63,7 @@ export knockoff_filter,
     # utilities
     merge_knockoffs_with_original, simulate_AR1,
     download_1000genomes,
-    simulate_block_covariance
+    simulate_block_covariance, hc_partition_groups, id_partition_groups
 
 include("struct.jl")
 include("fixed.jl")
@@ -77,6 +80,9 @@ include("approx.jl")
 include("ghost.jl")
 include("predict.jl")
 include("group.jl")
+
+const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
+const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_ccd, :sdp_full, :mvr, :maxent, :maxent_subopt]
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    

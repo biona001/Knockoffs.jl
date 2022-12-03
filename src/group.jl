@@ -37,32 +37,54 @@ function solve_s_group(
         Σ .= @view(Σ[perm, perm])
         permuted = true
     end
-    # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg, for other cases we initialize with equi solution
-    blocks = Matrix{T}[]
-    for g in unique(groups)
-        idx = findall(x -> x == g, groups)
-        push!(blocks, Σ[idx, idx])
-    end
-    Sblocks = BlockDiagonal(blocks)
-    # solve optimization problem
-    if method == :equi
-        S, γs = solve_group_equi(Σ, Sblocks; m=m)
-    elseif method == :sdp
-        S, γs = solve_group_SDP(Σ, Sblocks; m=m)
-    elseif method == :sdp_full
-        S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
-    elseif method == :mvr
-        S, γs = solve_group_MVR_full(Σ, Sblocks; m=m, kwargs...)
-    elseif method == :maxent
-        S, γs = solve_group_max_entropy_full(Σ, Sblocks; m=m, kwargs...)
+    unique_groups = unique(groups)
+    if length(unique_groups) == length(groups)
+        # solve ungroup knockoff problem
+        s = solve_s(Symmetric(Σ), 
+            method == :sdp_subopt ? :sdp : method;
+            m=m, kwargs...
+        )
+        S = Diagonal(s) |> Matrix
+        γs = T[]
     else
-        error("Method can only be :equi, :sdp, or :maxent, but was $method")
+        # solve group knockoff problem
+        # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg
+        # for other cases we initialize with equi solution
+        blocks = Matrix{T}[]
+        for g in unique_groups
+            idx = findall(x -> x == g, groups)
+            push!(blocks, Σ[idx, idx])
+        end
+        Sblocks = BlockDiagonal(blocks)
+        # solve optimization problem
+        if method == :equi
+            S, γs = solve_group_equi(Σ, Sblocks; m=m)
+        elseif method == :sdp_subopt
+            S, γs = solve_group_SDP_subopt(Σ, Sblocks; m=m)
+        elseif method == :sdp_subopt_correct
+            S, γs = solve_group_SDP_subopt_correct(Σ, Sblocks; m=m)
+        elseif method == :sdp
+            S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :sdp_ccd
+            S, γs = solve_group_SDP_ccd(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :sdp_full
+            S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
+        elseif method == :mvr
+            S, γs = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :maxent
+            S, γs = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
+        elseif method == :maxent_subopt
+            S, γs = solve_group_max_entropy_suboptimal(Σ, Sblocks)
+        else
+            error("Method must be one of $GROUP_KNOCKOFFS but was $method")
+        end
     end
-    # permuate S back to the original noncontiguous group structure
+    # permuate S and Σ back to the original noncontiguous group structure
     if permuted
         invpermute!(groups, perm)
         iperm = invperm(perm)
         S .= @view(S[iperm, iperm])
+        Σ .= @view(Σ[iperm, iperm])
     end
     return S, γs
 end
@@ -111,7 +133,7 @@ multiplies Σ_jj. In the equi-correlated setting, all `γ[j]` is forced to be eq
 Details can be found in
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
 """
-function solve_group_SDP(
+function solve_group_SDP_subopt(
     Σ::AbstractMatrix, 
     Σblocks::BlockDiagonal; 
     m::Int = 1,
@@ -126,15 +148,218 @@ function solve_group_SDP(
     @objective(model, Max, block_sizes' * γ)
     @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
     JuMP.optimize!(model)
-    check_model_solution(model)
+    success = check_model_solution(model)
+    if !success
+        @warn "Optimization unsuccessful, solution may be inaccurate"
+    end
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
     return S, γs
 end
 
-function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::Int = 1)
-    model = Model(() -> Hypatia.Optimizer(verbose=false))
-    # model = Model(() -> SCS.Optimizer())
+function solve_group_SDP_subopt_correct(
+    Σ::AbstractMatrix, 
+    Σblocks::BlockDiagonal; 
+    m::Int = 1,
+    verbose=false
+    )
+    model = Model(() -> Hypatia.Optimizer(verbose=verbose))
+    n = nblocks(Σblocks)
+    block_sizes = size.(Σblocks.blocks, 1)
+    @variable(model, γ[1:n])
+    blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
+    @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
+    @constraint(model, Symmetric(blocks) in PSDCone())
+    # slack variables
+    @variable(model, U[1:sum(block_sizes.^2)])
+    # loop over each block
+    offset = 0 # allows indexing over blocks of S
+    Uidx = 1   # index of U if U were treated as a matrix, i.e index of U[i, j]
+    for g in 1:n
+        G = block_sizes[g] # g is group idx, G is size of group g
+        cur_idx = offset + 1:offset + G
+        for i in cur_idx, j in cur_idx
+            @constraint(model, Σ[i, j] - γ[g]*Σ[i, j] ≤ U[Uidx])
+            @constraint(model, -U[Uidx] ≤ Σ[i, j] - γ[g]*Σ[i, j])
+            Uidx += 1
+        end
+        offset += G
+    end
+    @objective(model, Min, sum(U))
+    JuMP.optimize!(model)
+    success = check_model_solution(model)
+    if !success
+        @warn "Optimization unsuccessful, solution may be inaccurate"
+    end
+    γs = JuMP.value.(γ)
+    S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
+    return S, γs
+end
+
+"""
+    solve_group_SDP_single_block(Σ11, ub)
+
+Solves a single block of the fully general group SDP problem. The objective is
+    min  sum_{i,j} |Σ[i,j] - S[i,j]|
+    s.t. 0 ⪯ S ⪯ A11 - [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+
+# Inputs
++ `Σ11`: The block corresponding to the current group. Must be a correlation matrix. 
++ `ub`: The matrix defined as A11 - [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
++ `optm`: Any solver compatible with JuMP.jl
+"""
+function solve_group_SDP_single_block(
+    Σ11::AbstractMatrix,
+    ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
+    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
+    )
+    # quick return for singleton groups
+    if size(ub) == (1, 1)
+        if Σ11[1] ≤ ub[1]
+            return Σ11, true
+        else
+            return ub .- 1e-6, true
+        end
+    end
+    # Build model via JuMP
+    p = size(Σ11, 1)
+    model = Model(() -> optm)
+    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
+    # slack variables to handle absolute value in obj 
+    @variable(model, U[1:p, 1:p], Symmetric)
+    for i in 1:p, j in i:p
+        @constraint(model, Σ11[i, j] - S[i, j] ≤ U[i, j])
+        @constraint(model, -U[i, j] ≤ Σ11[i, j] - S[i, j])
+    end
+    @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ11 - S)))
+    # SDP constraints
+    @constraint(model, S in PSDCone())
+    @constraint(model, ub - S in PSDCone())
+    # solve and return
+    JuMP.optimize!(model)
+    success = check_model_solution(model)
+    return JuMP.value.(S), success
+end
+
+"""
+# Todo
++ somehow avoid reallocating ub every iteration
++ When solving each individual block,
+    - warmstart
+    - avoid reallocating S1_new
+    - allocate vector of models
+    - use loose convergence criteria
++ Avoid allocating iperm in each iter by modifying https://github.com/JuliaLang/julia/blob/36034abf26062acad4af9dcec7c4fc53b260dbb4/base/combinatorics.jl#L278
++ For singleton groups, don't use JuMP and directly update
+"""
+function solve_group_SDP_block_update(
+    Σ::AbstractMatrix, 
+    Sblocks::BlockDiagonal;
+    m::Int = 1,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    niter = 10, # max number of cyclic block updates
+    optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
+    verbose::Bool = false,
+    )
+    p = size(Σ, 1)
+    blocks = nblocks(Sblocks)
+    group_sizes = size.(Sblocks.blocks, 1)
+    perm = collect(1:p)
+    # initialize S/A/D matrices
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    A = (m+1)/m * Σ
+    D = A - S
+    # compute initial objective value
+    objective_values = group_sdp_objective(Σ, S, group_sizes)
+    verbose && println("Init obj = $(sum(objective_values))")
+    # begin block updates
+    for l in 1:niter
+        offset = 0
+        max_delta = zero(eltype(Σ))
+        for b in 1:blocks
+            g = group_sizes[b]
+            # permute current block into upper left corner
+            cur_idx = offset + 1:offset + g
+            @inbounds @simd for i in 1:offset
+                perm[g+i] = i
+            end
+            perm[1:g] .= cur_idx
+            S .= @view(S[perm, perm])
+            A .= @view(A[perm, perm])
+            D .= @view(D[perm, perm])
+            Σ .= @view(Σ[perm, perm])
+            # update constraints
+            S11 = @view(S[1:g, 1:g])
+            Σ11 = @view(Σ[1:g, 1:g])
+            A11 = @view(A[1:g, 1:g])
+            D12 = @view(D[1:g, g + 1:end])
+            D21 = @view(D[g + 1:end, 1:g])
+            D22 = @view(D[g + 1:end, g + 1:end])
+            ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
+            # solve SDP problem for current block
+            S11_new, success = solve_group_SDP_single_block(Σ11, ub)
+            block_obj = group_sdp_objective_single_block(Σ11, S11_new)
+            # only update if objective decreased and optimization was successful
+            if success && block_obj < objective_values[b]
+                # find max difference between previous block S
+                for i in eachindex(S11_new)
+                    if abs(S11_new[i] - S11[i]) > max_delta
+                        max_delta = abs(S11_new[i] - S11[i])
+                    end
+                end
+                # update relevant blocks
+                S11 .= S11_new
+                D[1:g, 1:g] .= A11 .- S11_new
+                objective_values[b] = block_obj
+            end
+            # repermute columns/rows of S back
+            iperm = invperm(perm)
+            S .= @view(S[iperm, iperm])
+            A .= @view(A[iperm, iperm])
+            D .= @view(D[iperm, iperm])
+            Σ .= @view(Σ[iperm, iperm])
+            sort!(perm)
+            offset += g
+        end
+        verbose && println("Iter $l δ = $max_delta, obj = $(sum(objective_values))")
+        max_delta < tol && break 
+    end
+    return S, Float64[]
+end
+
+# this assumes groups are contiguous, and each group's size is stored in group_sizes
+function group_sdp_objective(Σ, S, group_sizes)
+    blocks = length(group_sizes)
+    objective_values, offset = zeros(blocks), 0
+    for b in 1:blocks
+        cur_idx = offset + 1:offset + group_sizes[b]
+        objective_values[b] = group_sdp_objective_single_block(
+            @view(Σ[cur_idx, cur_idx]), @view(S[cur_idx, cur_idx])
+        )
+        offset += group_sizes[b]
+    end
+    return objective_values # returns sum | Σij - Sij | for each group
+end
+
+function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMatrix{T}) where T
+    p = size(Σg, 1)
+    size(Σg) == size(Sg) || error("group_sdp_objective_single_block: Expected size of Σg and Sg to be equal")
+    obj = zero(T)
+    for j in 1:p, i in 1:p
+        obj += abs(Σg[i, j] - Sg[i, j])
+    end
+    return obj
+end
+
+# this code solves every variable in S simultaneously, i.e. not fixing any block 
+function solve_group_SDP_full(
+    Σ::AbstractMatrix, 
+    Σblocks::BlockDiagonal; 
+    m::Int = 1,
+    optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
+    )
+    model = Model(() -> optm)
     T = eltype(Σ)
     p = size(Σ, 1)
     group_sizes = size.(Σblocks.blocks, 1)
@@ -155,42 +380,152 @@ function solve_group_SDP_full(Σ::AbstractMatrix, Σblocks::BlockDiagonal; m::In
         idx += g
     end
     @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
-    # @objective(model, Max, tr(S))
-    @objective(model, Max, sum(S))
+    @constraint(model, Symmetric(S) in PSDCone())
+    # slack variables to handle absolute value in obj 
+    @variable(model, U[1:p, 1:p], Symmetric)
+    for i in 1:p, j in i:p
+        @constraint(model, Σ[i, j] - S[i, j] ≤ U[i, j])
+        @constraint(model, -U[i, j] ≤ Σ[i, j] - S[i, j])
+    end
+    @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
     JuMP.optimize!(model)
     check_model_solution(model)
-    # construct block diagonal S
-    Sm = convert(Matrix{T}, clamp!(JuMP.value.(S), 0, 1))
-    Sdata = Matrix{T}[]
-    idx = 0
-    for g in group_sizes
-        push!(Sdata, Symmetric(Sm[idx+1 : idx+g, idx+1 : idx+g]))
-        idx += g
-    end
-    return BlockDiagonal(Sdata), T[]
+    return JuMP.value.(S), T[]
 end
 
-function solve_group_MVR_full(
+function solve_group_SDP_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol,
+    tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
-    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
-    verbose::Bool = false
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false,
+    backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S = convert(Matrix{T}, S + λmin*I)
+    S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
+    verbose && println("initial obj = ", sum(group_sdp_objective(Σ, S, group_sizes)))
+    # some timers
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    t3 = zero(T) # time for solving offdiag 1D optimization problems
+    # preallocated vectors for efficiency
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    x, ỹ, storage = zeros(p), zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        offset = 0
+        for b in 1:blocks
+            #
+            # optimize diagonal entries
+            #
+            for idx in 1:group_sizes[b]
+                j = idx + offset
+                # compute feasible region
+                fill!(ej, 0)
+                ej[j] = 1
+                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
+                t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
+                ub = 1 / sum(abs2, u) - λmin
+                lb = -1 / sum(abs2, v) + λmin
+                lb ≥ ub && continue
+                # compute new δ, making sure it is in feasible region
+                δj = clamp(Σ[j, j] - S[j, j], lb, ub)
+                abs(δj) < 1e-15 && continue
+                # update S
+                S[j, j] += δj
+                # rank 1 update to cholesky factor
+                t1 += @elapsed δj = update_diag_chol_sdp!(
+                    S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholupdate!, backtrack
+                )
+                # update convergence tol
+                abs(δj) > max_delta && (max_delta = abs(δj))
+            end
+            #
+            # optimize off-diagonal entries
+            #
+            for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
+                i, j = idx2 + offset, idx1 + offset
+                fill!(ej, 0); fill!(ei, 0)
+                ej[j], ei[i] = 1, 1
+                # compute aii, ajj, aij, bii, bjj, bij
+                t2 += @elapsed begin
+                    ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ei)
+                    ldiv!(v, UpperTriangular(L.factors)', ej)
+                    aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
+                    ldiv!(u, UpperTriangular(C.factors)', ei)
+                    ldiv!(v, UpperTriangular(C.factors)', ej)
+                    bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
+                end
+                # compute (mathematical) feasible region
+                s1 = (aij - sqrt(aii*ajj)) / (aij^2 - aii * ajj)
+                s2 = (aij + sqrt(aii*ajj)) / (aij^2 - aii * ajj)
+                d1 = (-bij - sqrt(bii*bjj)) / (bij^2 - bii * bjj)
+                d2 = (-bij + sqrt(bii*bjj)) / (bij^2 - bii * bjj)
+                s1 > s2 && ((s1, s2) = (s2, s1))
+                d1 > d2 && ((d1, d2) = (d2, d1))
+                # feasible region criteria due to computational reasons
+                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
+                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
+                lb ≥ ub && continue
+                # find δ ∈ [lb, ub] that maximizes objective
+                δ = clamp(Σ[i, j] - S[i, j], lb, ub)
+                (abs(δ) < 1e-15 || isnan(δ)) && continue
+                # update S
+                S[i, j] += δ
+                S[j, i] += δ
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
+                t1 += @elapsed δ = update_offdiag_chol_sdp!(
+                    S, Σ, L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!, backtrack
+                )
+                # update convergence tol
+                abs(δ) > max_delta && (max_delta = abs(δ))
+            end
+            offset += group_sizes[b]
+        end
+        if verbose
+            obj = sum(group_sdp_objective(Σ, S, group_sizes))
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        end
+        max_delta < tol && break 
+    end
+    return S, Float64[]
+end
+
+function solve_group_MVR_ccd(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol,
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false,
+    backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
+    ) where T
+    p = size(Σ, 1)
+    blocks = nblocks(Sblocks)
+    group_sizes = size.(Sblocks.blocks, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # initialize S matrix and compute initial cholesky factor
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += λmin*I
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    C = cholesky(Symmetric(S))
+    verbose && println("initial obj = ", group_mvr_obj(L, C, m))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -230,17 +565,9 @@ function solve_group_MVR_full(
                 # update s
                 S[j, j] += δj
                 # rank 1 update to cholesky factor
-                fill!(ei, 0)
-                ej[j] = ei[j] = sqrt(abs(δj))
-                t1 += @elapsed begin
-                    if δj > 0
-                        choldowndate!(L, ej)
-                        cholupdate!(C, ei)
-                    else
-                        cholupdate!(L, ej)
-                        choldowndate!(C, ei)
-                    end
-                end
+                t1 += @elapsed δj = update_diag_chol_mvr!(
+                    S, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack
+                )
                 # update convergence tol
                 abs(δj) > max_delta && (max_delta = abs(δj))
             end
@@ -287,70 +614,51 @@ function solve_group_MVR_full(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                abs(δ) < 1e-15 || isnan(δ) && continue
+                (abs(δ) < 1e-15 || isnan(δ)) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factor L
-                fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-                storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-                t1 += @elapsed begin
-                    if δ > 0
-                        choldowndate!(L, storage)
-                        cholupdate!(L, ei)
-                        cholupdate!(L, ej)
-                    else 
-                        cholupdate!(L, storage)
-                        choldowndate!(L, ei)
-                        choldowndate!(L, ej)
-                    end
-                end
-                # update cholesky factor C
-                fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-                storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-                t1 += @elapsed begin
-                    if δ > 0
-                        cholupdate!(C, storage)
-                        choldowndate!(C, ei)
-                        choldowndate!(C, ej)
-                    else
-                        choldowndate!(C, storage)
-                        cholupdate!(C, ei)
-                        cholupdate!(C, ej)
-                    end
-                end
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
+                t1 += @elapsed δ = update_offdiag_chol_mvr!(
+                    S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
+                )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
             end
             offset += group_sizes[b]
         end
-        verbose && println("Iter $l: δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        if verbose
+            obj = group_mvr_obj(L, C, m)
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        end
         max_delta < tol && break 
     end
     return S, Float64[]
 end
 
-function solve_group_max_entropy_full(
+function solve_group_max_entropy_ccd(
     Σ::AbstractMatrix{T}, 
     Sblocks::BlockDiagonal;
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol,
+    tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
-    robust::Bool = true, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
-    verbose::Bool = false
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false,
+    backtrack::Bool = true
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
-    choldowndate! = robust ? lowrankdowndate : lowrankdowndate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S = convert(Matrix{T}, S + λmin*I)
+    S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
+    verbose && println("initial obj = ", group_maxent_obj(L, C, m))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -394,15 +702,9 @@ function solve_group_max_entropy_full(
                 # rank 1 update to cholesky factors
                 fill!(x, 0); fill!(ỹ, 0)
                 x[j] = ỹ[j] = sqrt(abs(δ))
-                t1 += @elapsed begin
-                    if δ > 0
-                        choldowndate!(L, x)
-                        cholupdate!(C, ỹ)
-                    else
-                        cholupdate!(L, x)
-                        choldowndate!(C, ỹ)
-                    end
-                end
+                t1 += @elapsed δ = update_diag_chol_maxent!(
+                    S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack
+                )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
             end
@@ -439,44 +741,23 @@ function solve_group_max_entropy_full(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                abs(δ) < 1e-15 || isnan(δ) && continue
+                (abs(δ) < 1e-15 || isnan(δ)) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factor L
-                fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-                x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-                t1 += @elapsed begin
-                    if δ > 0
-                        choldowndate!(L, x)
-                        cholupdate!(L, ei)
-                        cholupdate!(L, ej)
-                    else 
-                        cholupdate!(L, x)
-                        choldowndate!(L, ei)
-                        choldowndate!(L, ej)
-                    end
-                end
-                # update cholesky factor C
-                fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-                x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-                t1 += @elapsed begin
-                    if δ > 0
-                        cholupdate!(C, x)
-                        choldowndate!(C, ei)
-                        choldowndate!(C, ej)
-                    else
-                        choldowndate!(C, x)
-                        cholupdate!(C, ei)
-                        cholupdate!(C, ej)
-                    end
-                end
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
+                t1 += @elapsed δ = update_offdiag_chol_maxent!(
+                    S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
+                )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
             end
             offset += group_sizes[b]
         end
-        verbose && println("Iter $l: δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        if verbose
+            obj = logdet(L) + m*logdet(C)
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+        end
         max_delta < tol && break 
     end
     return S, Float64[]
@@ -498,6 +779,295 @@ function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij
     return numer1 / denom1 + numer2 / denom2
 end
 
+# todo: can this be more efficient?
+function group_mvr_obj(L::Cholesky, C::Cholesky, m::Int)
+    return m^2*tr(inv(C.L * C.U)) + tr(inv(L.L * L.U))
+end
+
+function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
+    return logdet(L) + m*logdet(C)
+end
+
+function update_diag_chol_sdp!(S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholupdate!, backtrack = true)
+    obj_old = abs(Σ[j, j] - S[j, j])
+    new_obj = abs(Σ[j, j] - S[j, j] - δj)
+    if backtrack && new_obj > obj_old
+        # undo the update if objective got worse
+        S[j, j] -= δj
+        return zero(typeof(δj))
+    end
+    # update cholesky factors
+    fill!(ei, 0)
+    fill!(ej, 0)
+    ej[j] = ei[j] = sqrt(abs(δj))
+    if δj > 0
+        choldowndate!(L, ej)
+        cholupdate!(C, ei)
+    else
+        cholupdate!(L, ej)
+        choldowndate!(C, ei)
+    end
+    return δj
+end
+
+function update_offdiag_chol_sdp!(S, Σ, L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!, backtrack = true)
+    obj_old = abs(Σ[i, j] - S[i, j])
+    new_obj = abs(Σ[i, j] - S[i, j] - δ)
+    if backtrack && new_obj > obj_old
+        # undo the update if objective got worse
+        S[i, j] -= δ
+        S[j, i] -= δ
+        return zero(typeof(δj))
+    end
+    # update cholesky factor L
+    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        choldowndate!(L, storage)
+        cholupdate!(L, ei)
+        cholupdate!(L, ej)
+    else 
+        cholupdate!(L, storage)
+        choldowndate!(L, ei)
+        choldowndate!(L, ej)
+    end
+    # update cholesky factor C
+    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        cholupdate!(C, storage)
+        choldowndate!(C, ei)
+        choldowndate!(C, ej)
+    else
+        choldowndate!(C, storage)
+        cholupdate!(C, ei)
+        cholupdate!(C, ej)
+    end
+    return δ
+end
+
+function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_mvr_obj(L, C, m))
+    fill!(ei, 0)
+    fill!(ej, 0)
+    ej[j] = ei[j] = sqrt(abs(δj))
+    if δj > 0
+        choldowndate!(L, ej)
+        cholupdate!(C, ei)
+    else
+        cholupdate!(L, ej)
+        choldowndate!(C, ei)
+    end
+    !backtrack && return δj
+    # if objective didn't decrease, undo the update
+    new_obj = group_mvr_obj(L, C, m)
+    failed = new_obj > obj_old
+    if backtrack && failed
+        S[j, j] -= δj
+        fill!(ei, 0)
+        fill!(ej, 0)
+        ej[j] = ei[j] = sqrt(abs(δj))
+        if δj > 0
+            cholupdate!(L, ej)
+            choldowndate!(C, ei)
+        else
+            choldowndate!(L, ej)
+            cholupdate!(C, ei)
+        end
+    end
+    return failed ? 0 : δj
+end
+
+function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_mvr_obj(L, C, m))
+    # update cholesky factor L
+    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        choldowndate!(L, storage)
+        cholupdate!(L, ei)
+        cholupdate!(L, ej)
+    else 
+        cholupdate!(L, storage)
+        choldowndate!(L, ei)
+        choldowndate!(L, ej)
+    end
+    # update cholesky factor C
+    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        cholupdate!(C, storage)
+        choldowndate!(C, ei)
+        choldowndate!(C, ej)
+    else
+        choldowndate!(C, storage)
+        cholupdate!(C, ei)
+        cholupdate!(C, ej)
+    end
+    !backtrack && return δ
+    # if objective didn't decrease, undo the update
+    new_obj = group_mvr_obj(L, C, m)
+    failed = new_obj > obj_old
+    if backtrack && failed
+        S[i, j] -= δ
+        S[j, i] -= δ
+        # undo cholesky update to L
+        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+        if δ > 0
+            choldowndate!(L, ej)
+            choldowndate!(L, ei)
+            cholupdate!(L, storage)
+        else 
+            cholupdate!(L, ej)
+            cholupdate!(L, ei)
+            choldowndate!(L, storage)
+        end
+        # update cholesky factor C
+        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+        if δ > 0
+            cholupdate!(C, ej)
+            cholupdate!(C, ei)
+            choldowndate!(C, storage)
+        else
+            choldowndate!(C, ej)
+            choldowndate!(C, ei)
+            cholupdate!(C, storage)
+        end
+    end
+    return failed ? 0 : δ
+end
+
+function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_maxent_obj(L, C, m))
+    fill!(x, 0); fill!(ỹ, 0)
+    x[j] = ỹ[j] = sqrt(abs(δ))
+    if δ > 0
+        choldowndate!(L, x)
+        cholupdate!(C, ỹ)
+    else
+        cholupdate!(L, x)
+        choldowndate!(C, ỹ)
+    end
+    !backtrack && return δ
+    # if objective didn't increase, undo the update
+    new_obj = group_maxent_obj(L, C, m)
+    failed = new_obj < obj_old
+    if backtrack && failed
+        S[j, j] -= δ
+        fill!(x, 0); fill!(ỹ, 0)
+        x[j] = ỹ[j] = sqrt(abs(δ))
+        if δ > 0
+            cholupdate!(L, x)
+            choldowndate!(C, ỹ)
+        else
+            choldowndate!(L, x)
+            cholupdate!(C, ỹ)
+        end
+    end
+    return failed ? 0 : δ
+end
+
+function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_maxent_obj(L, C, m))
+    # update cholesky factor L
+    fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+    x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        choldowndate!(L, x)
+        cholupdate!(L, ei)
+        cholupdate!(L, ej)
+    else 
+        cholupdate!(L, x)
+        choldowndate!(L, ei)
+        choldowndate!(L, ej)
+    end
+    # update cholesky factor C
+    fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+    x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    if δ > 0
+        cholupdate!(C, x)
+        choldowndate!(C, ei)
+        choldowndate!(C, ej)
+    else
+        choldowndate!(C, x)
+        cholupdate!(C, ei)
+        cholupdate!(C, ej)
+    end
+    !backtrack && return δ
+    # if objective didn't increase, undo the update
+    new_obj = group_maxent_obj(L, C, m)
+    failed = new_obj < obj_old
+    if backtrack && failed
+        S[i, j] -= δ
+        S[j, i] -= δ
+        # undo update to cholesky factor L
+        fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+        x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+        if δ > 0
+            choldowndate!(L, ej)
+            choldowndate!(L, ei)
+            cholupdate!(L, x)
+        else 
+            cholupdate!(L, ej)
+            cholupdate!(L, ei)
+            choldowndate!(L, x)
+        end
+        # undo update to cholesky factor C
+        fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+        x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+        if δ > 0
+            cholupdate!(C, ej)
+            cholupdate!(C, ei)
+            choldowndate!(C, x)
+        else
+            choldowndate!(C, ej)
+            choldowndate!(C, ei)
+            cholupdate!(C, x)
+        end
+    end
+    return failed ? 0 : δ
+end
+
+# SDP construction by choosing S_g = γ_g * Σ_{g,g}
+function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
+    p = size(Σ, 1)
+    G = length(Σblocks.blocks)
+    group_sizes = size.(Σblocks.blocks, 1)
+    # calculate Db = bdiag(Σ_{11}^{-1/2}, ..., Σ_{GG}^{-1/2})
+    Db = Matrix{eltype(Σ)}[]
+    for Σbi in Σblocks.blocks
+        push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
+    end
+    Db = BlockDiagonal(Db)
+    λ = Symmetric(2Db * Σ * Db) |> eigvals
+    reverse!(λ)
+    # solve non-linear objective using Ipopt
+    model = Model(() -> Ipopt.Optimizer())
+    set_optimizer_attribute(model, "print_level", 0)
+    variant_to_group = zeros(Int, p)
+    offset = 1
+    for (idx, g) in enumerate(group_sizes)
+        variant_to_group[offset:offset+g-1] .= idx
+        offset += g
+    end
+    @variable(model, 0 <= γ[1:G] <= minimum(λ)) # todo: should this be γ[g] ≤ the corresponding λ?
+    @NLobjective(model, Max, 
+        sum(group_sizes[g] * log(γ[g]) for g in 1:G) + 
+        sum(log(λ[i] - γ[variant_to_group[i]]) for i in 1:p)
+    )
+    JuMP.optimize!(model)
+    success = check_model_solution(model)
+    if !success
+        @warn "Optimization unsuccessful, solution may be inaccurate"
+    end
+    # convert solution to vector and return resulting block diagonal matrix
+    γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
+    S = BlockDiagonal(γs[1] .* Σblocks.blocks)
+    return S, γs
+end
+
 """
     modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ)
     modelX_gaussian_group_knockoffs(X, method, groups; [covariance_approximator])
@@ -517,6 +1087,7 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
++ `kwargs`: Extra keyword arguments for `solve_s_group`
 
 # Reference
 Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
@@ -525,14 +1096,15 @@ function modelX_gaussian_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
     groups::AbstractVector{Int};
+    m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs...
+    kwargs... # extra arguments for solve_s_group
     ) where T
     # approximate covariance matrix
     Σapprox = cov(covariance_approximator, X)
     # mean component is just column means
     μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox)
+    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox; m=m, kwargs...)
 end
 
 function modelX_gaussian_group_knockoffs(
@@ -541,6 +1113,7 @@ function modelX_gaussian_group_knockoffs(
     groups::AbstractVector{Int},
     μ::AbstractVector{T},
     Σ::AbstractMatrix{T};
+    m::Int = 1,
     kwargs...
     ) where T
     # first check errors
@@ -549,14 +1122,403 @@ function modelX_gaussian_group_knockoffs(
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : StatsBase.cov2cor!(Matrix(Σ), σs)
+    Σcor = iscor ? Σ : cov2cor!(Matrix(Σ), σs)
     # compute S matrix using the specified knockoff method
-    S, γs = solve_s_group(Σcor, groups, method; kwargs...)
+    S, γs = solve_s_group(Σcor, groups, method; m=m, kwargs...)
     # rescale S back to the result for a covariance matrix   
-    iscor || StatsBase.cor2cov!(S, σs)
+    iscor || cor2cov!(S, σs)
     # generate knockoffs
-    X̃ = condition(X, μ, Σ, S)
-    return GaussianGroupKnockoff(X, X̃, groups, S, γs, Symmetric(Σ), method)
+    X̃ = condition(X, μ, Σ, S; m=m)
+    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method)
+end
+
+"""
+    modelX_gaussian_rep_group_knockoffs(X, method; [nrep], [cutoff], [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ; [nrep], [cutoff], [m], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
+
+Selects `nrep` variables from each group and generate group knockoffs based on the 
+smaller set of variants. If `nrep=1`, we generate (non-grouped) knockoffs.
+"""
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol;
+    nrep::Int = 1,
+    cutoff::Number = 0.7,
+    m::Int = 1,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs... # extra arguments for solve_s or solve_s_group
+    ) where T
+    Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
+    μ = vec(mean(X, dims=1))                  # mean component is just column means
+    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox; m=m, 
+        nrep=nrep, cutoff=cutoff, kwargs...)
+end
+
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    μ::AbstractVector, 
+    Σ::AbstractMatrix;
+    nrep::Int = 1,
+    m::Int = 1,
+    cutoff::Number = 0.7,
+    kwargs... # extra arguments for solve_s or solve_s_group
+    ) where T
+    groups, group_reps = hc_partition_groups(cov(X), cutoff=cutoff, nrep=nrep)
+    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps;
+        m=m, nrep=nrep, kwargs...)
+end
+
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    μ::AbstractVector, 
+    Σ::AbstractMatrix,
+    groups::AbstractVector{Int},
+    group_reps::AbstractVector{Int};
+    nrep::Int = 1,
+    m::Int = 1,
+    kwargs... # extra arguments for solve_s or solve_s_group
+    ) where T
+    # note: these cannot be views because in the resulting struct requires concrete types not subarrays
+    μrep = μ[group_reps]
+    Σrep = Σ[group_reps, group_reps]
+    Xrep = X[:, group_reps]
+
+    if nrep == 1
+        # generate (non-grouped) knockoff of X restricted to representative columns
+        ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
+    else
+        # generate (smaller) group knockoffs of X
+        Xrep_groups = groups[group_reps]
+        ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
+            m=m, kwargs...)
+    end
+
+    return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
+end
+
+"""
+    id_partition_groups(Σ::Symmetric; [nrep], [target], [force_contiguous])
+    id_partition_groups(X::AbstractMatrix; [nrep], [target], [force_contiguous])
+
+Compute group members based on interpolative decompositions. An initial pass 
+first selects the most representative features such that regressing each 
+non-represented feature on the selected will have residual less than `target`.
+The selected features are then defined as group centers and the remaining 
+features are assigned to groups according to rule `by`.
+
+# Inputs
++ `Σ`: p × p correlation or covariance matrix of features, must be wrapped in
+    `Symmetric` keyword
++ `X`: n × p data matrix, each column is a feature
++ `nrep`: Number of representative per group. Initial group representatives are
+    guaranteed to be selected
++ `target`: Target residual level (greater than 0) for the first pass, smaller
+    means more groups
++ `force_contiguous`: Whether groups are forced to be contiguous. If true,
+    variants are assigned its left or right center, whichever
+    has the largest correlation with it without breaking contiguity.
+
+Note: interpolative decomposition is a stochastic algorithm. See a seed to
+guarantee reproducible results. 
+"""
+function id_partition_groups(
+    Σ::Symmetric;
+    nrep = 1,
+    target = 0.25,
+    force_contiguous = false
+    )
+    p = size(Σ, 1)
+    target ≥ 0 || error("Expected target to be > 0.")
+    # step 1: compute most reprensentative columns using interpolative decomposition
+    A = cholesky(PositiveFactorizations.Positive, Σ).U
+    sk, _, _ = id(A)
+    rk = search_rank(Σ, A, sk, target)
+    centers = sort(sk[1:rk])
+    # bin non-represented members
+    groups = zeros(Int, p)
+    groups[centers] .= 1:rk
+    non_rep = setdiff(1:p, centers)
+    force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
+                       assign_members_cor!(groups, Σ, non_rep, centers)
+    # step 2: pick reprensetatives for each group. Centers are always selected
+    group_reps = centers
+    if nrep > 1
+        for g in 1:rk
+            group_idx = findall(x -> x == g, groups) # all variables in this group
+            group_members = setdiff!(group_idx, centers) # remove the representative
+            length(group_members) == 0 && continue
+            # apply ID to given group
+            Σg = @view(Σ[group_members, group_members])
+            A = cholesky(PositiveFactorizations.Positive, Σg).U
+            rep_variables = interpolative_decomposition(A, nrep - 1)
+            for rep in rep_variables
+                push!(group_reps, group_members[rep])
+            end
+        end
+    end
+    return groups, sort!(group_reps)
+end
+
+function id_partition_groups(
+    X::AbstractMatrix; # X is n × p (i.e. indiviual level data)
+    nrep = 1,
+    target = 0.25,
+    force_contiguous = false
+    )
+    p = size(X, 2)
+    target ≥ 0 || error("Expected target to be > 0.")
+    # get empirical covariance matrix and scale it to correlation matrix
+    Σ = cov(X)
+    cov2cor!(Σ, sqrt.(diag(Σ)))
+    # step 1: compute most reprensentative columns using interpolative decomposition
+    sk, _, _ = id(X)
+    rk = search_rank(Σ, X, sk, target)
+    centers = sort(sk[1:rk])
+    # bin non-represented members
+    groups = zeros(Int, p)
+    groups[centers] .= 1:rk
+    non_rep = setdiff(1:p, centers)
+    force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
+                       assign_members_cor!(groups, Σ, non_rep, centers)
+    # step 2: pick reprensetatives for each group. Centers are always selected
+    group_reps = centers
+    if nrep > 1
+        for g in 1:rk
+            group_idx = findall(x -> x == g, groups) # all variables in this group
+            group_members = setdiff!(group_idx, centers) # remove the representative
+            length(group_members) == 0 && continue
+            Xg = @view(X[:, group_members])
+            rep_variables = interpolative_decomposition(Xg, nrep - 1)
+            for rep in rep_variables
+                push!(group_reps, group_members[rep])
+            end
+        end
+    end
+    return groups, sort!(group_reps)
+end
+
+function assign_members_cor!(groups, Σ, non_rep, centers)
+    for j in non_rep
+        center, best_dist = 0, typemin(eltype(Σ))
+        # find which of the representatives have largest absolute correlation with j
+        for c in centers
+            if abs(Σ[c, j]) > best_dist
+                center = c
+                best_dist = abs(Σ[c, j])
+            end
+        end
+        # assign j to the group of its representative
+        groups[j] = groups[center]
+    end
+    return groups
+end
+
+function assign_members_cor_adj!(groups, Σ, non_rep, rep_columns)
+    issorted(rep_columns) || error("Expected rep_columns to be sorted")
+    for j in non_rep
+        group_on_right = searchsortedfirst(rep_columns, j)
+        if group_on_right > length(rep_columns) # no group on the right
+            nearest_rep = rep_columns[end]
+        elseif group_on_right == 1 # j comes before the first group
+            nearest_rep = rep_columns[1]
+        else # test which of the nearest representative is more correlated with j
+            left, right = rep_columns[group_on_right - 1], rep_columns[group_on_right]
+            nearest_rep = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
+        end
+        # assign j to the group of its representative
+        groups[j] = groups[nearest_rep]
+    end
+    # adhoc: second pass to ensure all groups are sorted, since routine above doesn't guarantee sorted
+    # e.g. [111 22 3 4 55555 6666 5 666] (need to convert 66665666 at the far right to a 66666666)
+    prev_group = 1
+    for i in eachindex(groups)
+        (groups[i] < prev_group) && (groups[i] = prev_group)
+        (groups[i] > prev_group) && (prev_group = groups[i])
+    end
+    return groups
+end
+
+"""
+    search_rank(A::AbstractMatrix, sk::Vector{Int}, target=0.25, verbose=false)
+
+Finds the rank (number of columns of A) that best approximates the remaining columns
+such that regressing each remaining variable on those selected has RSS less than some
+target. 
+
++ `Σ`: Original (p × p) correlation matrix
++ `A`: The (upper triangular) cholesky factor of Σ
++ `sk`: The (unsorted) columns of A, earlier ones are more important
++ `target`: Target residual level
+
+note: we cannot do binary search because large ranks can increase residuals
+"""
+function search_rank(Σ::AbstractMatrix, A::AbstractMatrix, sk::Vector{Int}, target=0.25)
+    p = size(A, 1)
+    rk = 0
+    invΣ = inv(Σ[sk[1], sk[1]])
+    for k in 1:p
+        selected = @view(sk[1:k])
+        not_selected = @view(sk[k+1:end])
+        # compute inv(Σ_SS) using block matrix inverse trick
+        # https://math.stackexchange.com/questions/182309/block-inverse-of-symmetric-matrices
+        if k > 1
+            δ = @view(Σ[sk[1:k-1], sk[k]])
+            Z = inv(Σ[sk[k], sk[k]])
+            μ = Z - dot(δ, invΣ, δ)
+            invΣδ = invΣ * δ
+            invΣ = [ invΣ.+(invΣδ*invΣδ')/μ  -invΣδ/μ;
+                        -invΣδ'/μ                1/μ  ]
+            # invΣ_correct = inv(Σ[selected, selected])
+            # @show all(invΣ .≈ invΣ_correct)
+        end
+        # check if residuals of remaining columns are lower than threshold
+        success = test_residuals(invΣ, Σ, not_selected, selected, target)
+        if success
+            rk = k
+            break
+        end
+    end
+    return rk
+end
+
+function test_residuals(invΣ, Σ::AbstractMatrix{T}, not_selected, selected, target=0.25) where T
+    S = selected
+    k = length(S)
+    success = true
+    storage = zeros(T, k)
+    for j in not_selected
+        @views begin
+            mul!(storage, invΣ, Σ[S, j])
+            rss = Σ[j, j] - dot(Σ[j, S], storage)
+        end
+        if rss > target
+            success = false
+            break
+        end
+    end
+    return success
+end
+
+"""
+    hc_partition_groups(X::AbstractMatrix; [rep_method], [cutoff], [min_clusters], [nrep])
+    hc_partition_groups(Σ::Symmetric; [rep_method], [cutoff], [min_clusters], [nrep])
+
+Computes a group partition based on individual level data `X` or correlation 
+matrix `Σ` using single-linkage hierarchical clustering. By default, a list of
+variables most representative of each group will also be computed.
+
+# Inputs
++ `X`: `n × p` data matrix. Each row is a sample
++ `Σ`: `p × p` correlation matrix
++ `cutoff`: Height value for which the clustering result is cut, between 0 and 1
+    (default 0.7). This ensures that no variables between 2 groups have correlation
+    greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
+    everything in a single group. 
++ `min_clusters`: The desired number of clusters. 
++ `nrep`: Number of representative per group. Defaults 1. If `nrep=1`, the 
+    representative will be selected by computing which element has the smallest
+    distance to all other elements in the cluster, i.e. the mediod. Otherise, 
+    we will run interpolative decomposition to select representatives
+
+If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
+number of clusters is not less than `min_clusters` and their height is not 
+above `cutoff`.
+
+# Outputs
++ `groups`: Length `p` vector of group membership for each variable
++ `rep_variables`: Variables most representative of X. These are typically used
+    to compare group knockoff vs representative group knockoff
+
+# todo:
+add option to enforce adjacency constraint
+"""
+function hc_partition_groups(
+    X::AbstractMatrix;
+    cutoff = 0.7,
+    min_clusters = 1,
+    nrep = 1,
+    )
+    Σ = cov(X)
+    cov2cor!(Σ, sqrt.(diag(Σ)))
+    return hc_partition_groups(
+        Symmetric(Σ), cutoff=cutoff, min_clusters=min_clusters, nrep=nrep)
+end
+
+function hc_partition_groups(
+    Σ::Symmetric;
+    cutoff = 0.7,
+    min_clusters = 1,
+    nrep = 1,
+    )
+    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    # convert correlation matrix to a distance matrix
+    distmat = copy(Matrix(Σ))
+    @inbounds @simd for i in eachindex(distmat)
+        distmat[i] = 1 - abs(distmat[i])
+    end
+    # hierarchical clustering
+    cluster_result = hclust(distmat; linkage=:single)
+    groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
+    # select representatives
+    if nrep == 1
+        rep_variables = top_rep(distmat, groups)
+    else
+        rep_variables = id_reps(Σ, groups, nrep)
+    end
+    return groups, rep_variables
+end
+
+# computes a single representative from each group
+function top_rep(distmat::AbstractMatrix, groups::AbstractVector)
+    group_reps = Int[]
+    for g in unique(groups)
+        group_idx = findall(x -> x == g, groups)
+        @views colsum = sum(distmat[group_idx, group_idx], dims=1) |> vec
+        _, r1 = findmin(colsum)
+        push!(group_reps, group_idx[r1])
+    end
+    return sort!(group_reps)
+end
+
+"""
+    id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
+
+Selects `nrep` variables for each group. Σ is assumed a correlation matrix
+"""
+function id_reps(Σ::AbstractMatrix, groups::AbstractVector, nrep::Int)
+    all(x -> x ≈ 1, diag(Σ)) || error("Σg must be scaled to a correlation matrix first.")
+    group_reps = Int[]
+    for g in unique(groups)
+        group_idx = findall(x -> x == g, groups)
+        # apply ID to given group
+        Σg = @views(Σ[group_idx, group_idx])
+        A = cholesky(PositiveFactorizations.Positive, Σg).U
+        col_selected = interpolative_decomposition(A, nrep)
+        # save reps
+        for c in col_selected
+            push!(group_reps, group_idx[c])
+        end
+    end
+    return sort!(group_reps)
+end
+
+"""
+    interpolative_decomposition(A::AbstractMatrix, rk::Int)
+
+Computes the interpolative decomposition of A with rank `rk`
+and returns the top `rk` most representative columns of `A`
+"""
+function interpolative_decomposition(A::AbstractMatrix, rk::Int)
+    p = size(A, 1)
+    # quick return
+    rk > p && return collect(1:p)
+    length(A) == 1 && return [1]
+    # Run ID
+    col_selected, redun_cols, T = id(A, rank=rk)
+    return col_selected
 end
 
 # every `windowsize` SNPs form a group
@@ -614,7 +1576,7 @@ function modelX_gaussian_group_knockoffs(
         # approximate covariance matrix and scale it to correlation matrix
         @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
         σs = sqrt.(diag(Σapprox))
-        Σcor = StatsBase.cov2cor!(Σapprox.data, σs)
+        Σcor = cov2cor!(Σapprox.data, σs)
         # define group-blocks
         groups = partition_group(1:length(cur_range); windowsize=10)
         empty!(group_ranges); empty!(Sblocks)
@@ -626,9 +1588,9 @@ function modelX_gaussian_group_knockoffs(
         Sblock_diag = BlockDiagonal(Sblocks)
         # compute block diagonal S matrix using the specified knockoff method
         @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
-        # rescale S back to the result for a covariance matrix   
+        # rescale S back to the result for a covariance matrix
         for (i, idx) in enumerate(group_ranges)
-            StatsBase.cor2cov!(S.blocks[i], @view(σs[idx]))
+            cor2cov!(S.blocks[i], @view(σs[idx]))
         end
         # generate knockoffs
         μ = vec(mean(X, dims=1))
