@@ -15,7 +15,7 @@ using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
-using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!
+using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap
 using GLMNet
 using BlockDiagonals
 using Roots: fzero
@@ -31,21 +31,27 @@ using LowRankApprox: id
 
 @reexport using GLM
 
-export knockoff_filter, 
-    fixed_knockoffs, modelX_gaussian_knockoffs, normalize_col, normalize_col!,
-    coefficient_diff, threshold, extract_beta,
-    partition, rapid, snpknock2, decorrelate_knockoffs,
-    process_fastphase_output, fastphase, 
-    approx_modelX_gaussian_knockoffs,
+export 
+    # functions that generate knockoffs
+    fixed_knockoffs,
+    modelX_gaussian_knockoffs,
     ghost_knockoffs,
     modelX_gaussian_group_knockoffs,
     modelX_gaussian_rep_group_knockoffs,
-    solve_s, solve_s_group,
+    approx_modelX_gaussian_knockoffs,
     ipad,
-    # constructors
-    knockoff,
+    full_knockoffscreen,
+    # solvers
+    solve_s, 
+    solve_s_group,
+    # utilities for running knockoff filter
+    coefficient_diff, 
+    mk_threshold,
+    threshold, 
+    extract_beta,
     # functions related to fitting lasso
-    fit_lasso, debias!, 
+    fit_lasso, 
+    debias!, 
     # functions for prediction routine after lasso fit
     predict, R2, auc, 
     # functions for hmm
@@ -57,14 +63,19 @@ export knockoff_filter,
     get_haplotype_emission_probabilities, markov_knockoffs, markov_knockoffs!,
     sample_markov_chain, sample_markov_chain!,
     update_normalizing_constants!, single_state_dmc_knockoff!,
-    # knockoffscreen knockoffs
-    full_knockoffscreen,
+    rapid, snpknock2, 
+    process_fastphase_output, fastphase, 
     # diagnostics
     compare_correlation, compare_pairwise_correlation,
     # utilities
-    merge_knockoffs_with_original, simulate_AR1,
+    merge_knockoffs_with_original,
+    simulate_AR1,
     download_1000genomes,
-    simulate_block_covariance, hc_partition_groups, id_partition_groups
+    simulate_block_covariance, 
+    hc_partition_groups, 
+    id_partition_groups,
+    normalize_col, 
+    normalize_col!,
 
 include("struct.jl")
 include("fixed.jl")
@@ -87,6 +98,6 @@ const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
 const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_ccd, :sdp_full, :mvr, :maxent, :maxent_subopt]
 
 # test data directory
-datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)    
+datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)
 
 end

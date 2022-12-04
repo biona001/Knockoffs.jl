@@ -1,13 +1,172 @@
 """
-    solve_s_group(Σ, groups, [method=:equi]; kwargs...)
+    modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ; [m], [nrep], [covariance_approximator])
+    modelX_gaussian_group_knockoffs(X, method, groups; [m], [nrep], [covariance_approximator])
+
+Constructs Gaussian model-X group knockoffs. If the covariance `Σ` and mean `μ` 
+are not specified, they will be estimated from data, i.e. we will make second-order
+group knockoffs. To incorporate group structure, the (true or estimated) covariance 
+matrix is block-diagonalized according to `groups` membership to solve a relaxed 
+optimization problem. See reference paper and Knockoffs.jl docs for more details. 
+
+# Inputs
++ `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
++ `method`: Method for constructing knockoffs. Options include
+    * `:maxent`: (recommended) for fully general maximum entropy group knockoffs
+    * `:mvr`: for fully general minimum variance-based reconstructability (MVR) group 
+        knockoffs (contrary to using `:maxent`, we don't do line search for MVR
+        group knockoffs because evaluating the objective is expensive)
+    * `:equi`: for equi-correlated knockoffs. This is the methodology proposed in
+        `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
+        International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
+    * `:sdp_ccd`: Fully general SDP group knockoffs based on coodinate descent
+    * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
+        generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
+    * `:sdp`: Fully general SDP group knockoffs where each block is solved exactly 
+        using an interior point solver. 
++ `groups`: Vector of group membership
++ `μ`: A length `p` vector storing the true column means of `X`
++ `Σ`: A `p × p` covariance matrix for columns of `X`
++ `m`: Number of knockoffs per variable, defaults to 1. 
++ `covariance_approximator`: A covariance estimator, defaults to 
+    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
+    for more options.
++ `kwargs`: Extra keyword arguments for `solve_s_group`
+
+# How to define groups
+The exported functions `hc_partition_groups` and `id_partition_groups` can be used
+to build a group membership vector. 
+
+# A note on compute time
+The computational complexity of group knockoffs scales quadratically with group size.
+Thus, very large groups (e.g. >100 members per group) dramatically slows down 
+parameter estimation. In such cases, one can consider running the routine 
+`modelX_gaussian_rep_group_knockoffs` which constructs group knockoffs by choosing
+top representatives from each group. 
+
+# Reference
+Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
+"""
+function modelX_gaussian_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    groups::AbstractVector{Int};
+    m::Int = 1,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    kwargs... # extra arguments for solve_s_group
+    ) where T
+    # approximate covariance matrix
+    Σapprox = cov(covariance_approximator, X)
+    # mean component is just column means
+    μ = vec(mean(X, dims=1))
+    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox; m=m, kwargs...)
+end
+
+function modelX_gaussian_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    groups::AbstractVector{Int},
+    μ::AbstractVector{T},
+    Σ::AbstractMatrix{T};
+    m::Int = 1,
+    kwargs...
+    ) where T
+    # first check errors
+    length(groups) == size(X, 2) || 
+        error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
+    max_group_size = countmap(groups) |> values |> collect |> maximum
+    if max_group_size > 50
+        @warn "Maximum group size is $max_group_size, optimization may be slow. " * 
+            "Consider running `modelX_gaussian_rep_group_knockoffs` to speed up convergence."
+    end
+    # Scale covariance to correlation matrix
+    σs = sqrt.(diag(Σ))
+    iscor = all(x -> x ≈ 1, σs)
+    Σcor = iscor ? Σ : cov2cor!(Matrix(Σ), σs)
+    # compute S matrix using the specified knockoff method
+    S, γs = solve_s_group(Σcor, groups, method; m=m, kwargs...)
+    # rescale S back to the result for a covariance matrix   
+    iscor || cor2cov!(S, σs)
+    # generate knockoffs
+    X̃ = condition(X, μ, Σ, S; m=m)
+    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method)
+end
+
+"""
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
+
+Constructs group knockoffs by choosing `nrep` representatives from each group. 
+This is a more computationally efficient approach compared to solving the general
+group knockoff problem when there are really large groups. If `nrep=1`, we
+build regular knockoffs based on the representatives.
+
+# Inputs
++ `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
++ `method`: Method for constructing knockoffs. Options are the same as 
+    `modelX_gaussian_group_knockoffs`
++ `groups`: Vector of `Int` denoting group membership. `groups[i]` is the group 
+    of `X[:, i]`
++ `group_reps`: Vector of `Int` denoting the columns of `X` that will be used to 
+    construct group knockoffs. That is, only `X[:, group_reps]` are used to build
+    knockoffs, where groups are defined by `groups[group_reps]`
++ `μ`: A length `p` vector storing the true column means of `X`
++ `Σ`: A `p × p` covariance matrix for columns of `X`
++ `m`: Number of knockoffs per variable, defaults to 1. 
++ `covariance_approximator`: A covariance estimator, defaults to 
+    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
+    for more options.
++ `kwargs`: Extra keyword arguments for `solve_s_group`
+"""
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    μ::AbstractVector, 
+    Σ::AbstractMatrix,
+    groups::AbstractVector{Int},
+    group_reps::AbstractVector{Int};
+    nrep::Int = 1,
+    m::Int = 1,
+    kwargs... # extra arguments for solve_s or solve_s_group
+    ) where T
+    # note: these cannot be views because in the resulting struct requires concrete types not subarrays
+    μrep = μ[group_reps]
+    Σrep = Σ[group_reps, group_reps]
+    Xrep = X[:, group_reps]
+
+    if nrep == 1
+        # generate (non-grouped) knockoff of X restricted to representative columns
+        ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
+    else
+        # generate (smaller) group knockoffs of X
+        Xrep_groups = groups[group_reps]
+        ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
+            m=m, kwargs...)
+    end
+
+    return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
+end
+
+"""
+    solve_s_group(Σ, groups, method; [m=1], kwargs...)
 
 Solves the group knockoff problem, returns block diagonal matrix S
-satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
+satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature. 
 
 # Inputs 
 + `Σ`: A covariance matrix that has been scaled to a correlation matrix.
 + `groups`: Vector of group membership, does not need to be contiguous
-+ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
++ `method`: Method for constructing knockoffs. Options include
+    * `:maxent`: (recommended) for fully general maximum entropy group knockoffs
+    * `:mvr`: for fully general minimum variance-based reconstructability (MVR) group 
+        knockoffs (contrary to using `:maxent`, we don't do line search for MVR
+        group knockoffs because evaluating the objective is expensive)
+    * `:equi`: for equi-correlated knockoffs. This is the methodology proposed in
+        `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
+        International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
+    * `:sdp_ccd`: Fully general SDP group knockoffs based on coodinate descent
+    * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
+        generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
+    * `:sdp`: Fully general SDP group knockoffs where each block is solved exactly 
+        using an interior point solver. 
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
@@ -21,7 +180,7 @@ satisfying `2Σ - S ⪰ 0` and the constant(s) γ.
 function solve_s_group(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int},
-    method::Symbol=:maxent;
+    method::Symbol;
     m::Int=1,
     kwargs...
     ) where T
@@ -1069,137 +1228,6 @@ function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockD
 end
 
 """
-    modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ)
-    modelX_gaussian_group_knockoffs(X, method, groups; [covariance_approximator])
-
-Constructs Gaussian model-X group knockoffs. If the covariance `Σ` and mean `μ` 
-are not specified, they will be estimated from data, i.e. we will make second-order
-group knockoffs. To incorporate group structure, the (true or estimated) covariance 
-matrix is block-diagonalized according to `groups` membership to solve a relaxed 
-optimization problem. See reference paper and Knockoffs.jl docs for more details. 
-
-# Inputs
-+ `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
-+ `method`: Method for constructing knockoffs. Options are `:equi` or `:sdp`
-+ `groups`: Vector of group membership
-+ `μ`: A length `p` vector storing the true column means of `X`
-+ `Σ`: A `p × p` covariance matrix for columns of `X`
-+ `covariance_approximator`: A covariance estimator, defaults to 
-    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
-    for more options.
-+ `kwargs`: Extra keyword arguments for `solve_s_group`
-
-# Reference
-Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
-"""
-function modelX_gaussian_group_knockoffs(
-    X::AbstractMatrix{T}, 
-    method::Symbol,
-    groups::AbstractVector{Int};
-    m::Int = 1,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs... # extra arguments for solve_s_group
-    ) where T
-    # approximate covariance matrix
-    Σapprox = cov(covariance_approximator, X)
-    # mean component is just column means
-    μ = vec(mean(X, dims=1))
-    return modelX_gaussian_group_knockoffs(X, method, groups, μ, Σapprox; m=m, kwargs...)
-end
-
-function modelX_gaussian_group_knockoffs(
-    X::AbstractMatrix{T}, 
-    method::Symbol,
-    groups::AbstractVector{Int},
-    μ::AbstractVector{T},
-    Σ::AbstractMatrix{T};
-    m::Int = 1,
-    kwargs...
-    ) where T
-    # first check errors
-    length(groups) == size(X, 2) || 
-        error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
-    # Scale covariance to correlation matrix
-    σs = sqrt.(diag(Σ))
-    iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : cov2cor!(Matrix(Σ), σs)
-    # compute S matrix using the specified knockoff method
-    S, γs = solve_s_group(Σcor, groups, method; m=m, kwargs...)
-    # rescale S back to the result for a covariance matrix   
-    iscor || cor2cov!(S, σs)
-    # generate knockoffs
-    X̃ = condition(X, μ, Σ, S; m=m)
-    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method)
-end
-
-"""
-    modelX_gaussian_rep_group_knockoffs(X, method; [nrep], [cutoff], [m], [covariance_approximator], [kwargs...])
-    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ; [nrep], [cutoff], [m], [kwargs...])
-    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
-
-Selects `nrep` variables from each group and generate group knockoffs based on the 
-smaller set of variants. If `nrep=1`, we generate (non-grouped) knockoffs.
-"""
-function modelX_gaussian_rep_group_knockoffs(
-    X::AbstractMatrix{T}, 
-    method::Symbol;
-    nrep::Int = 1,
-    cutoff::Number = 0.7,
-    m::Int = 1,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    kwargs... # extra arguments for solve_s or solve_s_group
-    ) where T
-    Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
-    μ = vec(mean(X, dims=1))                  # mean component is just column means
-    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox; m=m, 
-        nrep=nrep, cutoff=cutoff, kwargs...)
-end
-
-function modelX_gaussian_rep_group_knockoffs(
-    X::AbstractMatrix{T}, 
-    method::Symbol,
-    μ::AbstractVector, 
-    Σ::AbstractMatrix;
-    nrep::Int = 1,
-    m::Int = 1,
-    cutoff::Number = 0.7,
-    kwargs... # extra arguments for solve_s or solve_s_group
-    ) where T
-    groups, group_reps = hc_partition_groups(cov(X), cutoff=cutoff, nrep=nrep)
-    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps;
-        m=m, nrep=nrep, kwargs...)
-end
-
-function modelX_gaussian_rep_group_knockoffs(
-    X::AbstractMatrix{T}, 
-    method::Symbol,
-    μ::AbstractVector, 
-    Σ::AbstractMatrix,
-    groups::AbstractVector{Int},
-    group_reps::AbstractVector{Int};
-    nrep::Int = 1,
-    m::Int = 1,
-    kwargs... # extra arguments for solve_s or solve_s_group
-    ) where T
-    # note: these cannot be views because in the resulting struct requires concrete types not subarrays
-    μrep = μ[group_reps]
-    Σrep = Σ[group_reps, group_reps]
-    Xrep = X[:, group_reps]
-
-    if nrep == 1
-        # generate (non-grouped) knockoff of X restricted to representative columns
-        ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
-    else
-        # generate (smaller) group knockoffs of X
-        Xrep_groups = groups[group_reps]
-        ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
-            m=m, kwargs...)
-    end
-
-    return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
-end
-
-"""
     id_partition_groups(Σ::Symmetric; [nrep], [target], [force_contiguous])
     id_partition_groups(X::AbstractMatrix; [nrep], [target], [force_contiguous])
 
@@ -1546,66 +1574,66 @@ a single chromosome stored in PLINK formatted data.
 + Output to PGEN which stores dosages
 + Better window definition via hierarchical clustering
 """
-function modelX_gaussian_group_knockoffs(
-    x::SnpArray, # assumes only have 1 chromosome, allows missing data
-    method::Symbol;
-    T::DataType = Float32,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    outfile::Union{String, UndefInitializer} = undef,
-    windowsize::Int = 10000
-    )
-    # estimate rough memory requirement (need Σ which is windowsize*windowsize and X which is n*windowsize)
-    n, p = size(x)
-    windows = ceil(Int, p / windowsize)
-    @info "This routine requires at least $((T.size * windowsize^2 + T.size * n*windowsize) / 10^9) GB of RAM"
-    # preallocated arrays
-    xstore = Matrix{T}(undef, n, windowsize)
-    X̃snparray = SnpArray(outfile, n, p)
-    group_ranges = Vector{Int}[]
-    Sblocks = Matrix{T}[]
-    # loop over each window
-    for window in 1:windows
-        # import genotypes into numeric array
-        cur_range = window == windows ? 
-            ((windows - 1)*windowsize + 1:p) : 
-            ((window - 1)*windowsize + 1:window * windowsize)
-        @time copyto!(xstore, @view(x[:, cur_range]), impute=true)
-        X = @view(xstore[:, 1:length(cur_range)])
-        any(x -> iszero(x), std(X, dims=1)) &&
-            error("Detected monomorphic SNPs. Please make sure QC is done properly.")
-        # approximate covariance matrix and scale it to correlation matrix
-        @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
-        σs = sqrt.(diag(Σapprox))
-        Σcor = cov2cor!(Σapprox.data, σs)
-        # define group-blocks
-        groups = partition_group(1:length(cur_range); windowsize=10)
-        empty!(group_ranges); empty!(Sblocks)
-        for g in unique(groups)
-            idx = findall(x -> x == g, groups)
-            push!(Sblocks, @view(Σcor[idx, idx]))
-            push!(group_ranges, idx)
-        end
-        Sblock_diag = BlockDiagonal(Sblocks)
-        # compute block diagonal S matrix using the specified knockoff method
-        @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
-        # rescale S back to the result for a covariance matrix
-        for (i, idx) in enumerate(group_ranges)
-            cor2cov!(S.blocks[i], @view(σs[idx]))
-        end
-        # generate knockoffs
-        μ = vec(mean(X, dims=1))
-        @time X̃ = Knockoffs.condition(X, μ, Σapprox, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
-        # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
-        X̃ .= round.(X̃)
-        clamp!(X̃, 0, 2)
-        # count(vec(X̃) .!= vec(X)) # 160294 / 100000000 for a window
-        # copy result into SnpArray
-        for (j, jj) in enumerate(cur_range), i in 1:n
-            X̃snparray[i, jj] = iszero(X̃[i, j]) ? 0x00 : 
-                isone(X̃[i, j]) ? 0x02 : 0x03
-        end
-        # xtest = convert(Matrix{Float64}, @view(X̃snparray[:, cur_range]))
-        # @assert all(xtest .== X̃)
-    end
-    return X̃snparray
-end
+# function modelX_gaussian_group_knockoffs(
+#     x::SnpArray, # assumes only have 1 chromosome, allows missing data
+#     method::Symbol;
+#     T::DataType = Float32,
+#     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+#     outfile::Union{String, UndefInitializer} = undef,
+#     windowsize::Int = 10000
+#     )
+#     # estimate rough memory requirement (need Σ which is windowsize*windowsize and X which is n*windowsize)
+#     n, p = size(x)
+#     windows = ceil(Int, p / windowsize)
+#     @info "This routine requires at least $((T.size * windowsize^2 + T.size * n*windowsize) / 10^9) GB of RAM"
+#     # preallocated arrays
+#     xstore = Matrix{T}(undef, n, windowsize)
+#     X̃snparray = SnpArray(outfile, n, p)
+#     group_ranges = Vector{Int}[]
+#     Sblocks = Matrix{T}[]
+#     # loop over each window
+#     for window in 1:windows
+#         # import genotypes into numeric array
+#         cur_range = window == windows ? 
+#             ((windows - 1)*windowsize + 1:p) : 
+#             ((window - 1)*windowsize + 1:window * windowsize)
+#         @time copyto!(xstore, @view(x[:, cur_range]), impute=true)
+#         X = @view(xstore[:, 1:length(cur_range)])
+#         any(x -> iszero(x), std(X, dims=1)) &&
+#             error("Detected monomorphic SNPs. Please make sure QC is done properly.")
+#         # approximate covariance matrix and scale it to correlation matrix
+#         @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
+#         σs = sqrt.(diag(Σapprox))
+#         Σcor = cov2cor!(Σapprox.data, σs)
+#         # define group-blocks
+#         groups = partition_group(1:length(cur_range); windowsize=10)
+#         empty!(group_ranges); empty!(Sblocks)
+#         for g in unique(groups)
+#             idx = findall(x -> x == g, groups)
+#             push!(Sblocks, @view(Σcor[idx, idx]))
+#             push!(group_ranges, idx)
+#         end
+#         Sblock_diag = BlockDiagonal(Sblocks)
+#         # compute block diagonal S matrix using the specified knockoff method
+#         @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
+#         # rescale S back to the result for a covariance matrix
+#         for (i, idx) in enumerate(group_ranges)
+#             cor2cov!(S.blocks[i], @view(σs[idx]))
+#         end
+#         # generate knockoffs
+#         μ = vec(mean(X, dims=1))
+#         @time X̃ = Knockoffs.condition(X, μ, Σapprox, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
+#         # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
+#         X̃ .= round.(X̃)
+#         clamp!(X̃, 0, 2)
+#         # count(vec(X̃) .!= vec(X)) # 160294 / 100000000 for a window
+#         # copy result into SnpArray
+#         for (j, jj) in enumerate(cur_range), i in 1:n
+#             X̃snparray[i, jj] = iszero(X̃[i, j]) ? 0x00 : 
+#                 isone(X̃[i, j]) ? 0x02 : 0x03
+#         end
+#         # xtest = convert(Matrix{Float64}, @view(X̃snparray[:, cur_range]))
+#         # @assert all(xtest .== X̃)
+#     end
+#     return X̃snparray
+# end
