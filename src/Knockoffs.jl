@@ -22,7 +22,7 @@ using Roots: fzero
 using Downloads
 using GLM
 using Reexport
-using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
+using LoopVectorization: @turbo # speeding up cholesky updates
 using Ipopt
 using SCS
 using Optim: optimize, Brent # for group knockoffs
@@ -75,6 +75,7 @@ include("threshold.jl")
 include("hmm_wrapper.jl")
 include("hmm.jl")
 include("utilities.jl")
+include("cholesky.jl")
 include("knockoffscreen.jl")
 include("fit_lasso.jl")
 include("approx.jl")

@@ -706,120 +706,120 @@ function simulate_block_covariance(
     return Σ
 end
 
-"""
-    lowrankupdate_turbo!(C::Cholesky, v::AbstractVector)
+# """
+#     lowrankupdate_turbo!(C::Cholesky, v::AbstractVector)
 
-Vectorized version of lowrankupdate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L707
-Takes advantage of the fact that `v` is 0 everywhere except at 1 position
-"""
-function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
-    A = C.factors
-    n = length(v)
-    if size(C, 1) != n
-        throw(DimensionMismatch("updating vector must fit size of factorization"))
-    end
-    # if C.uplo == 'U'
-    #     conj!(v)
-    # end
+# Vectorized version of lowrankupdate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L707
+# Takes advantage of the fact that `v` is 0 everywhere except at 1 position
+# """
+# function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
+#     A = C.factors
+#     n = length(v)
+#     if size(C, 1) != n
+#         throw(DimensionMismatch("updating vector must fit size of factorization"))
+#     end
+#     # if C.uplo == 'U'
+#     #     conj!(v)
+#     # end
 
-    early_term = 0
-    idx_start = something(findfirst(!iszero, v))
-    @inbounds for i = idx_start:n
+#     early_term = 0
+#     idx_start = something(findfirst(!iszero, v))
+#     @inbounds for i = idx_start:n
 
-        # Compute Givens rotation
-        c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
+#         # Compute Givens rotation
+#         c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
 
-        # check for early termination
-        if abs(s) < 1e-15
-            early_term += 1
-            early_term > 10 && break
-        else
-            early_term = 0
-        end
+#         # check for early termination
+#         if abs(s) < 1e-15
+#             early_term += 1
+#             early_term > 10 && break
+#         else
+#             early_term = 0
+#         end
 
-        # Store new diagonal element
-        A[i,i] = r
+#         # Store new diagonal element
+#         A[i,i] = r
 
-        # Update remaining elements in row/column
-        if C.uplo == 'U'
-            @turbo for j = i + 1:n
-                Aij = A[i,j]
-                vj  = v[j]
-                A[i,j]  =   c*Aij + s*vj
-                v[j]    = -s*Aij + c*vj
-            end
-        else
-            @turbo for j = i + 1:n
-                Aji = A[j,i]
-                vj  = v[j]
-                A[j,i]  =   c*Aji + s*vj
-                v[j]    = -s*Aji + c*vj
-            end
-        end
-    end
-    return C
-end
+#         # Update remaining elements in row/column
+#         if C.uplo == 'U'
+#             @turbo for j = i + 1:n
+#                 Aij = A[i,j]
+#                 vj  = v[j]
+#                 A[i,j]  =   c*Aij + s*vj
+#                 v[j]    = -s*Aij + c*vj
+#             end
+#         else
+#             @turbo for j = i + 1:n
+#                 Aji = A[j,i]
+#                 vj  = v[j]
+#                 A[j,i]  =   c*Aji + s*vj
+#                 v[j]    = -s*Aji + c*vj
+#             end
+#         end
+#     end
+#     return C
+# end
 
-"""
-    lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
+# """
+#     lowrankdowndate_turbo!(C::Cholesky, v::AbstractVector)
 
-Vectorized version of lowrankdowndate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L753
-Takes advantage of the fact that `v` is 0 everywhere except at 1 position
-"""
-function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
-    A = C.factors
-    n = length(v)
-    if size(C, 1) != n
-        throw(DimensionMismatch("updating vector must fit size of factorization"))
-    end
-    # if C.uplo == 'U'
-    #     conj!(v)
-    # end
+# Vectorized version of lowrankdowndate!, source https://github.com/JuliaLang/julia/blob/742b9abb4dd4621b667ec5bb3434b8b3602f96fd/stdlib/LinearAlgebra/src/cholesky.jl#L753
+# Takes advantage of the fact that `v` is 0 everywhere except at 1 position
+# """
+# function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: AbstractFloat
+#     A = C.factors
+#     n = length(v)
+#     if size(C, 1) != n
+#         throw(DimensionMismatch("updating vector must fit size of factorization"))
+#     end
+#     # if C.uplo == 'U'
+#     #     conj!(v)
+#     # end
 
-    early_term = 0
-    idx_start = something(findfirst(!iszero, v))
-    @inbounds for i = idx_start:n
+#     early_term = 0
+#     idx_start = something(findfirst(!iszero, v))
+#     @inbounds for i = idx_start:n
 
-        Aii = A[i,i]
+#         Aii = A[i,i]
 
-        # Compute Givens rotation
-        s = v[i] / Aii
-        s2 = abs2(s)
-        if s2 > 1
-            throw(LinearAlgebra.PosDefException(i))
-        end
-        c = sqrt(1 - abs2(s))
+#         # Compute Givens rotation
+#         s = v[i] / Aii
+#         s2 = abs2(s)
+#         if s2 > 1
+#             throw(LinearAlgebra.PosDefException(i))
+#         end
+#         c = sqrt(1 - abs2(s))
 
-        # check for early termination
-        if abs(s) < 1e-15
-            early_term += 1
-            early_term > 10 && break
-        else
-            early_term = 0
-        end
+#         # check for early termination
+#         if abs(s) < 1e-15
+#             early_term += 1
+#             early_term > 10 && break
+#         else
+#             early_term = 0
+#         end
 
-        # Store new diagonal element
-        A[i,i] = c*Aii
+#         # Store new diagonal element
+#         A[i,i] = c*Aii
 
-        # Update remaining elements in row/column
-        if C.uplo == 'U'
-            @turbo for j = i + 1:n
-                vj = v[j]
-                Aij = (A[i,j] - s*vj)/c
-                A[i,j] = Aij
-                v[j] = -s*Aij + c*vj
-            end
-        else
-            @turbo for j = i + 1:n
-                vj = v[j]
-                Aji = (A[j,i] - s*vj)/c
-                A[j,i] = Aji
-                v[j] = -s*Aji + c*vj
-            end
-        end
-    end
-    return C
-end
+#         # Update remaining elements in row/column
+#         if C.uplo == 'U'
+#             @turbo for j = i + 1:n
+#                 vj = v[j]
+#                 Aij = (A[i,j] - s*vj)/c
+#                 A[i,j] = Aij
+#                 v[j] = -s*Aij + c*vj
+#             end
+#         else
+#             @turbo for j = i + 1:n
+#                 vj = v[j]
+#                 Aji = (A[j,i] - s*vj)/c
+#                 A[j,i] = Aji
+#                 v[j] = -s*Aji + c*vj
+#             end
+#         end
+#     end
+#     return C
+# end
 
 """
     ◺(n::Integer)
