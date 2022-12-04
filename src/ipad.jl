@@ -22,13 +22,14 @@ problem.
 """
 function ipad(X::AbstractMatrix{T}; r_method = :er, m::Int = 1) where T
     n, p = size(X)
-    kmax = min(n, p)
     # estimate r
     XXt = X * X'
     evals, evecs = eigen(XXt)
     evecs = evecs[:, sortperm(evals)]
     reverse!(evals)
     r = 0
+    # kmax = min(n, p)
+    kmax = count(x -> x > 0, evals) - 2
     if r_method == :er
         r = [evals[i] / evals[i + 1] for i in 1:kmax-1] |> argmax
     elseif r_method == :gr
