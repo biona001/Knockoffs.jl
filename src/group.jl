@@ -92,6 +92,7 @@ function modelX_gaussian_group_knockoffs(
 end
 
 """
+    modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [nrep], [m], [covariance_approximator], [kwargs...])
     modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
 
 Constructs group knockoffs by choosing `nrep` representatives from each group. 
@@ -116,6 +117,22 @@ build regular knockoffs based on the representatives.
     for more options.
 + `kwargs`: Extra keyword arguments for `solve_s_group`
 """
+function modelX_gaussian_rep_group_knockoffs(
+    X::AbstractMatrix{T}, 
+    method::Symbol,
+    groups::AbstractVector{Int},
+    group_reps::AbstractVector{Int};
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
+    nrep::Int = 1,
+    m::Int = 1,
+    kwargs... # extra arguments for solve_s or solve_s_group
+    ) where T
+    Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
+    μ = vec(mean(X, dims=1)) # empirical column means
+    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, 
+        groups, group_reps; nrep=nrep, m=m, kwargs...)
+end
+
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
@@ -173,9 +190,14 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
 
 # Output
 + `S`: A matrix solved so that `(m+1)/m*Σ - S ⪰ 0` and `S ⪰ 0`
-+ `γ`: A vector that is only non-empty for equi and SDP knockoffs. They correspond to 
-    values of γ where `S_{gg} = γΣ_{gg}`. So for equi, the vector is length 1. For 
-    SDP, the vector has length equal to number of groups
++ `γ`: A vector that is only non-empty for equi and suboptimal SDP knockoffs. 
+    They correspond to values of γ where `S_{gg} = γΣ_{gg}`. So for equi, the
+    vector is length 1. For SDP, the vector has length equal to number of groups
+
+# Warning
+This function potentially permutes the columns/rows of `Σ`, and puts them back
+at the end. Thus one should NOT call `solve_s_group` on the same `Σ` simultaneously,
+e.g. in a multithreaded for loop. 
 """
 function solve_s_group(
     Σ::AbstractMatrix{T}, 
