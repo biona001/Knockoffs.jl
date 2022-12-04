@@ -75,7 +75,7 @@ export
     hc_partition_groups, 
     id_partition_groups,
     normalize_col, 
-    normalize_col!,
+    normalize_col!
 
 include("struct.jl")
 include("fixed.jl")
