@@ -40,6 +40,14 @@ struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff
     nrep::Int # number of representatives per group
 end
 
+struct IPADKnockoff{T<:AbstractFloat} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × mp knockoff of X
+    m::Int # number of knockoffs per feature generated
+    r::Int # rank of factor model
+    r_method::Symbol # method for choosing r
+end
+
 struct MergedKnockoff{T} <: Knockoff
     XX̃::Matrix{T} # n × (m+1)p matrix of original+knockoff features. The first m+1 variables are the first feature and its knockoffs shuffled...etc
     original::Vector{Int} # p × 1 vector of indices storing which columns of XX̃ contains the original features
