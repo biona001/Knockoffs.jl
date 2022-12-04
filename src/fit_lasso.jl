@@ -17,6 +17,8 @@ data.
     (logistic regression) use `Binomial()`.
 + `m`: Number of simultaneous knockoffs to generate, defaults to `m=1`
 + `fdrs`: Target FDRs, defaults to `[0.01, 0.05, 0.1, 0.25, 0.5]`
++ `groups`: Vector of group membership. If not supplied, we generate regular knockoffs.
+    If supplied, we run group knockoffs.
 + `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default) 
 + `debias`: Defines how the selected coefficients are debiased. Specify `:ls` 
     for least squares or `:lasso` for Lasso (only running on the 
@@ -37,7 +39,7 @@ function fit_lasso(
     ) where T
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
         modelX_gaussian_group_knockoffs(X, method, groups, m=m)
-    return fit_lasso(y, X, ko, d=d, fdrs=fdrs, 
+    return fit_lasso(y, ko, d=d, fdrs=fdrs, 
         filter_method=filter_method, debias=debias; kwargs...)
 end
 
@@ -57,13 +59,12 @@ function fit_lasso(
     ) where T
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, μ, Σ, m=m) : 
         modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ; m=m)
-    return fit_lasso(y, X, ko, d=d, fdrs=fdrs, 
+    return fit_lasso(y, ko, d=d, fdrs=fdrs, 
         filter_method=filter_method, debias=debias; kwargs...)
 end
 
 function fit_lasso(
     y::AbstractVector{T},
-    X::AbstractMatrix{T}, 
     ko::Knockoff; # GaussianRepGroupKnockoff has specialized fit_lasso
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
@@ -73,6 +74,7 @@ function fit_lasso(
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
+    X = ko.X
     X̃ = ko.X̃
     m = ko.m # number of knockoffs per feature
     # merge X with its knockoffs X̃ and shuffle around the indices

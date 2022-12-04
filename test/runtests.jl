@@ -295,9 +295,9 @@ end
     @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
 
     # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
-    @time sdp_filter = fit_lasso(y, X, Xko_sdp, debias=nothing)
-    @time mvr_filter = fit_lasso(y, X, Xko_mvr, debias=nothing)
-    @time me_filter = fit_lasso(y, X, Xko_maxent, debias=nothing)
+    @time sdp_filter = fit_lasso(y, Xko_sdp, debias=nothing)
+    @time mvr_filter = fit_lasso(y, Xko_mvr, debias=nothing)
+    @time me_filter = fit_lasso(y, Xko_maxent, debias=nothing)
 
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
     for i in eachindex(sdp_filter.fdr_target)
@@ -381,9 +381,9 @@ end
 
     # run lasso, followed up by debiasing
     Random.seed!(seed)
-    @time nodebias = fit_lasso(y, X, Xko, debias=nothing)
+    @time nodebias = fit_lasso(y, Xko, debias=nothing)
     Random.seed!(seed)
-    @time yesdebias = fit_lasso(y, X, Xko, debias=:ls)
+    @time yesdebias = fit_lasso(y, Xko, debias=:ls)
 
     # check that debiased result have same support as not debiasing
     for i in eachindex(nodebias.fdr_target)
