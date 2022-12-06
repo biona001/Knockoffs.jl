@@ -158,20 +158,24 @@ end
 """
     coefficient_diff(β::AbstractVector, groups::Vector{Int}, original::Vector{Int}, knockoff::Vector{Int})
 
-Returns the coefficient difference statistic for grouped variables
-W[G] = sum_{j in G} |β[j]| - sum_{j in G} |β[j + p]|.
+Returns the coefficient difference statistic for grouped variables. If
+`compute_avg=true`, we compute the average beta for each group, otherwise
+we compute the sum.
 
 # Inputs
 + `β`: `2p × 1` vector of regression coefficients, including original and knockoff effect sizes
 + `groups`: `2p × 1` vector storing group membership. `groups[i]` is the group of `β[i]`
 + `original`: The index of original variables in `β`
 + `knockoff`: The index of knockoff variables in `β`
++ `compute_avg`: If true, feature importance for each group will average over
+    absolute values of the betas. If false, we compute the sum instead.
 """
 function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
-    original::AbstractVector{Int}, knockoff::AbstractVector{Int})
-    length(β) == length(groups) || error("coefficient_diff: length(β) = $(length(β)) does not equal length(groups) = $(length(groups))")
+    original::AbstractVector{Int}, knockoff::AbstractVector{Int}; compute_avg::Bool=true)
+    length(β) == length(groups) || 
+        error("coefficient_diff: length(β) = $(length(β)) does not equal length(groups) = $(length(groups))")
     unique_groups = unique(groups)
-    β_groups = zeros(length(unique_groups))
+    W = zeros(length(unique_groups))
     # find which variables are Knockoffs
     knockoff_idx = falses(length(β))
     knockoff_idx[knockoff] .= true
@@ -179,12 +183,18 @@ function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
     for i in eachindex(β)
         idx = findfirst(x -> x == groups[i], unique_groups)
         if knockoff_idx[i]
-            β_groups[idx] -= abs(β[i])
+            W[idx] -= abs(β[i])
         else
-            β_groups[idx] += abs(β[i])
+            W[idx] += abs(β[i])
         end
     end
-    return β_groups
+    # average over group size
+    if compute_avg
+        for (i, g) in enumerate(unique_groups)
+            W[i] /= count(x -> x == g, groups) / 2
+        end
+    end
+    return W
 end
 
 """
