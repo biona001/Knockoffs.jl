@@ -206,15 +206,25 @@ end
     @test w[2] ≈ 0.5
     @test w[3] ≈ 0.4
 
-    # group knockoffs
+    # group knockoffs (use sum)
     β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5, 0.5, -0.1]
     groups = [1, 1, 1, 1, 2, 2, 2, 2]
     original = [1, 4, 6, 7]
     knockoff = [2, 3, 5, 8]
-    w = coefficient_diff(β, groups, original, knockoff)
+    w = coefficient_diff(β, groups, original, knockoff, compute_avg=false)
     @test length(w) == 2
     @test w[1] ≈ 1.8 - 0.5
     @test w[2] ≈ 1.0 - 0.2
+
+    # group knockoffs (use average)
+    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5, 0.5, -0.1]
+    groups = [1, 1, 1, 1, 2, 2, 2, 2]
+    original = [1, 4, 6, 7]
+    knockoff = [2, 3, 5, 8]
+    w = coefficient_diff(β, groups, original, knockoff, compute_avg=true)
+    @test length(w) == 2
+    @test w[1] ≈ (1 + 0.8 - 0.2 - 0.3) / 2
+    @test w[2] ≈ (0.5 + 0.5 - 0.1 - 0.1) / 2
 end
 
 # from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
@@ -592,6 +602,37 @@ end
     true_mu = zeros(p)
     X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1))
+
+    #
+    # Some tests for defining groups and choosing representatives within groups
+    #
+    #Interpolative decomposition, selecting group reps by ID
+    nrep = 3
+    rep_method = :id
+    groups1, group_reps = id_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    @test countmap(groups1[group_reps]) |> values |> collect |> maximum == 3
+    groups1, group_reps = id_partition_groups(Symmetric(cor(X)), rep_method=rep_method, nrep=nrep)
+    @test countmap(groups1[group_reps]) |> values |> collect |> maximum == 3
+
+    #Interpolative decomposition, selecting group reps by Trevor's method
+    nrep = 2
+    rep_method = :rss
+    groups2, group_reps = id_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    @test countmap(groups2[group_reps]) |> values |> collect |> maximum == 2
+
+    #hierarchical clustering, using ID to choose reps
+    nrep = 2
+    rep_method = :id
+    groups, group_reps = hc_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    @test countmap(groups[group_reps]) |> values |> collect |> maximum == 2
+
+    #hierarchical clustering, using Trevor's method to choose reps
+    nrep = 1
+    rep_method = :rss
+    groups2, group_reps2 = hc_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    groups2, group_reps2 = hc_partition_groups(Symmetric(cor(X)), rep_method=rep_method, nrep=nrep)
+    @test countmap(groups2[group_reps2]) |> values |> collect |> maximum == 1
+
     # 
     # single representative = running single variant knockoffs
     #
@@ -606,6 +647,15 @@ end
         verbose=false, # whether to print informative intermediate results
     )
     @test all(me.s .≈ rme.ko.s)
+
+    nrep = 5
+    groups, group_reps = id_partition_groups(X, rep_method=:id, nrep=nrep)
+    rme = modelX_gaussian_rep_group_knockoffs(
+        X, :maxent, true_mu, Σ, 
+        groups, group_reps, nrep=nrep
+    )
+    @test typeof(rme.ko.S) <: Matrix
+    offdiag_nz_idx = findall(!iszero, rme.ko.S - Diagonal(rme.ko.S))
 end
 
 @testset "group fit_lasso" begin
