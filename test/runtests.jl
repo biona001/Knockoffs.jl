@@ -591,6 +591,30 @@ end
     @time me = modelX_gaussian_group_knockoffs(X, :maxent, groups, m=m)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - me.S))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(me.S))
+
+    # test adjacency constrained hierachical clustering
+    distmat = rand(4, 4)
+    group1 = [1, 2]
+    group2 = [3, 4]
+    val, pos = findmin(distmat[group1, group2])
+    @test val == Knockoffs.single_linkage_distance(distmat, group1, group2)
+
+    # test all groups in adj_constrained_hclust are contiguous
+    n = 100
+    p = 500
+    μ = zeros(p)
+    Σ = simulate_AR1(p, a=3, b=1)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    zscore!(X, mean(X, dims=1), std(X, dims=1))
+    distmat = cor(X)
+    @inbounds @simd for i in eachindex(distmat)
+        distmat[i] = 1 - abs(distmat[i])
+    end
+    groups = Knockoffs.adj_constrained_hclust(distmat, h=0.3)
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        @test all(diff(idx) .== 1)
+    end
 end
 
 @testset "representative group knockoffs" begin

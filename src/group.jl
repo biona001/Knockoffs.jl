@@ -1313,8 +1313,8 @@ function id_partition_groups(
 end
 
 """
-    hc_partition_groups(X::AbstractMatrix; [rep_method], [cutoff], [min_clusters], [nrep])
-    hc_partition_groups(Σ::Symmetric; [rep_method], [cutoff], [min_clusters], [nrep])
+    hc_partition_groups(X::AbstractMatrix; [rep_method], [cutoff], [min_clusters], [nrep], [force_contiguous])
+    hc_partition_groups(Σ::Symmetric; [rep_method], [cutoff], [min_clusters], [nrep], [force_contiguous])
 
 Computes a group partition based on individual level data `X` or correlation 
 matrix `Σ` using single-linkage hierarchical clustering. By default, a list of
@@ -1346,7 +1346,9 @@ above `cutoff`.
 + `rep_variables`: Variables most representative of X. Each group have at most `nrep`
     representatives. These are typically used to construct smaller group knockoff
     for extremely large groups
-
++ `force_contiguous`: Whether groups are forced to be contiguous. If true,
+    we will run adjacency constrained hierarchical clustering. 
+    
 # todo:
 add option to enforce adjacency constraint
 """
@@ -1355,7 +1357,8 @@ function hc_partition_groups(
     cutoff = 0.7,
     min_clusters = 1,
     nrep = 1,   
-    rep_method = :id
+    rep_method = :id,
+    force_contiguous = false
     )
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     # convert correlation matrix to a distance matrix
@@ -1364,14 +1367,74 @@ function hc_partition_groups(
         distmat[i] = 1 - abs(distmat[i])
     end
     # hierarchical clustering
-    cluster_result = hclust(distmat; linkage=:single)
-    groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
+    if force_contiguous
+        groups = adj_constrained_hclust(distmat, h=1-cutoff)
+    else
+        cluster_result = hclust(distmat; linkage=:single)
+        groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
+    end
     # pick reprensetatives for each group
     group_reps = choose_group_reps(Σ, groups; method = rep_method, nrep = nrep)
     return groups, group_reps
 end
-hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, nrep = 1, rep_method=:id) = 
-    hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, min_clusters=min_clusters, nrep=nrep, rep_method=rep_method)
+hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, nrep = 1, rep_method=:id, force_contiguous=false) = 
+    hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, min_clusters=min_clusters, nrep=nrep, rep_method=rep_method, force_contiguous=force_contiguous)
+
+"""
+    adj_constrained_hclust(distmat::AbstractMatrix, h::Number)
+
+Performs (single-linkage) hierarchical clustering, forcing groups to be contiguous.
+We implement a bottom-up approach naively because `Clustering.jl` does not 
+support adjacency constraints (see https://github.com/JuliaStats/Clustering.jl/issues/230)
+"""
+function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where T
+    0 ≤ h ≤ 1 || error("adj_constrained_hclust: expected 0 ≤ h ≤ 1 but got $h")
+    p = size(distmat, 2)
+    clusters = [[i] for i in 1:p] # initially all variables is its own cluster
+    @inbounds for iter in 1:p-1
+        remaining_clusters = length(clusters)
+        min_d, max_d = typemax(T), typemin(T)
+        merge_left, merge_right = 0, 0 # clusters to be merged
+        # find min between-cluster distance among adjacent clusters
+        for left in 1:remaining_clusters-1
+            right = left + 1
+            d = single_linkage_distance(distmat, clusters[left], clusters[right])
+            if d < min_d
+                merge_left, merge_right = left, right
+                min_d = d
+            end
+            d > max_d && (max_d = d)
+        end
+        # merge 2 clusters with min distance
+        for i in clusters[merge_right]
+            push!(clusters[merge_left], i)
+        end
+        deleteat!(clusters, merge_right)
+        # check for convergence
+        min_d ≥ h && break
+    end
+    # let each cluster be its own group
+    groups = zeros(Int, p)
+    for (i, cluster) in enumerate(clusters), g in cluster
+        groups[g] = i
+    end
+    return groups
+end
+
+"""
+    single_linkage_distance(distmat, left, right)
+
+Computes the minimum distance (i.e. single-linkage distance) between members
+in `left` and members in `right`. Member distances are precomputed in `distmat`
+"""
+function single_linkage_distance(distmat::AbstractMatrix{T}, left::Vector{Int}, right::Vector{Int}) where T
+    d = typemax(T)
+    @inbounds for j in left, i in right
+        new_d = distmat[i, j]
+        new_d < d && (d = new_d)
+    end
+    return d
+end
 
 """
     choose_group_reps(C::AbstractMatrix, groups::AbstractVector; nrep = 1)
