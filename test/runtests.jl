@@ -551,22 +551,21 @@ end
     @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
 
     # simulate some data
-    m = 100 # number of groups
+    groups = 100 # number of groups
     pi = 5  # features per group
     k = 10  # number of causal groups
     ρ = 0.4 # within group correlation
     γ = 0.2 # between group correlation
-    p = m * pi # number of features
+    p = groups * pi # number of features
     n = 1000 # sample size
-    groups = repeat(1:m, inner=5)
+    m = 5 # number of knockoffs per feature
+    groups = repeat(1:groups, inner=5)
     Σ = simulate_block_covariance(groups, ρ, γ)
     true_mu = zeros(p)
     X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1));
 
     # exact group knockoffs
-    m = 5 # 5 knockoffs per feature
-
     @time equi = modelX_gaussian_group_knockoffs(X, :equi, groups, true_mu, Σ, m=m)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - equi.S))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(equi.S))
@@ -574,6 +573,14 @@ end
     @time sdp = modelX_gaussian_group_knockoffs(X, :sdp, groups, true_mu, Σ, m=m)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp.S))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp.S))
+
+    # @time sdp_subopt = modelX_gaussian_group_knockoffs(X, :sdp_subopt, groups, true_mu, Σ, m=m)
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp_subopt.S))
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp_subopt.S))
+
+    # @time sdp_subopt_correct = modelX_gaussian_group_knockoffs(X, :sdp_subopt_correct, groups, true_mu, Σ, m=m)
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp_subopt_correct.S))
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp_subopt_correct.S))
 
     @time mvr = modelX_gaussian_group_knockoffs(X, :mvr, groups, true_mu, Σ, m=m, tol=0.001, verbose=true)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - mvr.S))
@@ -594,6 +601,7 @@ end
 
     # test adjacency constrained hierachical clustering
     distmat = rand(4, 4)
+    LinearAlgebra.copytri!(distmat, 'U')
     group1 = [1, 2]
     group2 = [3, 4]
     val, pos = findmin(distmat[group1, group2])

@@ -25,11 +25,12 @@ struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric}
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
-    S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
-    γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
+    S::BD # p × p block-diagonal matrix of the same size as Σ. S and (m+1)/m*Σ - S are both psd
+    γs::Vector{T} # for suboptimal group construction only. These are scalars chosen so that S_i = γ_i * Σ_i
     m::Int # number of knockoffs per feature generated
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
+    obj::T # final objective value of group knockoff
 end
 
 struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff

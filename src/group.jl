@@ -78,12 +78,12 @@ function modelX_gaussian_group_knockoffs(
     iscor = all(x -> x ≈ 1, σs)
     Σcor = iscor ? Σ : cov2cor!(Matrix(Σ), σs)
     # compute S matrix using the specified knockoff method
-    S, γs = solve_s_group(Σcor, groups, method; m=m, kwargs...)
+    S, γs, obj = solve_s_group(Σcor, groups, method; m=m, kwargs...)
     # rescale S back to the result for a covariance matrix   
     iscor || cor2cov!(S, σs)
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
-    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method)
+    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method, obj)
 end
 
 """
@@ -185,14 +185,17 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
 
 # Output
 + `S`: A matrix solved so that `(m+1)/m*Σ - S ⪰ 0` and `S ⪰ 0`
-+ `γ`: A vector that is only non-empty for equi and suboptimal SDP knockoffs. 
++ `γ`: A vector that is only non-empty for equi and suboptimal knockoff constructions. 
     They correspond to values of γ where `S_{gg} = γΣ_{gg}`. So for equi, the
     vector is length 1. For SDP, the vector has length equal to number of groups
++ `obj`: Final SDP/MVR/ME objective value given `S`. Equi-correlated group knockoffs
+    returns 0 because it has no objective value. 
 
 # Warning
 This function potentially permutes the columns/rows of `Σ`, and puts them back
 at the end. Thus one should NOT call `solve_s_group` on the same `Σ` simultaneously,
-e.g. in a multithreaded for loop. 
+e.g. in a multithreaded for loop. Permutation does not happen when groups are
+contiguous. 
 """
 function solve_s_group(
     Σ::AbstractMatrix{T}, 
@@ -239,23 +242,23 @@ function solve_s_group(
         Sblocks = BlockDiagonal(blocks)
         # solve optimization problem
         if method == :equi
-            S, γs = solve_group_equi(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_equi(Σ, Sblocks; m=m)
         elseif method == :sdp_subopt
-            S, γs = solve_group_SDP_subopt(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_subopt(Σ, Sblocks; m=m)
         elseif method == :sdp_subopt_correct
-            S, γs = solve_group_SDP_subopt_correct(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_subopt_correct(Σ, Sblocks; m=m)
         elseif method == :sdp
-            S, γs = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
         elseif method == :sdp_ccd
-            S, γs = solve_group_SDP_ccd(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_SDP_ccd(Σ, Sblocks; m=m, kwargs...)
         elseif method == :sdp_full
-            S, γs = solve_group_SDP_full(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_full(Σ, Sblocks; m=m)
         elseif method == :mvr
-            S, γs = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
         elseif method == :maxent
-            S, γs = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
         elseif method == :maxent_subopt
-            S, γs = solve_group_max_entropy_suboptimal(Σ, Sblocks)
+            S, γs, obj = solve_group_max_entropy_suboptimal(Σ, Sblocks)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -267,7 +270,7 @@ function solve_s_group(
         S .= @view(S[iperm, iperm])
         Σ .= @view(Σ[iperm, iperm])
     end
-    return S, γs
+    return S, γs, obj
 end
 
 """
@@ -303,7 +306,7 @@ function solve_group_equi(
     λmin = Symmetric(Db * Σ * Db) |> eigmin
     γ = min(1, (m+1)/m * λmin)
     S = BlockDiagonal(γ .* Σblocks.blocks) |> Matrix
-    return S, [γ]
+    return S, [γ], zero(eltype(Σ))
 end
 
 """
@@ -333,9 +336,11 @@ function solve_group_SDP_subopt(
     if !success
         @warn "Optimization unsuccessful, solution may be inaccurate"
     end
+    # return solution
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    return S, γs
+    obj = sum(group_sdp_objective(Σ, S, block_sizes))
+    return S, γs, obj
 end
 
 function solve_group_SDP_subopt_correct(
@@ -372,9 +377,11 @@ function solve_group_SDP_subopt_correct(
     if !success
         @warn "Optimization unsuccessful, solution may be inaccurate"
     end
+    # return solution
     γs = JuMP.value.(γ)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    return S, γs
+    obj = sum(group_sdp_objective(Σ, S, block_sizes))
+    return S, γs, obj
 end
 
 """
@@ -506,7 +513,7 @@ function solve_group_SDP_block_update(
         verbose && println("Iter $l δ = $max_delta, obj = $(sum(objective_values))")
         max_delta < tol && break 
     end
-    return S, Float64[]
+    return S, Float64[], sum(objective_values)
 end
 
 # this assumes groups are contiguous, and each group's size is stored in group_sizes
@@ -571,6 +578,12 @@ function solve_group_SDP_full(
     @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
     JuMP.optimize!(model)
     check_model_solution(model)
+
+    obj = group_sdp_objective(Σ, S, block_sizes)
+    obj_model = objective_value(model)
+    @show obj, obj_model
+    fdsa
+
     return JuMP.value.(S), T[]
 end
 
@@ -681,7 +694,7 @@ function solve_group_SDP_ccd(
         end
         max_delta < tol && break 
     end
-    return S, Float64[]
+    return S, Float64[], sum(group_sdp_objective(Σ, S, group_sizes))
 end
 
 function solve_group_MVR_ccd(
@@ -814,7 +827,7 @@ function solve_group_MVR_ccd(
         end
         max_delta < tol && break 
     end
-    return S, Float64[]
+    return S, Float64[], group_mvr_obj(L, C, m)
 end
 
 function solve_group_max_entropy_ccd(
@@ -941,7 +954,7 @@ function solve_group_max_entropy_ccd(
         end
         max_delta < tol && break 
     end
-    return S, Float64[]
+    return S, Float64[], logdet(L) + m*logdet(C)
 end
 
 # objective function to minimize when optimizing off-diagonal entries in max entropy group knockoffs
@@ -1211,7 +1224,8 @@ function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldownda
     return failed ? 0 : δ
 end
 
-# SDP construction by choosing S_g = γ_g * Σ_{g,g}
+# SDP construction for ME by choosing S_g = γ_g * Σ_{g,g}
+# todo: multiple knockoffs, check objective value is correct
 function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
     p = size(Σ, 1)
     G = length(Σblocks.blocks)
@@ -1246,7 +1260,7 @@ function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockD
     # convert solution to vector and return resulting block diagonal matrix
     γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
     S = BlockDiagonal(γs[1] .* Σblocks.blocks)
-    return S, γs
+    return S, γs, objective_value(model)
 end
 
 """
@@ -1467,7 +1481,7 @@ function choose_group_reps!(
             length(group_members) == 0 && continue
             # Run ID on X[:, group_members] or cholesky of Σ[group_members, group_members]
             A = typeof(G) <: Symmetric ? 
-                cholesky(Symmetric(G[group_members, group_members])).U :
+                cholesky(PositiveFactorizations.Positive, Symmetric(G[group_members, group_members])).U :
                 @view(G[:, group_members])
             rep_variables = interpolative_decomposition(A, nrep - offset)
             for rep in rep_variables
