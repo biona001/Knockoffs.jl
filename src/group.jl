@@ -601,6 +601,8 @@ function solve_group_SDP_ccd(
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
+    num_var = sum(abs2, group_sizes)
+    verbose && println("solve_group_SDP_ccd: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
@@ -711,6 +713,8 @@ function solve_group_MVR_ccd(
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
+    num_var = sum(abs2, group_sizes)
+    verbose && println("solve_group_MVR_ccd: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
@@ -844,6 +848,8 @@ function solve_group_max_entropy_ccd(
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
+    num_var = sum(abs2, group_sizes)
+    verbose && println("solve_group_max_entropy_ccd: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
