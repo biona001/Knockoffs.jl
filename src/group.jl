@@ -73,14 +73,8 @@ function modelX_gaussian_group_knockoffs(
     # first check errors
     length(groups) == size(X, 2) || 
         error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
-    # Scale covariance to correlation matrix
-    σs = sqrt.(diag(Σ))
-    iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : cov2cor!(Matrix(Σ), σs)
     # compute S matrix using the specified knockoff method
-    S, γs, obj = solve_s_group(Σcor, groups, method; m=m, kwargs...)
-    # rescale S back to the result for a covariance matrix   
-    iscor || cor2cov!(S, σs)
+    S, γs, obj = solve_s_group(Symmetric(Σ), groups, method; m=m, kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
     return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method, obj)
@@ -128,33 +122,91 @@ function modelX_gaussian_rep_group_knockoffs(
         groups, group_reps; nrep=nrep, m=m, kwargs...)
 end
 
+# function modelX_gaussian_rep_group_knockoffs(
+#     X::AbstractMatrix{T}, 
+#     method::Symbol,
+#     μ::AbstractVector, 
+#     Σ::AbstractMatrix,
+#     groups::AbstractVector{Int},
+#     group_reps::AbstractVector{Int};
+#     nrep::Int = 1,
+#     m::Int = 1,
+#     kwargs... # extra arguments for solve_s or solve_s_group
+#     ) where T
+#     # note: these cannot be views because in the resulting struct requires concrete types not subarrays
+#     μrep = μ[group_reps]
+#     Σrep = Σ[group_reps, group_reps]
+#     Xrep = X[:, group_reps]
+
+#     if nrep == 1
+#         # generate (non-grouped) knockoff of X restricted to representative columns
+#         ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
+#     else
+#         # generate (smaller) group knockoffs of X
+#         Xrep_groups = groups[group_reps]
+#         ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
+#             m=m, kwargs...)
+#     end
+
+#     return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
+# end
+
+"""
+Let X_R = (X_1,...,X_r); X_C = (X_{r+1},...,X_p)
+"""
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
     μ::AbstractVector, 
     Σ::AbstractMatrix,
     groups::AbstractVector{Int},
-    group_reps::AbstractVector{Int};
+    group_reps::AbstractVector{Int}; # Vector{Int} with values in 1,...,p (columns of X that are representatives)
     nrep::Int = 1,
     m::Int = 1,
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
-    # note: these cannot be views because in the resulting struct requires concrete types not subarrays
-    μrep = μ[group_reps]
-    Σrep = Σ[group_reps, group_reps]
-    Xrep = X[:, group_reps]
+    p = size(X, 2)
+    isposdef(Σ) || error("Σ not positive definite")
 
-    if nrep == 1
-        # generate (non-grouped) knockoff of X restricted to representative columns
-        ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
-    else
-        # generate (smaller) group knockoffs of X
-        Xrep_groups = groups[group_reps]
-        ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
-            m=m, kwargs...)
-    end
+    # reorder variables so groups are contiguous
+    perm = sortperm(groups)
+    rep_perm = sortperm(groups[group_reps])
+    permute!(groups, perm)
+    permute!(group_reps, rep_perm)
+    Σ .= @view(Σ[perm, perm])
+    X .= @view(X[:, perm])
 
-    return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
+    # separate X into Xr (representatives) and Xc (nonrepresentatives)
+    # note: these can't be views because the resulting struct requires Matrix{T}
+    non_reps = setdiff(1:p, group_reps)
+    Xr = X[:, group_reps]
+    Xc = X[:, non_reps]
+    Σ11 = Σ[group_reps, group_reps]
+    Σ12 = Σ[group_reps, non_reps]
+    Σ22 = Σ[non_reps, non_reps]
+    μr = μ[group_reps]
+    μc = μ[non_reps]
+    
+    # 1. compute S matrix using the specified knockoff method
+    S, γs, obj = solve_s_group(Symmetric(Σ11), groups, method; m=m, kwargs...)
+
+    # 1. perform group knockoff construction for the representative variables
+    Xr_groups = groups[group_reps]
+    X̃r = modelX_gaussian_group_knockoffs(Xr, method, Xr_groups, μr, Σ11;
+        m=m, kwargs...)
+
+    # 2. generate knockoffs for the remaining variables 
+
+    # 3. Reorder columns of X̃_R and X̃_C so that (X̃_R, X̃_C) is a valid knockoff of X
+
+    # permuate Σ and X and X̃ back to the original noncontiguous group structure
+    invpermute!(groups, perm)
+    invpermute!(group_reps, rep_perm)
+    iperm = invperm(perm)
+    S .= @view(S[iperm, iperm])
+    Σ .= @view(Σ[iperm, iperm])
+
+    return GaussianRepGroupKnockoff(X, X̃_R, groups, group_reps, nrep)
 end
 
 """
@@ -164,7 +216,7 @@ Solves the group knockoff problem, returns block diagonal matrix S
 satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature. 
 
 # Inputs 
-+ `Σ`: A covariance matrix that has been scaled to a correlation matrix.
++ `Σ`: A general covariance matrix wrapped by `Symmetric` keyword
 + `groups`: Vector of group membership, does not need to be contiguous
 + `method`: Method for constructing knockoffs. Options include
     * `:maxent`: (recommended) for fully general maximum entropy group knockoffs
@@ -174,10 +226,10 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
     * `:equi`: for equi-correlated knockoffs. This is the methodology proposed in
         `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
-    * `:sdp_ccd`: Fully general SDP group knockoffs based on coodinate descent
+    * `:sdp`: Fully general SDP group knockoffs based on coodinate descent
     * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
         generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
-    * `:sdp`: Fully general SDP group knockoffs where each block is solved exactly 
+    * `:sdp_block`: Fully general SDP group knockoffs where each block is solved exactly 
         using an interior point solver. 
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
@@ -198,33 +250,36 @@ e.g. in a multithreaded for loop. Permutation does not happen when groups are
 contiguous. 
 """
 function solve_s_group(
-    Σ::AbstractMatrix{T}, 
+    Σ::Symmetric{T}, 
     groups::Vector{Int},
     method::Symbol;
     m::Int=1,
     kwargs...
     ) where T
     # check for errors
-    length(groups) == size(Σ, 1) == size(Σ, 2) || 
+    length(groups) == size(Σ, 1) || 
         error("Length of groups should be equal to dimension of Σ")
-    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     max_group_size = countmap(groups) |> values |> collect |> maximum
     if max_group_size > 50 && method != :equi
         @warn "Maximum group size is $max_group_size, optimization may be slow. " * 
             "Consider running `modelX_gaussian_rep_group_knockoffs` to speed up convergence."
     end
+    # Scale covariance to correlation matrix
+    σs = sqrt.(diag(Σ))
+    iscor = all(x -> x ≈ 1, σs)
+    Σcor = iscor ? Σ : cov2cor!(Σ.data, σs)
     # if groups not contiguous, permute columns/rows of Σ so that they are contiguous
     perm = sortperm(groups)
     permuted = false
     if !issorted(groups)
         permute!(groups, perm)
-        Σ .= @view(Σ[perm, perm])
+        Σcor.data .= @view(Σcor.data[perm, perm])
         permuted = true
     end
     unique_groups = unique(groups)
     if length(unique_groups) == length(groups)
         # solve ungroup knockoff problem
-        s = solve_s(Symmetric(Σ), 
+        s = solve_s(Symmetric(Σcor), 
             method == :sdp_subopt ? :sdp : method;
             m=m, kwargs...
         )
@@ -237,28 +292,32 @@ function solve_s_group(
         blocks = Matrix{T}[]
         for g in unique_groups
             idx = findall(x -> x == g, groups)
-            push!(blocks, Σ[idx, idx])
+            push!(blocks, Σcor[idx, idx])
         end
         Sblocks = BlockDiagonal(blocks)
         # solve optimization problem
         if method == :equi
-            S, γs, obj = solve_group_equi(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_equi(Σcor, Sblocks; m=m)
         elseif method == :sdp_subopt
-            S, γs, obj = solve_group_SDP_subopt(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_subopt(Σcor, Sblocks; m=m)
         elseif method == :sdp_subopt_correct
-            S, γs, obj = solve_group_SDP_subopt_correct(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_subopt_correct(Σcor, Sblocks; m=m)
+        elseif method == :sdp_block
+            S, γs, obj = solve_group_SDP_block_update(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :mvr_block
+            S, γs, obj = solve_group_MVR_block_update(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :maxent_block
+            S, γs, obj = solve_group_maxent_block_update(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :sdp
-            S, γs, obj = solve_group_SDP_block_update(Σ, Sblocks; m=m, kwargs...)
-        elseif method == :sdp_ccd
-            S, γs, obj = solve_group_SDP_ccd(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_SDP_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :sdp_full
-            S, γs, obj = solve_group_SDP_full(Σ, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_full(Σcor, Sblocks; m=m)
         elseif method == :mvr
-            S, γs, obj = solve_group_MVR_ccd(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_MVR_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent
-            S, γs, obj = solve_group_max_entropy_ccd(Σ, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_max_entropy_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_subopt
-            S, γs, obj = solve_group_max_entropy_suboptimal(Σ, Sblocks)
+            S, γs, obj = solve_group_max_entropy_suboptimal(Σcor, Sblocks)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -268,8 +327,10 @@ function solve_s_group(
         invpermute!(groups, perm)
         iperm = invperm(perm)
         S .= @view(S[iperm, iperm])
-        Σ .= @view(Σ[iperm, iperm])
+        Σcor.data .= @view(Σcor.data[iperm, iperm])
     end
+    # rescale S back to the result for a covariance matrix   
+    iscor || cor2cov!(S, σs)
     return S, γs, obj
 end
 
@@ -430,6 +491,34 @@ function solve_group_SDP_single_block(
     return JuMP.value.(S), success
 end
 
+# function solve_group_MVR_single_block(
+#     Σ11::AbstractMatrix,
+#     A11::AbstractMatrix,
+#     A12::AbstractMatrix, 
+#     invD22::AbstractMatrix,
+#     m::Int,
+#     ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+#     )
+#     # needed constants
+#     invZYt = invD22 * A12'
+#     YinvZYt = A12 * invZYt
+#     # Build model via JuMP
+#     p = size(Σ11, 1)
+#     model = Model(() -> Ipopt.Optimizer())
+#     @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
+#     # SDP constraints
+#     @constraint(model, S in PSDCone())
+#     @constraint(model, ub - S in PSDCone())
+#     # objective
+#     @NLobjective(model, Min, 
+#         m^2*tr(inv(S)) + tr(A-S-YinvZYt) + tr(invZYt'*(A11-S-YinvZYt)*YinvZYt)
+#     )
+#     # solve and return
+#     JuMP.optimize!(model)
+#     success = check_model_solution(model)
+#     return JuMP.value.(S), success
+# end
+
 """
 # Todo
 + somehow avoid reallocating ub every iteration
@@ -485,7 +574,7 @@ function solve_group_SDP_block_update(
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
             ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
-            # solve SDP problem for current block
+            # solve SDP/MVR/ME problem for current block
             S11_new, success = solve_group_SDP_single_block(Σ11, ub)
             block_obj = group_sdp_objective_single_block(Σ11, S11_new)
             # only update if objective decreased and optimization was successful
@@ -1296,9 +1385,9 @@ features are assigned to groups
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `rep_variables`: Variables most representative of X. Each group have at most `nrep`
-    representatives. These are typically used to construct smaller group knockoff
-    for extremely large groups
++ `rep_variables`: Columns of X selected as representatives. Each group have at 
+    most `nrep` representatives. These are typically used to construct smaller
+    group knockoff for extremely large groups
 
 Note: interpolative decomposition is a stochastic algorithm. Set a seed to
 guarantee reproducible results. 
@@ -1363,14 +1452,11 @@ above `cutoff`.
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `rep_variables`: Variables most representative of X. Each group have at most `nrep`
-    representatives. These are typically used to construct smaller group knockoff
-    for extremely large groups
++ `rep_variables`: Columns of X selected as representatives. Each group have at 
+    most `nrep` representatives. These are typically used to construct smaller
+    group knockoff for extremely large groups
 + `force_contiguous`: Whether groups are forced to be contiguous. If true,
     we will run adjacency constrained hierarchical clustering. 
-    
-# todo:
-add option to enforce adjacency constraint
 """
 function hc_partition_groups(
     Σ::Symmetric;
@@ -1457,7 +1543,7 @@ function single_linkage_distance(distmat::AbstractMatrix{T}, left::Vector{Int}, 
 end
 
 """
-    choose_group_reps(C::AbstractMatrix, groups::AbstractVector; nrep = 1)
+    choose_group_reps(G::AbstractMatrix, groups::AbstractVector; nrep = 1)
     choose_group_reps!(group_reps::Vector{Int}, C::AbstractMatrix, groups::AbstractVector; nrep = 1)
 
 # Inputs
