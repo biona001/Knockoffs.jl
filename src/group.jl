@@ -214,13 +214,16 @@ function modelX_gaussian_rep_group_knockoffs(
             S            Σ11inv_Σ12; 
             Σ11inv_Σ12'  Σ11inv_Σ12' * S * Σ11inv_Σ12
         ]
-    X̃new = condition(Xnew, μnew, Σnew, D, m=m)
-    # A = repeat(Σ - D, m, m)
-    # A += BlockDiagonal([D for _ in 1:m])
+    A = repeat(Σ - D, m, m)
+    A += BlockDiagonal([D for _ in 1:m])
+    X̃new = rand(MvNormal(Symmetric(A)), n)'
+    # μi = hcat(Xr * (I - inv(Σ11) * S), X̃r_correct * inv(Σ11) * Σ12)
+    # μfull = repeat(μi, 1, m)
+    # X̃new = μfull + rand(MvNormal(Symmetric(A)), n)'
 
     # sample 1 knockoff
-    X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
-    X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
+    # X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
+    # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
 
     # test 
     X̃r = X̃new[:, 1:r]
