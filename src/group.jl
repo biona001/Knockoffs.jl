@@ -155,21 +155,20 @@ end
 Let X_R = (X_1,...,X_r); X_C = (X_{r+1},...,X_p)
 """
 function modelX_gaussian_rep_group_knockoffs(
-    X::AbstractMatrix{T}, 
+    X::AbstractMatrix{T}, # n × p
     method::Symbol,
-    μ::AbstractVector, 
-    Σ::AbstractMatrix,
-    groups::AbstractVector{Int},
+    μ::AbstractVector, # p × 1
+    Σ::AbstractMatrix, # p × p
+    groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
     group_reps::AbstractVector{Int}; # Vector{Int} with values in 1,...,p (columns of X that are representatives)
-    nrep::Int = 1,
     m::Int = 1,
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
     n, p = size(X)
     r = length(group_reps)
-    group_reps_original = copy(group_reps)
     all(x -> 1 ≤ x ≤ p, group_reps) || error("group_reps should be column indices of X")
     all(μ .≈ 0) || error("Currently we assume X is centered")
+    println("$r representatives for $p variables")
 
     # test that permuting is working
     # X[:, group_reps] .+= 10
@@ -194,62 +193,61 @@ function modelX_gaussian_rep_group_knockoffs(
     Σ12 = @views Σ[group_reps, non_reps]
     Σ21 = @views Σ[non_reps, group_reps]
     Σ22 = @views Σ[non_reps, non_reps]
-    μr = @views μ[group_reps]
-    μc = @views μ[non_reps]
-    Xnew = [Xr Xc]
-    μnew = [μr; μc]
     Σnew = [Σ11 Σ12; Σ21 Σ22]
-
-    # test
-    # ko = modelX_gaussian_knockoffs(Xr, method, μr, Σ11; m=m, kwargs...)
-    # return ko
 
     # 3. Compute S matrix on the representatives
     S, _, _ = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
-    @show size(S)
+    @assert eigmin((m+1)/m*Σ11 - S) ≥ 0 "PSD constraint for S not satisfied"
+
+    # test: sample 1 knockoff
+    X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
+    X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
 
     # 4. Sample multiple knockoffs
     Σ11inv_Σ12 = inv(Σ11) * Σ12 # r × (p-r)
-    D = [
+    D = Symmetric([
             S            Σ11inv_Σ12; 
             Σ11inv_Σ12'  Σ11inv_Σ12' * S * Σ11inv_Σ12
-        ]
-    A = repeat(Σ - D, m, m)
-    A += BlockDiagonal([D for _ in 1:m])
-    X̃new = rand(MvNormal(Symmetric(A)), n)'
-    # μi = hcat(Xr * (I - inv(Σ11) * S), X̃r_correct * inv(Σ11) * Σ12)
-    # μfull = repeat(μi, 1, m)
-    # X̃new = μfull + rand(MvNormal(Symmetric(A)), n)'
+        ])
+    varXX̃ = Symmetric([
+        Σnew      Σnew - D;
+        Σnew - D  Σnew
+    ])
+    @show eigvals(Symmetric(varXX̃))[1:10] # check if var(X, X̃) is PSD (its not)
+    # mean of X̃ | X (repeat mean of X̃r and X̃c m times)
+    μr = Xr * (I - inv(Σ11) * S) # n by p*m
+    X̃r = μr + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
+    μi = hcat(μr, X̃r * inv(Σ11) * Σ12)
+    μfull = repeat(μi, 1, m)
+    # covariance of X̃ | X (Gimenez and Zou 2019)
+    C = 2D - D * inv(Σnew) * D
+    Σ̃ = repeat(C - D, m, m)
+    Σ̃ += BlockDiagonal([D for _ in 1:m])
+    @show eigvals(Symmetric(Σ̃))[1:10]
+    L = cholesky(PositiveFactorizations.Positive, Symmetric(Σ̃)).L
+    X̃new = μfull + randn(n, m*p) * L
+    # X̃new = μfull + rand(MvNormal(Symmetric(Σ̃)), n)' # fails because Σ̃ not PSD
 
-    # sample 1 knockoff
-    # X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
-    # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
+    # check if full covariance matrix A is PSD (its not)
+    A = repeat(Σ - D, m+1, m+1) # (m+1)p by (m+1)p 
+    A += BlockDiagonal([D for _ in 1:m+1])
+    @show eigvals(Symmetric(A))[1:10]
 
     # test 
     X̃r = X̃new[:, 1:r]
-    X̃c = X̃new[:, r+1:end]
-    # X̃r_correct = condition(Xr, μr, Σ11, S, m=m)
+    X̃c = X̃new[:, r+1:p]
     @show size(X̃new)
     @show size(X̃r)
     @show size(X̃c)
     return Xr, Xc, X̃r, X̃c, X̃r_correct, X̃c_correct
 
-    #test
-    # @show mean(Xnew, dims=1)[1:10]
-    # @show mean(X̃new, dims=1)[1:10]
-    # @show μnew[1:10]
-    # return X̃new, Xnew
-    # X̃ = condition(Xr, μr, Σ11, S, m=m)
-    # return X̃
+    # 6. todo: Restore columns ordering in X, X̃, and other variables
+    # invpermute!(groups, perm)
+    # iperm = invperm(perm)
+    # S .= @view(S[iperm, iperm])
+    # Σ .= @view(Σ[iperm, iperm])
 
-    # 6. Restore columns ordering in X, X̃, and other variables
-    invpermute!(groups, perm)
-    group_reps .= group_reps_original
-    iperm = invperm(perm)
-    S .= @view(S[iperm, iperm])
-    Σ .= @view(Σ[iperm, iperm])
-
-    return GaussianRepGroupKnockoff(X, X̃_R, groups, group_reps, nrep)
+    # return GaussianRepGroupKnockoff(X, X̃_R, groups, group_reps, nrep)
 end
 
 """

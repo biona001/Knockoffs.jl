@@ -112,7 +112,7 @@ function condition(
     end
     # todo: can we form Σ̃ using SymmetricToeplitz? 
     # So we don't need to actually store a matrix of size pm × pm in memory?
-    Σ̃ = repeat(Σ - C, m, m)
+    Σ̃ = repeat(C - S, m, m)
     Σ̃ += BlockDiagonal([S for _ in 1:m]) # note S is variable D in Gimenez and Zou
     μi = X - (X .- μ') * ΣinvS # in Gaminez and Zou, μi = Dinv(Σ)μ-(I-Dinv(Σ))X = (algebra..) = X-(X.-μ')*ΣinvS
     μfull = repeat(μi, 1, m)
