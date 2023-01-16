@@ -165,43 +165,83 @@ function modelX_gaussian_rep_group_knockoffs(
     m::Int = 1,
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
-    p = size(X, 2)
-    isposdef(Σ) || error("Σ not positive definite")
+    n, p = size(X)
+    r = length(group_reps)
+    group_reps_original = copy(group_reps)
+    all(x -> 1 ≤ x ≤ p, group_reps) || error("group_reps should be column indices of X")
+    all(μ .≈ 0) || error("Currently we assume X is centered")
 
-    # reorder variables so groups are contiguous
+    # test that permuting is working
+    # X[:, group_reps] .+= 10
+    # @show mean(X[:, group_reps], dims=1)
+
+    # 1. make groups contiguous (ordering will be restored at the end)
     perm = sortperm(groups)
-    rep_perm = sortperm(groups[group_reps])
     permute!(groups, perm)
-    permute!(group_reps, rep_perm)
     Σ .= @view(Σ[perm, perm])
     X .= @view(X[:, perm])
+    group_reps = indexin(group_reps, perm) |> Vector{Int}
 
-    # separate X into Xr (representatives) and Xc (nonrepresentatives)
-    # note: these can't be views because the resulting struct requires Matrix{T}
+    # @show group_reps
+    # @show mean(X[:, group_reps], dims=1)
+    # fff
+
+    # 2. Separate X into Xr (representatives) and Xc (nonrepresentatives)
     non_reps = setdiff(1:p, group_reps)
-    Xr = X[:, group_reps]
-    Xc = X[:, non_reps]
-    Σ11 = Σ[group_reps, group_reps]
-    Σ12 = Σ[group_reps, non_reps]
-    Σ22 = Σ[non_reps, non_reps]
-    μr = μ[group_reps]
-    μc = μ[non_reps]
-    
-    # 1. compute S matrix using the specified knockoff method
-    S, γs, obj = solve_s_group(Symmetric(Σ11), groups, method; m=m, kwargs...)
+    Xr = @views X[:, group_reps]
+    Xc = @views X[:, non_reps]
+    Σ11 = Σ[group_reps, group_reps] # no view because Σ11 needs to be inverted later
+    Σ12 = @views Σ[group_reps, non_reps]
+    Σ21 = @views Σ[non_reps, group_reps]
+    Σ22 = @views Σ[non_reps, non_reps]
+    μr = @views μ[group_reps]
+    μc = @views μ[non_reps]
+    Xnew = [Xr Xc]
+    μnew = [μr; μc]
+    Σnew = [Σ11 Σ12; Σ21 Σ22]
 
-    # 1. perform group knockoff construction for the representative variables
-    Xr_groups = groups[group_reps]
-    X̃r = modelX_gaussian_group_knockoffs(Xr, method, Xr_groups, μr, Σ11;
-        m=m, kwargs...)
+    # test
+    # ko = modelX_gaussian_knockoffs(Xr, method, μr, Σ11; m=m, kwargs...)
+    # return ko
 
-    # 2. generate knockoffs for the remaining variables 
+    # 3. Compute S matrix on the representatives
+    S, _, _ = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
+    @show size(S)
 
-    # 3. Reorder columns of X̃_R and X̃_C so that (X̃_R, X̃_C) is a valid knockoff of X
+    # 4. Sample multiple knockoffs
+    Σ11inv_Σ12 = inv(Σ11) * Σ12 # r × (p-r)
+    D = [
+            S            Σ11inv_Σ12; 
+            Σ11inv_Σ12'  Σ11inv_Σ12' * S * Σ11inv_Σ12
+        ]
+    X̃new = condition(Xnew, μnew, Σnew, D, m=m)
+    # A = repeat(Σ - D, m, m)
+    # A += BlockDiagonal([D for _ in 1:m])
 
-    # permuate Σ and X and X̃ back to the original noncontiguous group structure
+    # sample 1 knockoff
+    X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
+    X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
+
+    # test 
+    X̃r = X̃new[:, 1:r]
+    X̃c = X̃new[:, r+1:end]
+    # X̃r_correct = condition(Xr, μr, Σ11, S, m=m)
+    @show size(X̃new)
+    @show size(X̃r)
+    @show size(X̃c)
+    return Xr, Xc, X̃r, X̃c, X̃r_correct, X̃c_correct
+
+    #test
+    # @show mean(Xnew, dims=1)[1:10]
+    # @show mean(X̃new, dims=1)[1:10]
+    # @show μnew[1:10]
+    # return X̃new, Xnew
+    # X̃ = condition(Xr, μr, Σ11, S, m=m)
+    # return X̃
+
+    # 6. Restore columns ordering in X, X̃, and other variables
     invpermute!(groups, perm)
-    invpermute!(group_reps, rep_perm)
+    group_reps .= group_reps_original
     iperm = invperm(perm)
     S .= @view(S[iperm, iperm])
     Σ .= @view(Σ[iperm, iperm])
@@ -241,7 +281,8 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
     They correspond to values of γ where `S_{gg} = γΣ_{gg}`. So for equi, the
     vector is length 1. For SDP, the vector has length equal to number of groups
 + `obj`: Final SDP/MVR/ME objective value given `S`. Equi-correlated group knockoffs
-    returns 0 because it has no objective value. 
+    and singleton (non-grouped knockoffs) returns 0 because they either no objective 
+    value or it is not necessary to evaluate the objectives
 
 # Warning
 This function potentially permutes the columns/rows of `Σ`, and puts them back
@@ -285,6 +326,7 @@ function solve_s_group(
         )
         S = Diagonal(s) |> Matrix
         γs = T[]
+        obj = zero(T) # non-grouped knockoffs do not compute objective
     else
         # solve group knockoff problem
         # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg
