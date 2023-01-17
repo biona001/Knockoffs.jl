@@ -374,7 +374,7 @@ end
 Keeps adding λI to Σ until the minimum eigenvalue > tol
 """
 function shift_until_PSD!(Σ::AbstractMatrix, tol=1e-4)
-    while eigmin(Σ) ≤ tol
+    while eigmin(Symmetric(Σ)) ≤ tol
         Σ += tol*I
     end
     return Σ
