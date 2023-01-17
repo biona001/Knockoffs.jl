@@ -175,7 +175,7 @@ function modelX_gaussian_rep_group_knockoffs(
     non_reps = setdiff(1:p, group_reps)
     Σ11 = Σ[group_reps, group_reps] # no view because Σ11 needs to be inverted later
     Σ12 = @views Σ[group_reps, non_reps]
-    S, γs, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
+    S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
 
     # this samples 1 knockoff
     # Xr = @views X[:, group_reps]
@@ -192,13 +192,8 @@ function modelX_gaussian_rep_group_knockoffs(
     D[non_reps, non_reps] .= S_Σ11inv_Σ12' * S * S_Σ11inv_Σ12
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
 
-    # test 
-    # X̃r = X̃[:, group_reps]
-    # X̃c = X̃[:, non_reps]
-    # return Xr, Xc, X̃r, X̃c, X̃r_correct, X̃c_correct
-
-    ko = GaussianGroupKnockoff(X, X̃, groups, D, γs, m, Symmetric(Σ), method, obj)
-    return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
+    return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
+        Symmetric(D), m, Symmetric(Σ), method, obj, nrep)
 end
 
 """
@@ -1557,7 +1552,7 @@ function choose_group_reps!(
         # if reprensetatives are already present, they are considered "group centers"
         # so check that there's only 1 rep per group
         length(unique(groups[group_reps])) == length(unique_groups) || 
-            error("choose_distinct_group_reps!: if group_reps are supplied, " * 
+            error("choose_group_reps!: if group_reps are supplied, " * 
                 "each group should have only 1 representative")
     end
     if method == :id
@@ -1594,6 +1589,60 @@ function choose_group_reps!(
 end
 choose_group_reps(G::AbstractMatrix, groups::AbstractVector; method=:id, nrep = 1) = 
     choose_group_reps!(Int[], G, groups, nrep=nrep, method=method)
+
+function choose_group_reps_adapt!(
+    group_reps::Vector{Int}, 
+    G::AbstractMatrix, 
+    groups::AbstractVector;
+    method = "id", # id or rss
+    nrep = 1
+    )
+    unique_groups = unique(groups)
+    offset = length(group_reps) > 0 ? 1 : 0
+    if length(group_reps) > 0
+        # if reprensetatives are already present, they are considered "group centers"
+        # so check that there's only 1 rep per group
+        length(unique(groups[group_reps])) == length(unique_groups) || 
+            error("choose_group_reps_adapt!: if group_reps are supplied, " * 
+                "each group should have only 1 representative")
+    end
+    if method == :id
+        for g in unique_groups
+            group_idx = findall(x -> x == g, groups) # all variables in this group
+            group_members = setdiff!(group_idx, group_reps) # remove the representative
+            length(group_members) == 0 && continue
+            # Run ID on X[:, group_members] or cholesky of Σ[group_members, group_members]
+            A = typeof(G) <: Symmetric ? 
+                cholesky(PositiveFactorizations.Positive, Symmetric(G[group_members, group_members])).U :
+                @view(G[:, group_members])
+            rep_variables = interpolative_decomposition(A, nrep - offset)
+            for rep in rep_variables
+                push!(group_reps, group_members[rep])
+            end
+        end
+    elseif method == :rss
+        Σ = typeof(G) <: Symmetric ? G : cor(G)
+        for g in unique_groups
+            group_idx = findall(x -> x == g, groups) # all variables in this group
+            group_members = setdiff!(group_idx, group_reps) # remove the representative
+            length(group_members) == 0 && continue
+            # compute upper bound of variation that can be explained by other variants
+
+            # compute top representatives by minimizing RSS of un-selected variants
+            Σg = @view(Σ[group_members, group_members])
+            rep_variables = select_best_rss_subset(Σg, nrep - offset)
+            for rep in rep_variables
+                push!(group_reps, group_members[rep])
+            end
+        end
+    else 
+        error("choose_group_reps_adapt!: expected method to be :id or :rss")
+    end
+    return sort!(group_reps)
+end
+choose_group_reps_adapt(G::AbstractMatrix, groups::AbstractVector; method=:id) = 
+    choose_group_reps_adapt!(Int[], G, groups, method=method)
+    
 
 # faithful re-implementation of Trevor's R code. Probably not the most Julian/efficient Julia code
 # select_one and select_best_rss_subset will help us choose k representatives from each group

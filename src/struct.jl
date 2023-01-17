@@ -33,11 +33,17 @@ struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric}
     obj::T # final objective value of group knockoff
 end
 
-struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff
-    X::Matrix{T} # original n × p design matrix
-    ko::Union{GaussianKnockoff, GaussianGroupKnockoff} # knockoff struct of the representative variants
+struct GaussianRepGroupKnockoff{T<:AbstractFloat, S<:Symmetric} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
     group_reps::Vector{Int} # vector of representative variables (i.e. columns of X)
+    S11::Matrix{T} # r × r matrix from running group knockoffs optimization on the representatives. S11 and (m+1)/m*Σ11 - S11 are both psd
+    S::S # p × p matrix equal to [S11  S11*inv(Σ11)*Σ12; Σ21*inv(Σ11)*S11 Σ21*inv(Σ11)S11*inv(Σ11)*Σ12]
+    m::Int # number of knockoffs per feature generated
+    Σ::S # p × p symmetric covariance matrix. 
+    method::Symbol # method for solving s
+    obj::T # final objective value of group knockoff
     nrep::Int # number of representatives per group
 end
 

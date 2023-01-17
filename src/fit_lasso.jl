@@ -75,13 +75,8 @@ function fit_lasso(
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     X = ko.X
-    if typeof(ko) <: GaussianRepGroupKnockoff
-        X̃ = ko.ko.X̃
-        m = ko.ko.m # number of knockoffs per feature
-    else
-        X̃ = ko.X̃
-        m = ko.m
-    end
+    X̃ = ko.X̃
+    m = ko.m
     # merge X with its knockoffs X̃ and shuffle around the indices
     merged_ko = merge_knockoffs_with_original(X, X̃)
     # cross validate for λ, then refit Lasso with best λ
