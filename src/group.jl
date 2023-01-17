@@ -122,6 +122,7 @@ function modelX_gaussian_rep_group_knockoffs(
         groups, group_reps; nrep=nrep, m=m, kwargs...)
 end
 
+# for group representative variant method that completely ignores non-rep variants
 # function modelX_gaussian_rep_group_knockoffs(
 #     X::AbstractMatrix{T}, 
 #     method::Symbol,
@@ -175,6 +176,7 @@ function modelX_gaussian_rep_group_knockoffs(
     non_reps = setdiff(1:p, group_reps)
     Σ11 = Σ[group_reps, group_reps] # no view because Σ11 needs to be inverted later
     Σ12 = @views Σ[group_reps, non_reps]
+    Σ22 = @views Σ[non_reps, non_reps]
     S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
 
     # this samples 1 knockoff
@@ -184,12 +186,15 @@ function modelX_gaussian_rep_group_knockoffs(
     # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
 
     # sample multiple knockoffs
-    S_Σ11inv_Σ12 = S * inv(Σ11) * Σ12 # r × (p-r)
+    Σ11inv = inv(Σ11)
+    Σ11inv_Σ12 = Σ11inv * Σ12
+    S_Σ11inv_Σ12 = S * Σ11inv_Σ12 # r × (p-r)
     D = Matrix{T}(undef, p, p)
     D[group_reps, group_reps] .= S
     D[group_reps, non_reps] .= S_Σ11inv_Σ12
     D[non_reps, group_reps] .= S_Σ11inv_Σ12'
-    D[non_reps, non_reps] .= S_Σ11inv_Σ12' * S * S_Σ11inv_Σ12
+    D[non_reps, non_reps] .= Σ22 - (Σ12' * Σ11inv * Σ12) + (Σ11inv_Σ12' * S * Σ11inv_Σ12)
+    # @show eigmin(Symmetric(D))
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
 
     return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
@@ -255,7 +260,7 @@ function solve_s_group(
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : cov2cor!(Σ.data, σs)
+    Σcor = iscor ? Σ : Symmetric(cov2cor!(Σ.data, σs))
     # if groups not contiguous, permute columns/rows of Σ so that they are contiguous
     perm = sortperm(groups)
     permuted = false
