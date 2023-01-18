@@ -170,7 +170,8 @@ function modelX_gaussian_rep_group_knockoffs(
     n, p = size(X)
     r = length(group_reps)
     all(x -> 1 ≤ x ≤ p, group_reps) || error("group_reps should be column indices of X")
-    verbose && println("$r representatives for $p variables")
+    group_size = countmap(groups[group_reps]) |> values |> collect
+    verbose && println("$r representatives for $p variables, $(sum(abs2, group_size)) optimization variables"); flush(stdout)
 
     # Compute S matrix on the representatives
     non_reps = setdiff(1:p, group_reps)
@@ -297,11 +298,11 @@ function solve_s_group(
         elseif method == :sdp_subopt_correct
             S, γs, obj = solve_group_SDP_subopt_correct(Σcor, Sblocks; m=m)
         elseif method == :sdp_block
-            S, γs, obj = solve_group_SDP_block_update(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_block_update(Σcor, Sblocks, method; m=m, kwargs...)
         elseif method == :mvr_block
-            S, γs, obj = solve_group_MVR_block_update(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_block_update(Σcor, Sblocks, method; m=m, kwargs...)
         elseif method == :maxent_block
-            S, γs, obj = solve_group_maxent_block_update(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_block_update(Σcor, Sblocks, method; m=m, kwargs...)
         elseif method == :sdp
             S, γs, obj = solve_group_SDP_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :sdp_full
@@ -394,7 +395,7 @@ function solve_group_SDP_subopt(
     # return solution
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = sum(group_sdp_objective(Σ, S, block_sizes))
+    obj = sum(group_block_objective(Σ, S, block_sizes))
     return S, γs, obj
 end
 
@@ -435,7 +436,7 @@ function solve_group_SDP_subopt_correct(
     # return solution
     γs = JuMP.value.(γ)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = sum(group_sdp_objective(Σ, S, block_sizes))
+    obj = sum(group_block_objective(Σ, S, block_sizes))
     return S, γs, obj
 end
 
@@ -453,7 +454,8 @@ Solves a single block of the fully general group SDP problem. The objective is
 """
 function solve_group_SDP_single_block(
     Σ11::AbstractMatrix,
-    ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    old_obj::Number;
     optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
     # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
@@ -481,8 +483,45 @@ function solve_group_SDP_single_block(
     @constraint(model, ub - S in PSDCone())
     # solve and return
     JuMP.optimize!(model)
-    success = check_model_solution(model)
-    return JuMP.value.(S), success
+    opt_success = check_model_solution(model)
+    S11_new = JuMP.value.(S)
+    obj = group_sdp_objective_single_block(Σ11, S11_new)
+    success = opt_success && (obj < old_obj)
+    return S11_new, success, obj
+end
+
+function solve_group_maxent_single_block(
+    Σ11::AbstractMatrix,
+    ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    m::Int; # number of knockoffs to generate
+    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
+    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
+    )
+    # todo: quick return for singleton groups
+    # Build model via JuMP
+    p = size(Σ11, 1)
+    model = Model(() -> optm)
+    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
+    # SDP constraints
+    @constraint(model, S in PSDCone())
+    @constraint(model, ub - S in PSDCone())
+    # logdet objective needs to be handled by converting it to conic problem:
+    #     max log(det(x))
+    # is equivalent to
+    #     max t
+    #     s.t. t <= log(det(X))
+    # see: https://discourse.julialang.org/t/log-determinant-objective/23927/6
+    @variable(model, t)
+    @variable(model, u)
+    @constraint(model, [t; 1; vec(ub - S)] in MOI.LogDetConeSquare(p))
+    @constraint(model, [u; 1; vec(S)] in MOI.LogDetConeSquare(p))
+    @objective(model, Max, t + u)
+    # solve and return
+    JuMP.optimize!(model)
+    success = Knockoffs.check_model_solution(model) # todo: check if objective improves
+    S11_new = JuMP.value.(S)
+    obj = group_maxent_objective_single_block(S11_new, ub, m)
+    return JuMP.value.(S), success, obj
 end
 
 # function solve_group_MVR_single_block(
@@ -521,18 +560,21 @@ end
     - avoid reallocating S1_new
     - allocate vector of models
     - use loose convergence criteria
-+ Avoid allocating iperm in each iter by modifying https://github.com/JuliaLang/julia/blob/36034abf26062acad4af9dcec7c4fc53b260dbb4/base/combinatorics.jl#L278
 + For singleton groups, don't use JuMP and directly update
++ Currently all objective values are computed based on SDP case. 
+    Need to display objective values for ME/MVR objective
 """
-function solve_group_SDP_block_update(
-    Σ::AbstractMatrix, 
-    Sblocks::BlockDiagonal;
+function solve_group_block_update(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal,
+    method::Symbol;
     m::Int = 1,
     tol=0.01, # converges when changes in s are all smaller than tol
-    niter = 10, # max number of cyclic block updates
-    optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
+    niter = 100, # max number of cyclic block updates
     verbose::Bool = false,
-    )
+    ) where T
+    method ∈ [:sdp_block, :maxent_block, :mvr_block] ||
+        error("Expected method to be :sdp_block, :maxent_block, or :mvr_block")
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
@@ -542,7 +584,7 @@ function solve_group_SDP_block_update(
     A = (m+1)/m * Σ
     D = A - S
     # compute initial objective value
-    objective_values = group_sdp_objective(Σ, S, group_sizes)
+    objective_values = group_block_objective(Σ, S, group_sizes)
     verbose && println("Init obj = $(sum(objective_values))")
     # begin block updates
     for l in 1:niter
@@ -550,16 +592,17 @@ function solve_group_SDP_block_update(
         max_delta = zero(eltype(Σ))
         for b in 1:blocks
             g = group_sizes[b]
+            old_obj = objective_values[b]
             # permute current block into upper left corner
             cur_idx = offset + 1:offset + g
             @inbounds @simd for i in 1:offset
                 perm[g+i] = i
             end
             perm[1:g] .= cur_idx
-            S .= @view(S[perm, perm])
-            A .= @view(A[perm, perm])
-            D .= @view(D[perm, perm])
-            Σ .= @view(Σ[perm, perm])
+            S      .= @view(S[perm, perm])
+            A.data .= @view(A.data[perm, perm])
+            D      .= @view(D[perm, perm])
+            Σ.data .= @view(Σ.data[perm, perm])
             # update constraints
             S11 = @view(S[1:g, 1:g])
             Σ11 = @view(Σ[1:g, 1:g])
@@ -569,10 +612,15 @@ function solve_group_SDP_block_update(
             D22 = @view(D[g + 1:end, g + 1:end])
             ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
             # solve SDP/MVR/ME problem for current block
-            S11_new, success = solve_group_SDP_single_block(Σ11, ub)
-            block_obj = group_sdp_objective_single_block(Σ11, S11_new)
+            if method == :sdp_block
+                S11_new, success, block_obj = solve_group_SDP_single_block(Σ11, ub, old_obj)
+            elseif method == :maxent_block
+                S11_new, success, block_obj = solve_group_maxent_single_block(Σ11, ub, m)
+            elseif method == :mvr_block
+                error("method = :mvr_block not implemented yet")
+            end
             # only update if objective decreased and optimization was successful
-            if success && block_obj < objective_values[b]
+            if success
                 # find max difference between previous block S
                 for i in eachindex(S11_new)
                     if abs(S11_new[i] - S11[i]) > max_delta
@@ -586,31 +634,39 @@ function solve_group_SDP_block_update(
             end
             # repermute columns/rows of S back
             iperm = invperm(perm)
-            S .= @view(S[iperm, iperm])
-            A .= @view(A[iperm, iperm])
-            D .= @view(D[iperm, iperm])
-            Σ .= @view(Σ[iperm, iperm])
+            S      .= @view(S[iperm, iperm])
+            A.data .= @view(A.data[iperm, iperm])
+            D      .= @view(D[iperm, iperm])
+            Σ.data .= @view(Σ.data[iperm, iperm])
             sort!(perm)
             offset += g
         end
         verbose && println("Iter $l δ = $max_delta, obj = $(sum(objective_values))")
         max_delta < tol && break 
     end
-    return S, Float64[], sum(objective_values)
+    return S, T[], sum(objective_values)
 end
 
 # this assumes groups are contiguous, and each group's size is stored in group_sizes
-function group_sdp_objective(Σ, S, group_sizes)
+function group_block_objective(Σ, S, group_sizes)
     blocks = length(group_sizes)
     objective_values, offset = zeros(blocks), 0
     for b in 1:blocks
         cur_idx = offset + 1:offset + group_sizes[b]
-        objective_values[b] = group_sdp_objective_single_block(
-            @view(Σ[cur_idx, cur_idx]), @view(S[cur_idx, cur_idx])
-        )
+        Sb = @view(S[cur_idx, cur_idx])
+        Σb = @view(Σ[cur_idx, cur_idx])
+        objective_values[b] = group_sdp_objective_single_block(Σb, Sb)
+        # todo: compute objecive for SDP/MVR/ME separately
+        # if method == :sdp_block
+        #     objective_values[b] = group_sdp_objective_single_block(Σb, Sb)
+        # elseif method == :maxent_block
+        #     # todo: need compute ub? How?
+        #     # ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
+        #     objective_values[b] = group_maxent_objective_single_block(Sb, ub, m)
+        # end
         offset += group_sizes[b]
     end
-    return objective_values # returns sum | Σij - Sij | for each group
+    return objective_values # for SDP, returns sum | Σij - Sij | for each group
 end
 
 function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMatrix{T}) where T
@@ -621,6 +677,10 @@ function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMa
         obj += abs(Σg[i, j] - Sg[i, j])
     end
     return obj
+end
+
+function group_maxent_objective_single_block(Sg::AbstractMatrix{T}, ub::AbstractMatrix{T}, m::Int) where T
+    return logdet(ub - Sg) + m*logdet(Sg)
 end
 
 # this code solves every variable in S simultaneously, i.e. not fixing any block 
@@ -661,11 +721,10 @@ function solve_group_SDP_full(
     @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
     JuMP.optimize!(model)
     check_model_solution(model)
-
-    obj = group_sdp_objective(Σ, S, block_sizes)
-    obj_model = objective_value(model)
-    @show obj, obj_model
-    fdsa
+    obj = group_block_objective(Σ, S, block_sizes)
+    # obj_model = objective_value(model)
+    # @show obj, obj_model
+    # fdsa
 
     return JuMP.value.(S), T[]
 end
@@ -694,7 +753,7 @@ function solve_group_SDP_ccd(
     S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    verbose && println("initial obj = ", sum(group_sdp_objective(Σ, S, group_sizes)))
+    verbose && println("initial obj = ", sum(group_block_objective(Σ, S, group_sizes)))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -774,12 +833,12 @@ function solve_group_SDP_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = sum(group_sdp_objective(Σ, S, group_sizes))
+            obj = sum(group_block_objective(Σ, S, group_sizes))
             println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, Float64[], sum(group_sdp_objective(Σ, S, group_sizes))
+    return S, Float64[], sum(group_block_objective(Σ, S, group_sizes))
 end
 
 function solve_group_MVR_ccd(
