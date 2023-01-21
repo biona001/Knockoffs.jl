@@ -18,11 +18,11 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
     * `:equi`: for equi-correlated knockoffs. This is the methodology proposed in
         `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
-    * `:sdp_ccd`: Fully general SDP group knockoffs based on coodinate descent
+    * `:sdp`: Fully general SDP group knockoffs based on coodinate descent
+    * `:sdp_block`: Fully general SDP group knockoffs where each block is solved exactly 
+    using an interior point solver. 
     * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
         generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
-    * `:sdp`: Fully general SDP group knockoffs where each block is solved exactly 
-        using an interior point solver. 
 + `groups`: Vector of group membership
 + `μ`: A length `p` vector storing the true column means of `X`
 + `Σ`: A `p × p` covariance matrix for columns of `X`
@@ -84,10 +84,11 @@ end
     modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [nrep], [m], [covariance_approximator], [kwargs...])
     modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
 
-Constructs group knockoffs by choosing `nrep` representatives from each group. 
-This is a more computationally efficient approach compared to solving the general
-group knockoff problem when there are really large groups. If `nrep=1`, we
-build regular knockoffs based on the representatives.
+Constructs group knockoffs by choosing `nrep` representatives from each group and
+solving a smaller optimization problem based on the representatives only. Remaining
+knockoffs are generated based on a conditional independence assumption similar to
+a graphical model (details to be given later). The representatives must be specified,
+they can be computed via `hc_partition_groups` or `id_partition_groups`
 
 # Inputs
 + `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
@@ -96,14 +97,15 @@ build regular knockoffs based on the representatives.
 + `groups`: Vector of `Int` denoting group membership. `groups[i]` is the group 
     of `X[:, i]`
 + `group_reps`: Vector of `Int` denoting the columns of `X` that will be used to 
-    construct group knockoffs. That is, only `X[:, group_reps]` are used to build
-    knockoffs, where groups are defined by `groups[group_reps]`
-+ `μ`: A length `p` vector storing the true column means of `X`
-+ `Σ`: A `p × p` covariance matrix for columns of `X`
-+ `m`: Number of knockoffs per variable, defaults to 1. 
+    construct group knockoffs. That is, only `X[:, group_reps]` are used to solve
+    the S matrix
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
++ `μ`: A length `p` vector storing the true column means of `X`
++ `Σ`: A `p × p` covariance matrix for columns of `X`
++ `nrep`: Max number of representatives per group, defaults to 5
++ `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra keyword arguments for `solve_s_group`
 """
 function modelX_gaussian_rep_group_knockoffs(
@@ -112,7 +114,7 @@ function modelX_gaussian_rep_group_knockoffs(
     groups::AbstractVector{Int},
     group_reps::AbstractVector{Int};
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    nrep::Int = 1,
+    nrep::Int = 5,
     m::Int = 1,
     kwargs... # extra arguments for solve_s or solve_s_group
     ) where T
