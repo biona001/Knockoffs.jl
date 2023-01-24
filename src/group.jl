@@ -315,6 +315,8 @@ function solve_s_group(
             S, γs, obj = solve_group_max_entropy_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_subopt
             S, γs, obj = solve_group_max_entropy_suboptimal(Σcor, Sblocks)
+        elseif method == :maxent_pca
+            S, γs, obj = solve_group_max_entropy_pca(Σcor, m, groups)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
