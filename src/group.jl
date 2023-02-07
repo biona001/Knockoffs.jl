@@ -630,7 +630,7 @@ function solve_group_block_update(
                 S11_new, success, block_obj = solve_group_maxent_single_block(Σ11, ub, m)
             elseif method == :mvr_block
                 S11_new, success, block_obj = solve_group_MVR_single_block(Σ11, ub, D21, D22inv, m)
-                return S11_new, success, block_obj
+                # return S11_new, success, block_obj # for testing
             else
                 error("group block updates methods can only be :sdp_block, :maxent_block, or :mvr_block")
             end
@@ -853,7 +853,7 @@ function solve_group_SDP_ccd(
         end
         max_delta < tol && break 
     end
-    return S, Float64[], sum(group_block_objective(Σ, S, group_sizes))
+    return S, T[], sum(group_block_objective(Σ, S, group_sizes))
 end
 
 function solve_group_MVR_ccd(
@@ -929,6 +929,7 @@ function solve_group_MVR_ccd(
             #
             # optimize off-diagonal entries
             #
+            obj = group_mvr_obj(L, C, m)
             for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
                 i, j = idx2 + offset, idx1 + offset
                 fill!(ej, 0); fill!(ei, 0)
@@ -969,13 +970,17 @@ function solve_group_MVR_ccd(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                (abs(δ) < 1e-15 || isnan(δ)) && continue
+                change_obj = opt.minimum
+                if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ)
+                    continue
+                end
+                obj += change_obj
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
+                # update cholesky factors
                 t1 += @elapsed δ = update_offdiag_chol_mvr!(
-                    S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
+                    L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -1099,18 +1104,17 @@ function solve_group_max_entropy_ccd(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                # (abs(δ) < 1e-15 || isnan(δ)) && continue
                 change_obj = -opt.minimum
-                if change_obj < 0 || (abs(δ) < 1e-15 || isnan(δ))
+                if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ)
                     continue
                 end
                 obj += change_obj
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
+                # update cholesky factors
                 t1 += @elapsed δ = update_offdiag_chol_maxent!(
-                    S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
+                    L, C, x, i, j, ei, ej, δ, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -1123,7 +1127,7 @@ function solve_group_max_entropy_ccd(
         end
         max_delta < tol && break 
     end
-    return S, Float64[], logdet(L) + m*logdet(C)
+    return S, T[], logdet(L) + m*logdet(C)
 end
 
 # objective function to minimize when optimizing off-diagonal entries in max entropy group knockoffs
@@ -1241,8 +1245,7 @@ function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholup
     return failed ? 0 : δj
 end
 
-function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_mvr_obj(L, C, m))
+function update_offdiag_chol_mvr!(L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!)
     # update cholesky factor L
     fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
     storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
@@ -1267,39 +1270,7 @@ function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldow
         cholupdate!(C, ei)
         cholupdate!(C, ej)
     end
-    !backtrack && return δ
-    # if objective didn't decrease, undo the update
-    new_obj = group_mvr_obj(L, C, m)
-    failed = new_obj > obj_old
-    if backtrack && failed
-        S[i, j] -= δ
-        S[j, i] -= δ
-        # undo cholesky update to L
-        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ > 0
-            choldowndate!(L, ej)
-            choldowndate!(L, ei)
-            cholupdate!(L, storage)
-        else 
-            cholupdate!(L, ej)
-            cholupdate!(L, ei)
-            choldowndate!(L, storage)
-        end
-        # update cholesky factor C
-        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ > 0
-            cholupdate!(C, ej)
-            cholupdate!(C, ei)
-            choldowndate!(C, storage)
-        else
-            choldowndate!(C, ej)
-            choldowndate!(C, ei)
-            cholupdate!(C, storage)
-        end
-    end
-    return failed ? 0 : δ
+    return δ
 end
 
 function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack = true)
@@ -1332,7 +1303,7 @@ function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, chol
     return failed ? 0 : δ
 end
 
-function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
+function update_offdiag_chol_maxent!(L, C, x, i, j, ei, ej, δ, choldowndate!, cholupdate!)
     # update cholesky factor L
     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
@@ -1359,67 +1330,6 @@ function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldownda
     end
     return δ
 end
-
-# function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-#     backtrack && (obj_old = group_maxent_obj(L, C, m))
-#     # update cholesky factor L
-#     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-#     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-#     if δ > 0
-#         choldowndate!(L, x)
-#         cholupdate!(L, ei)
-#         cholupdate!(L, ej)
-#     else 
-#         cholupdate!(L, x)
-#         choldowndate!(L, ei)
-#         choldowndate!(L, ej)
-#     end
-#     # update cholesky factor C
-#     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-#     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-#     if δ > 0
-#         cholupdate!(C, x)
-#         choldowndate!(C, ei)
-#         choldowndate!(C, ej)
-#     else
-#         choldowndate!(C, x)
-#         cholupdate!(C, ei)
-#         cholupdate!(C, ej)
-#     end
-#     !backtrack && return δ
-#     # if objective didn't increase, undo the update
-#     new_obj = group_maxent_obj(L, C, m)
-#     failed = new_obj < obj_old
-#     if backtrack && failed
-#         S[i, j] -= δ
-#         S[j, i] -= δ
-#         # undo update to cholesky factor L
-#         fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-#         x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-#         if δ > 0
-#             choldowndate!(L, ej)
-#             choldowndate!(L, ei)
-#             cholupdate!(L, x)
-#         else 
-#             cholupdate!(L, ej)
-#             cholupdate!(L, ei)
-#             choldowndate!(L, x)
-#         end
-#         # undo update to cholesky factor C
-#         fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-#         x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-#         if δ > 0
-#             cholupdate!(C, ej)
-#             cholupdate!(C, ei)
-#             choldowndate!(C, x)
-#         else
-#             choldowndate!(C, ej)
-#             choldowndate!(C, ei)
-#             cholupdate!(C, x)
-#         end
-#     end
-#     return failed ? 0 : δ
-# end
 
 # SDP construction for ME by choosing S_g = γ_g * Σ_{g,g}
 # todo: multiple knockoffs, check objective value is correct
