@@ -531,14 +531,15 @@ end
 function solve_group_MVR_single_block(
     Σ11::AbstractMatrix,
     ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    A12::AbstractMatrix,
+    A21::AbstractMatrix,
     D22inv::AbstractMatrix,
     m::Int; # number of knockoffs to generate
-    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
+    optm=Hypatia.Optimizer(verbose=true, iter_limit=100) # Any solver compatible with JuMP
     # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
     # Build model via JuMP
     p = size(Σ11, 1)
+    q = size(D22inv, 1)
     model = Model(() -> optm)
     @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
     # SDP constraints
@@ -548,17 +549,18 @@ function solve_group_MVR_single_block(
     # https://discourse.julialang.org/t/how-to-optimize-trace-of-matrix-inverse-with-jump-or-convex/94167/4
     @variable(model, X[1:p, 1:p])
     @variable(model, Y[1:p, 1:p])
-    @variable(model, Z[1:p, 1:p])
+    @variable(model, Z[1:q, 1:q]) # this is huge
     @constraint(model, [X I; I S] in PSDCone())
     @constraint(model, [Y I; I ub-S] in PSDCone())
-    C = A12 * D22inv
-    @constraint(model, [Z Transpose(C); C ub-S] in PSDCone())
+    C = D22inv * A21
+    @constraint(model, [Z C; Transpose(C) ub-S] in PSDCone())
     # objective
     @objective(model, Min, m^2*tr(X) + tr(Y) + tr(Z))
     # solve and return
     JuMP.optimize!(model)
     success = check_model_solution(model)
-    return JuMP.value.(S), success
+    obj = objective_value(model)
+    return JuMP.value.(S), success, obj
 end
 
 """
@@ -627,7 +629,8 @@ function solve_group_block_update(
             elseif method == :maxent_block
                 S11_new, success, block_obj = solve_group_maxent_single_block(Σ11, ub, m)
             elseif method == :mvr_block
-                S11_new, success, block_obj = solve_group_MVR_single_block(Σ11, ub, m, D12, D22inv)
+                S11_new, success, block_obj = solve_group_MVR_single_block(Σ11, ub, D21, D22inv, m)
+                return S11_new, success, block_obj
             else
                 error("group block updates methods can only be :sdp_block, :maxent_block, or :mvr_block")
             end
@@ -1065,6 +1068,7 @@ function solve_group_max_entropy_ccd(
             #
             # optimize off-diagonal entries
             #
+            obj = group_maxent_obj(L, C, m)
             for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
                 i, j = idx2 + offset, idx1 + offset
                 fill!(ej, 0); fill!(ei, 0)
@@ -1095,7 +1099,12 @@ function solve_group_max_entropy_ccd(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                (abs(δ) < 1e-15 || isnan(δ)) && continue
+                # (abs(δ) < 1e-15 || isnan(δ)) && continue
+                change_obj = -opt.minimum
+                if change_obj < 0 || (abs(δ) < 1e-15 || isnan(δ))
+                    continue
+                end
+                obj += change_obj
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
@@ -1324,7 +1333,6 @@ function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, chol
 end
 
 function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_maxent_obj(L, C, m))
     # update cholesky factor L
     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
@@ -1349,40 +1357,69 @@ function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldownda
         cholupdate!(C, ei)
         cholupdate!(C, ej)
     end
-    !backtrack && return δ
-    # if objective didn't increase, undo the update
-    new_obj = group_maxent_obj(L, C, m)
-    failed = new_obj < obj_old
-    if backtrack && failed
-        S[i, j] -= δ
-        S[j, i] -= δ
-        # undo update to cholesky factor L
-        fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-        x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ > 0
-            choldowndate!(L, ej)
-            choldowndate!(L, ei)
-            cholupdate!(L, x)
-        else 
-            cholupdate!(L, ej)
-            cholupdate!(L, ei)
-            choldowndate!(L, x)
-        end
-        # undo update to cholesky factor C
-        fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-        x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ > 0
-            cholupdate!(C, ej)
-            cholupdate!(C, ei)
-            choldowndate!(C, x)
-        else
-            choldowndate!(C, ej)
-            choldowndate!(C, ei)
-            cholupdate!(C, x)
-        end
-    end
-    return failed ? 0 : δ
+    return δ
 end
+
+# function update_offdiag_chol_maxent!(S, L, C, x, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
+#     backtrack && (obj_old = group_maxent_obj(L, C, m))
+#     # update cholesky factor L
+#     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+#     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+#     if δ > 0
+#         choldowndate!(L, x)
+#         cholupdate!(L, ei)
+#         cholupdate!(L, ej)
+#     else 
+#         cholupdate!(L, x)
+#         choldowndate!(L, ei)
+#         choldowndate!(L, ej)
+#     end
+#     # update cholesky factor C
+#     fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+#     x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+#     if δ > 0
+#         cholupdate!(C, x)
+#         choldowndate!(C, ei)
+#         choldowndate!(C, ej)
+#     else
+#         choldowndate!(C, x)
+#         cholupdate!(C, ei)
+#         cholupdate!(C, ej)
+#     end
+#     !backtrack && return δ
+#     # if objective didn't increase, undo the update
+#     new_obj = group_maxent_obj(L, C, m)
+#     failed = new_obj < obj_old
+#     if backtrack && failed
+#         S[i, j] -= δ
+#         S[j, i] -= δ
+#         # undo update to cholesky factor L
+#         fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+#         x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+#         if δ > 0
+#             choldowndate!(L, ej)
+#             choldowndate!(L, ei)
+#             cholupdate!(L, x)
+#         else 
+#             cholupdate!(L, ej)
+#             cholupdate!(L, ei)
+#             choldowndate!(L, x)
+#         end
+#         # undo update to cholesky factor C
+#         fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
+#         x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
+#         if δ > 0
+#             cholupdate!(C, ej)
+#             cholupdate!(C, ei)
+#             choldowndate!(C, x)
+#         else
+#             choldowndate!(C, ej)
+#             choldowndate!(C, ei)
+#             cholupdate!(C, x)
+#         end
+#     end
+#     return failed ? 0 : δ
+# end
 
 # SDP construction for ME by choosing S_g = γ_g * Σ_{g,g}
 # todo: multiple knockoffs, check objective value is correct
