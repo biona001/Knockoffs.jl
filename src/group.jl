@@ -528,33 +528,38 @@ function solve_group_maxent_single_block(
     return JuMP.value.(S), success, obj
 end
 
-# function solve_group_MVR_single_block(
-#     Σ11::AbstractMatrix,
-#     A11::AbstractMatrix,
-#     A12::AbstractMatrix, 
-#     invD22::AbstractMatrix,
-#     m::Int,
-#     ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-#     )
-#     # needed constants
-#     invZYt = invD22 * A12'
-#     YinvZYt = A12 * invZYt
-#     # Build model via JuMP
-#     p = size(Σ11, 1)
-#     model = Model(() -> Ipopt.Optimizer())
-#     @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
-#     # SDP constraints
-#     @constraint(model, S in PSDCone())
-#     @constraint(model, ub - S in PSDCone())
-#     # objective
-#     @NLobjective(model, Min, 
-#         m^2*tr(inv(S)) + tr(A-S-YinvZYt) + tr(invZYt'*(A11-S-YinvZYt)*YinvZYt)
-#     )
-#     # solve and return
-#     JuMP.optimize!(model)
-#     success = check_model_solution(model)
-#     return JuMP.value.(S), success
-# end
+function solve_group_MVR_single_block(
+    Σ11::AbstractMatrix,
+    ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
+    A12::AbstractMatrix,
+    D22inv::AbstractMatrix,
+    m::Int; # number of knockoffs to generate
+    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
+    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
+    )
+    # Build model via JuMP
+    p = size(Σ11, 1)
+    model = Model(() -> optm)
+    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
+    # SDP constraints
+    @constraint(model, S in PSDCone())
+    @constraint(model, ub - S in PSDCone())
+    # convert tr(inv(X)) terms into linear matrix inequalities using slack variable trick
+    # https://discourse.julialang.org/t/how-to-optimize-trace-of-matrix-inverse-with-jump-or-convex/94167/4
+    @variable(model, X[1:p, 1:p])
+    @variable(model, Y[1:p, 1:p])
+    @variable(model, Z[1:p, 1:p])
+    @constraint(model, [X I; I S] in PSDCone())
+    @constraint(model, [Y I; I ub-S] in PSDCone())
+    C = A12 * D22inv
+    @constraint(model, [Z Transpose(C); C ub-S] in PSDCone())
+    # objective
+    @objective(model, Min, m^2*tr(X) + tr(Y) + tr(Z))
+    # solve and return
+    JuMP.optimize!(model)
+    success = check_model_solution(model)
+    return JuMP.value.(S), success
+end
 
 """
 # Todo
@@ -614,14 +619,17 @@ function solve_group_block_update(
             D12 = @view(D[1:g, g + 1:end])
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
-            ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
+            D22inv = inv(D22 + 0.00001I)
+            ub = Symmetric(A11 - D12 * D22inv * D21)
             # solve SDP/MVR/ME problem for current block
             if method == :sdp_block
                 S11_new, success, block_obj = solve_group_SDP_single_block(Σ11, ub, old_obj)
             elseif method == :maxent_block
                 S11_new, success, block_obj = solve_group_maxent_single_block(Σ11, ub, m)
             elseif method == :mvr_block
-                error("method = :mvr_block not implemented yet")
+                S11_new, success, block_obj = solve_group_MVR_single_block(Σ11, ub, m, D12, D22inv)
+            else
+                error("group block updates methods can only be :sdp_block, :maxent_block, or :mvr_block")
             end
             # only update if objective decreased and optimization was successful
             if success

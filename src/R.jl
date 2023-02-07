@@ -103,7 +103,7 @@ function solve_group_max_entropy_pca(
             }
             new.obj<-new.obj+change_obj
             if(change_obj/abs(new.obj)<=0.001){break}
-            print(new.obj)
+            # print(new.obj)
         }
         
         # Compensate for numerical errors (feasibility)
