@@ -124,36 +124,6 @@ function modelX_gaussian_rep_group_knockoffs(
         groups, group_reps; nrep=nrep, m=m, kwargs...)
 end
 
-# for group representative variant method that completely ignores non-rep variants
-# function modelX_gaussian_rep_group_knockoffs(
-#     X::AbstractMatrix{T}, 
-#     method::Symbol,
-#     μ::AbstractVector, 
-#     Σ::AbstractMatrix,
-#     groups::AbstractVector{Int},
-#     group_reps::AbstractVector{Int};
-#     nrep::Int = 1,
-#     m::Int = 1,
-#     kwargs... # extra arguments for solve_s or solve_s_group
-#     ) where T
-#     # note: these cannot be views because in the resulting struct requires concrete types not subarrays
-#     μrep = μ[group_reps]
-#     Σrep = Σ[group_reps, group_reps]
-#     Xrep = X[:, group_reps]
-
-#     if nrep == 1
-#         # generate (non-grouped) knockoff of X restricted to representative columns
-#         ko = modelX_gaussian_knockoffs(Xrep, method, μrep, Σrep; m=m, kwargs...)
-#     else
-#         # generate (smaller) group knockoffs of X
-#         Xrep_groups = groups[group_reps]
-#         ko = modelX_gaussian_group_knockoffs(Xrep, method, Xrep_groups, μrep, Σrep;
-#             m=m, kwargs...)
-#     end
-
-#     return GaussianRepGroupKnockoff(X, ko, groups, group_reps, nrep)
-# end
-
 """
 Let X_R = (X_1,...,X_r); X_C = (X_{r+1},...,X_p)
 """
@@ -399,7 +369,7 @@ function solve_group_SDP_subopt(
     # return solution
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = sum(group_block_objective(Σ, S, block_sizes))
+    obj = group_block_objective(Σ, S, m, :sdp_subopt)
     return S, γs, obj
 end
 
@@ -440,7 +410,7 @@ function solve_group_SDP_subopt_correct(
     # return solution
     γs = JuMP.value.(γ)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = sum(group_block_objective(Σ, S, block_sizes))
+    obj = group_block_objective(Σ, S, m, method)
     return S, γs, obj
 end
 
@@ -458,8 +428,7 @@ Solves a single block of the fully general group SDP problem. The objective is
 """
 function solve_group_SDP_single_block(
     Σ11::AbstractMatrix,
-    ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    old_obj::Number;
+    ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
     optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
     # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
@@ -487,11 +456,8 @@ function solve_group_SDP_single_block(
     @constraint(model, ub - S in PSDCone())
     # solve and return
     JuMP.optimize!(model)
-    opt_success = check_model_solution(model)
-    S11_new = JuMP.value.(S)
-    obj = group_sdp_objective_single_block(Σ11, S11_new)
-    success = opt_success && (obj < old_obj)
-    return S11_new, success, obj
+    success = check_model_solution(model)
+    return JuMP.value.(S), success
 end
 
 function solve_group_maxent_single_block(
@@ -522,10 +488,8 @@ function solve_group_maxent_single_block(
     @objective(model, Max, t + u)
     # solve and return
     JuMP.optimize!(model)
-    success = Knockoffs.check_model_solution(model) # todo: check if objective improves
-    S11_new = JuMP.value.(S)
-    obj = group_maxent_objective_single_block(S11_new, ub, m)
-    return JuMP.value.(S), success, obj
+    success = check_model_solution(model)
+    return JuMP.value.(S), success
 end
 
 function solve_group_MVR_single_block(
@@ -534,7 +498,7 @@ function solve_group_MVR_single_block(
     A21::AbstractMatrix,
     D22inv::AbstractMatrix,
     m::Int; # number of knockoffs to generate
-    optm=Hypatia.Optimizer(verbose=true, iter_limit=100) # Any solver compatible with JuMP
+    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
     # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
     # Build model via JuMP
@@ -549,18 +513,18 @@ function solve_group_MVR_single_block(
     # https://discourse.julialang.org/t/how-to-optimize-trace-of-matrix-inverse-with-jump-or-convex/94167/4
     @variable(model, X[1:p, 1:p])
     @variable(model, Y[1:p, 1:p])
-    @variable(model, Z[1:q, 1:q]) # this is huge
+    @variable(model, Z[1:q]) # force Z to be diagonal matrix rather than q by q matrix
     @constraint(model, [X I; I S] in PSDCone())
     @constraint(model, [Y I; I ub-S] in PSDCone())
     C = D22inv * A21
-    @constraint(model, [Z C; Transpose(C) ub-S] in PSDCone())
+    @constraint(model, [Diagonal(Z) C; Transpose(C) ub-S] in PSDCone())
     # objective
-    @objective(model, Min, m^2*tr(X) + tr(Y) + tr(Z))
+    @objective(model, Min, m^2*tr(X) + tr(Y) + sum(Z))
     # solve and return
     JuMP.optimize!(model)
-    success = check_model_solution(model)
-    obj = objective_value(model)
-    return JuMP.value.(S), success, obj
+    # success = check_model_solution(model)
+    success = eigmin(JuMP.value.(S)) ≥ 0 ? true : false
+    return JuMP.value.(S), success
 end
 
 """
@@ -594,16 +558,16 @@ function solve_group_block_update(
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     A = (m+1)/m * Σ
     D = A - S
+    Stmp = copy(S)
     # compute initial objective value
-    objective_values = group_block_objective(Σ, S, group_sizes)
-    verbose && println("Init obj = $(sum(objective_values))")
+    obj = group_block_objective(Σ, S, m, method)
+    verbose && println("Init obj = $obj")
     # begin block updates
     for l in 1:niter
         offset = 0
         max_delta = zero(eltype(Σ))
         for b in 1:blocks
             g = group_sizes[b]
-            old_obj = objective_values[b]
             # permute current block into upper left corner
             cur_idx = offset + 1:offset + g
             @inbounds @simd for i in 1:offset
@@ -625,17 +589,25 @@ function solve_group_block_update(
             ub = Symmetric(A11 - D12 * D22inv * D21)
             # solve SDP/MVR/ME problem for current block
             if method == :sdp_block
-                S11_new, success, block_obj = solve_group_SDP_single_block(Σ11, ub, old_obj)
+                S11_new, opt_success = solve_group_SDP_single_block(Σ11, ub)
             elseif method == :maxent_block
-                S11_new, success, block_obj = solve_group_maxent_single_block(Σ11, ub, m)
+                S11_new, opt_success = solve_group_maxent_single_block(Σ11, ub, m)
             elseif method == :mvr_block
-                S11_new, success, block_obj = solve_group_MVR_single_block(Σ11, ub, D21, D22inv, m)
-                # return S11_new, success, block_obj # for testing
-            else
-                error("group block updates methods can only be :sdp_block, :maxent_block, or :mvr_block")
+                S11_new, opt_success = solve_group_MVR_single_block(Σ11, ub, D21, D22inv, m)
             end
-            # only update if objective decreased and optimization was successful
-            if success
+            !opt_success && continue
+            # check if objective improves
+            obj_improves = false
+            Stmp .= S
+            Stmp[1:g, 1:g] .= S11_new
+            new_obj = group_block_objective(Σ, Stmp, m, method)
+            if method == :sdp_block || method == :mvr_block
+                new_obj < obj && (obj_improves = true; obj = new_obj)
+            else
+                new_obj > obj && (obj_improves = true; obj = new_obj)
+            end
+            # only update if optimization was successful and objective improves
+            if opt_success && obj_improves
                 # find max difference between previous block S
                 for i in eachindex(S11_new)
                     if abs(S11_new[i] - S11[i]) > max_delta
@@ -645,7 +617,6 @@ function solve_group_block_update(
                 # update relevant blocks
                 S11 .= S11_new
                 D[1:g, 1:g] .= A11 .- S11_new
-                objective_values[b] = block_obj
             end
             # repermute columns/rows of S back
             iperm = invperm(perm)
@@ -656,32 +627,28 @@ function solve_group_block_update(
             sort!(perm)
             offset += g
         end
-        verbose && println("Iter $l δ = $max_delta, obj = $(sum(objective_values))")
+        verbose && println("Iter $l δ = $max_delta, obj = $obj")
         max_delta < tol && break 
     end
-    return S, T[], sum(objective_values)
+    return S, T[], obj
 end
 
-# this assumes groups are contiguous, and each group's size is stored in group_sizes
-function group_block_objective(Σ, S, group_sizes)
-    blocks = length(group_sizes)
-    objective_values, offset = zeros(blocks), 0
-    for b in 1:blocks
-        cur_idx = offset + 1:offset + group_sizes[b]
-        Sb = @view(S[cur_idx, cur_idx])
-        Σb = @view(Σ[cur_idx, cur_idx])
-        objective_values[b] = group_sdp_objective_single_block(Σb, Sb)
-        # todo: compute objecive for SDP/MVR/ME separately
-        # if method == :sdp_block
-        #     objective_values[b] = group_sdp_objective_single_block(Σb, Sb)
-        # elseif method == :maxent_block
-        #     # todo: need compute ub? How?
-        #     # ub = Symmetric(A11 - D12 * inv(D22 + 0.00001I) * D21)
-        #     objective_values[b] = group_maxent_objective_single_block(Sb, ub, m)
-        # end
-        offset += group_sizes[b]
+# this evaluate the objective for SDP/MVR/ME
+function group_block_objective(Σ, S, m, method)
+    size(Σ) == size(S) || error("expected size(Σ) == size(S)")
+    obj = zero(eltype(Σ))
+    if occursin("sdp", string(method))
+        for j in axes(Σ, 2), i in axes(Σ, 1)
+            obj += abs(Σ[i, j] - S[i, j])
+        end
+    elseif occursin("maxent", string(method))
+        obj += logdet((m+1)/m*Σ - S) + m*logdet(S)
+    elseif occursin("mvr", string(method))
+        obj += m^2*logdet(inv(S)) + tr(inv((m+1)/m*Σ - S))
+    else
+        error("methods can only be :sdp_block, :maxent_block, or :mvr_block")
     end
-    return objective_values # for SDP, returns sum | Σij - Sij | for each group
+    return obj
 end
 
 function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMatrix{T}) where T
@@ -692,10 +659,6 @@ function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMa
         obj += abs(Σg[i, j] - Sg[i, j])
     end
     return obj
-end
-
-function group_maxent_objective_single_block(Sg::AbstractMatrix{T}, ub::AbstractMatrix{T}, m::Int) where T
-    return logdet(ub - Sg) + m*logdet(Sg)
 end
 
 # this code solves every variable in S simultaneously, i.e. not fixing any block 
@@ -736,12 +699,8 @@ function solve_group_SDP_full(
     @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
     JuMP.optimize!(model)
     check_model_solution(model)
-    obj = group_block_objective(Σ, S, block_sizes)
-    # obj_model = objective_value(model)
-    # @show obj, obj_model
-    # fdsa
-
-    return JuMP.value.(S), T[]
+    obj = group_block_objective(Σ, S, m, method)
+    return JuMP.value.(S), T[], obj
 end
 
 function solve_group_SDP_ccd(
@@ -768,7 +727,7 @@ function solve_group_SDP_ccd(
     S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    verbose && println("initial obj = ", sum(group_block_objective(Σ, S, group_sizes)))
+    verbose && println("initial obj = ", group_block_objective(Σ, S, m, :sdp))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -848,12 +807,12 @@ function solve_group_SDP_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = sum(group_block_objective(Σ, S, group_sizes))
+            obj = group_block_objective(Σ, S, m, :sdp)
             println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, T[], sum(group_block_objective(Σ, S, group_sizes))
+    return S, T[], group_block_objective(Σ, S, m, :sdp)
 end
 
 function solve_group_MVR_ccd(
