@@ -50,8 +50,9 @@ export
     mk_threshold,
     threshold, 
     extract_beta,
-    # functions related to fitting lasso
+    # functions related to fitting
     fit_lasso, 
+    fit_marginal, 
     debias!, 
     # functions for prediction routine after lasso fit
     predict, R2, auc, 

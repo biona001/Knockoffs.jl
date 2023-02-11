@@ -5,7 +5,7 @@
 Returns a `Vector{Int}` that includes the selected variables. 
 
 # Inputs
-+ `β`: mp × 1 vector of estimated beta for the original and knockoff features
++ `β`: (m+1)p × 1 vector of feature importance statistics for the original and knockoff features
 + `original`: p × 1 vector of indices storing which columns of XX̃ contains the original features
 + `knockoff`: p × 1 vector of where knockoff[i] is a length m vector storing which 
     columns of XX̃ contains the `i`th knockoffs
@@ -17,7 +17,7 @@ Returns a `Vector{Int}` that includes the selected variables.
     propose uses median which seems to be more stable in practice
 """
 function select_features(
-    β::AbstractVector{T}, 
+    β::AbstractVector{T},
     original::AbstractVector{Int}, 
     knockoff::Vector{Vector{Int}},
     fdr::Number;

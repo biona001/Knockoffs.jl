@@ -113,7 +113,9 @@ indicating whether estimated effect size have been debiased with Lasso. The
 property. `τ` is the knockoff threshold, which controls the empirical FDR at 
 level `q`
 """
-struct KnockoffFilter{T}
+abstract type KnockoffFilter end
+
+struct LassoKnockoffFilter{T} <: KnockoffFilter
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
@@ -124,4 +126,14 @@ struct KnockoffFilter{T}
     fdr_target :: Vector{T} # target FDR level for each τs and βs
     d :: UnivariateDistribution # distribution of y
     debias :: Union{Nothing, Symbol} # how βs and a0 have been debiased (`nothing` for not debiased)
+end
+
+struct MarginalKnockoffFilter{T} <: KnockoffFilter
+    y :: Vector{T} # n × 1 response vector
+    X :: Matrix{T} # n × p matrix of original features
+    ko :: Knockoff # A knockoff struct
+    m :: Int # number of knockoffs per feature generated
+    selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    d :: UnivariateDistribution # distribution of y
 end

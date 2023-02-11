@@ -108,51 +108,43 @@ function fit_lasso(
         push!(βs, β_filtered)
         push!(a0s, a0)
     end
-    return KnockoffFilter(y, X, ko, merged_ko, m, βs, a0s, fdrs, d, debias)
+    return LassoKnockoffFilter(y, X, ko, merged_ko, m, βs, a0s, fdrs, d, debias)
 end
 
-# for group representative variant method that completely ignores non-rep variants
-# function fit_lasso(
-#     y::AbstractVector{T},
-#     ko::GaussianRepGroupKnockoff;
-#     d::Distribution=Normal(),
-#     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
-#     filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
-#     debias::Union{Nothing, Symbol} = nothing,
-#     kwargs..., # arguments for glmnetcv
-#     ) where T <: AbstractFloat
-#     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
-#     m = ko.ko.m # number of knockoffs per feature
-#     p = size(ko.X, 2) # total number of features (before choosing representatives)
-#     # merge X with its knockoffs X̃ and shuffle around the indices
-#     merged_ko = merge_knockoffs_with_original(ko.ko.X, ko.ko.X̃)
-#     # cross validate for λ, then refit Lasso with best λ
-#     knockoff_cv = glmnetcv(merged_ko.XX̃, ytmp, d; kwargs...)
-#     λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-#     best_fit = glmnet(merged_ko.XX̃, y, lambda=[λbest])
-#     βestim = vec(best_fit.betas) |> Vector{T}
-#     a0 = best_fit.a0[1]
-#     # compute feature importance statistics and allocate necessary knockoff-filter variables
-#     βs, a0s = Vector{T}[], T[]
-#     for fdr in fdrs
-#         if ko.nrep == 1 # single reprensetative from each group: apply standard knockoff filter
-#             β_filtered = extract_beta(βestim, fdr, merged_ko.original, merged_ko.knockoff, filter_method)
-#         else # multiple reprensetative from each group: apply group knockoff filter
-#             groups_full = repeat(ko.groups[ko.group_reps], inner=m+1)
-#             β_filtered = extract_beta(βestim, fdr, groups_full, merged_ko.original, merged_ko.knockoff, filter_method)
-#         end
-#         # debias the estimates if requested
-#         if !isnothing(debias) && count(!iszero, β_filtered) > 0
-#             a0 = debias!(β_filtered, ko.ko.X, y; method=debias, d=d, kwargs...)
-#         end
-#         # save beta and intercept
-#         β_filtered_full = zeros(T, p)
-#         β_filtered_full[ko.group_reps] .= β_filtered
-#         push!(βs, β_filtered_full)
-#         push!(a0s, a0)
-#     end
-#     return KnockoffFilter(y, ko.X, ko, merged_ko, m, βs, a0s, fdrs, d, debias)
-# end
+function fit_marginal(
+    y::AbstractVector{T},
+    ko::Knockoff;
+    d::Distribution=Normal(),
+    fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
+    filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
+    ) where T <: AbstractFloat
+    X = ko.X
+    X̃ = ko.X̃
+    m = ko.m
+    n, p = size(X)
+    # compute -log10(p-value) for each variable
+    X_pvals, X̃_pvals = zeros(p), zeros(m*p)
+    data = ones(n, 2)
+    for j in 1:p
+        data[:, 2] .= @view(X[:, j])
+        result = glm(data, y, d, canonicallink(d))
+        X_pvals[j] = -log10(coeftable(result).cols[4][2])
+    end
+    for j in 1:m*p
+        data[:, 2] .= @view(X̃[:, j])
+        result = glm(data, y, d, canonicallink(d))
+        X̃_pvals[j] = -log10(coeftable(result).cols[4][2])
+    end
+    # knockoff filter
+    original = collect(1:p)
+    knockoff = [collect((k-1)*m+1+p:p+k*m) for k in 1:p]
+    selected = Vector{Int}[]
+    for fdr in fdrs
+        push!(selected, select_features([X_pvals; X̃_pvals], original, knockoff, 
+            fdr; filter_method=filter_method))
+    end
+    return MarginalKnockoffFilter(y, X, ko, m, selected, fdrs, d)
+end
 
 function debias!(
     β̂::AbstractVector{T},
