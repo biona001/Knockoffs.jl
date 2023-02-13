@@ -889,7 +889,6 @@ function solve_group_MVR_ccd(
             #
             # optimize off-diagonal entries
             #
-            obj = group_mvr_obj(L, C, m)
             for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
                 i, j = idx2 + offset, idx1 + offset
                 fill!(ej, 0); fill!(ei, 0)
@@ -930,17 +929,12 @@ function solve_group_MVR_ccd(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
-                change_obj = opt.minimum
-                if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ)
-                    continue
-                end
-                obj += change_obj
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors
+                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
                 t1 += @elapsed δ = update_offdiag_chol_mvr!(
-                    L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!
+                    S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -1022,8 +1016,6 @@ function solve_group_max_entropy_ccd(
                 # update S
                 S[j, j] += δ
                 # rank 1 update to cholesky factors
-                fill!(x, 0); fill!(ỹ, 0)
-                x[j] = ỹ[j] = sqrt(abs(δ))
                 t1 += @elapsed δ = update_diag_chol_maxent!(
                     S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack
                 )
@@ -1082,12 +1074,12 @@ function solve_group_max_entropy_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = logdet(L) + m*logdet(C)
+            obj = group_maxent_obj(L, C, m)
             println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, T[], logdet(L) + m*logdet(C)
+    return S, T[], group_maxent_obj(L, C, m)
 end
 
 # objective function to minimize when optimizing off-diagonal entries in max entropy group knockoffs
@@ -1205,7 +1197,8 @@ function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholup
     return failed ? 0 : δj
 end
 
-function update_offdiag_chol_mvr!(L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!)
+function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_mvr_obj(L, C, m))
     # update cholesky factor L
     fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
     storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
@@ -1230,7 +1223,39 @@ function update_offdiag_chol_mvr!(L, C, storage, i, j, ei, ej, δ, choldowndate!
         cholupdate!(C, ei)
         cholupdate!(C, ej)
     end
-    return δ
+    !backtrack && return δ
+    # if objective didn't decrease, undo the update
+    new_obj = group_mvr_obj(L, C, m)
+    failed = new_obj > obj_old
+    if backtrack && failed
+        S[i, j] -= δ
+        S[j, i] -= δ
+        # undo cholesky update to L
+        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+        if δ > 0
+            choldowndate!(L, ej)
+            choldowndate!(L, ei)
+            cholupdate!(L, storage)
+        else 
+            cholupdate!(L, ej)
+            cholupdate!(L, ei)
+            choldowndate!(L, storage)
+        end
+        # update cholesky factor C
+        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
+        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+        if δ > 0
+            cholupdate!(C, ej)
+            cholupdate!(C, ei)
+            choldowndate!(C, storage)
+        else
+            choldowndate!(C, ej)
+            choldowndate!(C, ei)
+            cholupdate!(C, storage)
+        end
+    end
+    return failed ? zero(typeof(δ)) : δ
 end
 
 function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack = true)
