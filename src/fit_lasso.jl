@@ -143,7 +143,7 @@ function fit_marginal(
     end
     # knockoff filter
     original = collect(1:p)
-    knockoff = [collect((k-1)*m+1+p:p+k*m) for k in 1:p]
+    knockoff = [[mm*p + k for mm in 1:m] for k in 1:p] # knockoff[i] are indices of X̃_pvals that contain knockoffs for var i
     selected = Vector{Int}[]
     for fdr in fdrs
         sel = isnothing(groups) ? 
@@ -153,7 +153,7 @@ function fit_marginal(
             fdr; filter_method=filter_method)
         push!(selected, sel)
     end
-    return MarginalKnockoffFilter(y, X, ko, m, selected, fdrs, d)
+    return MarginalKnockoffFilter(y, X, ko, m, X_pvals, X̃_pvals, selected, fdrs, d)
 end
 
 function debias!(
