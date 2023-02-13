@@ -135,13 +135,23 @@ function fit_marginal(
         result = glm(data, y, d, canonicallink(d))
         X̃_pvals[j] = -log10(coeftable(result).cols[4][2])
     end
+    # check if groups exist (todo: do I really need groups_full defined)
+    groups = nothing
+    if hasproperty(ko, :groups)
+        groups = ko.groups # group membership of original variables
+        groups_full = repeat(groups, m+1)
+    end
     # knockoff filter
     original = collect(1:p)
     knockoff = [collect((k-1)*m+1+p:p+k*m) for k in 1:p]
     selected = Vector{Int}[]
     for fdr in fdrs
-        push!(selected, select_features([X_pvals; X̃_pvals], original, knockoff, 
-            fdr; filter_method=filter_method))
+        sel = isnothing(groups) ? 
+            select_features([X_pvals; X̃_pvals], original, knockoff, fdr; 
+            filter_method=filter_method) :
+            select_features([X_pvals; X̃_pvals], original, knockoff, groups_full,
+            fdr; filter_method=filter_method)
+        push!(selected, sel)
     end
     return MarginalKnockoffFilter(y, X, ko, m, selected, fdrs, d)
 end

@@ -229,6 +229,7 @@ function solve_s_group(
     if max_group_size > 50 && method != :equi
         @warn "Maximum group size is $max_group_size, optimization may be slow. " * 
             "Consider running `modelX_gaussian_rep_group_knockoffs` to speed up convergence."
+        flush(stdout)
     end
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
