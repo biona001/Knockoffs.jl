@@ -840,7 +840,8 @@ function solve_group_MVR_ccd(
     S += λmin*I
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    verbose && println("initial obj = ", group_mvr_obj(L, C, m))
+    M = LowerTriangular(copy(S)) # used as storage for evaluating objective
+    verbose && println("initial obj = ", group_mvr_obj!(M, L, C, m))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -881,7 +882,7 @@ function solve_group_MVR_ccd(
                 S[j, j] += δj
                 # rank 1 update to cholesky factor
                 t1 += @elapsed δj = update_diag_chol_mvr!(
-                    S, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack
+                    S, M, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack
                 )
                 # update convergence tol
                 abs(δj) > max_delta && (max_delta = abs(δj))
@@ -934,7 +935,7 @@ function solve_group_MVR_ccd(
                 S[j, i] += δ
                 # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
                 t1 += @elapsed δ = update_offdiag_chol_mvr!(
-                    S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
+                    S, M, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -942,12 +943,12 @@ function solve_group_MVR_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = group_mvr_obj(L, C, m)
+            obj = group_mvr_obj!(M, L, C, m)
             println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, Float64[], group_mvr_obj(L, C, m)
+    return S, T[], group_mvr_obj!(M, L, C, m)
 end
 
 function solve_group_max_entropy_ccd(
@@ -1098,9 +1099,14 @@ function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij
     return numer1 / denom1 + numer2 / denom2
 end
 
-# todo: can this be more efficient?
-function group_mvr_obj(L::Cholesky, C::Cholesky, m::Int)
-    return m^2*tr(inv(C.L * C.U)) + tr(inv(L.L * L.U))
+function group_mvr_obj!(M::LowerTriangular{T}, L::Cholesky, C::Cholesky, m::Int) where T
+    copyto!(M, I)
+    ldiv!(C.L, M)
+    obj = m^2 * sum(abs2, M)
+    copyto!(M, I)
+    ldiv!(L.L, M)
+    obj += sum(abs2, M)
+    return obj
 end
 
 function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
@@ -1165,8 +1171,8 @@ function update_offdiag_chol_sdp!(S, Σ, L, C, storage, i, j, ei, ej, δ, choldo
     return δ
 end
 
-function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_mvr_obj(L, C, m))
+function update_diag_chol_mvr!(S, M, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_mvr_obj!(M, L, C, m))
     fill!(ei, 0)
     fill!(ej, 0)
     ej[j] = ei[j] = sqrt(abs(δj))
@@ -1179,7 +1185,7 @@ function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholup
     end
     !backtrack && return δj
     # if objective didn't decrease, undo the update
-    new_obj = group_mvr_obj(L, C, m)
+    new_obj = group_mvr_obj!(M, L, C, m)
     failed = new_obj > obj_old
     if backtrack && failed
         S[j, j] -= δj
@@ -1197,8 +1203,8 @@ function update_diag_chol_mvr!(S, L, C, j, ei, ej, δj, m, choldowndate!, cholup
     return failed ? 0 : δj
 end
 
-function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_mvr_obj(L, C, m))
+function update_offdiag_chol_mvr!(S, M, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
+    backtrack && (obj_old = group_mvr_obj!(M, L, C, m))
     # update cholesky factor L
     fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
     storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
@@ -1225,7 +1231,7 @@ function update_offdiag_chol_mvr!(S, L, C, storage, i, j, ei, ej, δ, m, choldow
     end
     !backtrack && return δ
     # if objective didn't decrease, undo the update
-    new_obj = group_mvr_obj(L, C, m)
+    new_obj = group_mvr_obj!(M, L, C, m)
     failed = new_obj > obj_old
     if backtrack && failed
         S[i, j] -= δ
