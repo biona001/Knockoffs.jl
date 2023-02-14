@@ -726,6 +726,7 @@ function solve_group_SDP_ccd(
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S += λmin*I
+    S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     verbose && println("initial obj = ", group_block_objective(Σ, S, m, :sdp))
@@ -838,6 +839,7 @@ function solve_group_MVR_ccd(
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S += λmin*I
+    S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     M = LowerTriangular(copy(S)) # used as storage for evaluating objective
@@ -973,6 +975,7 @@ function solve_group_max_entropy_ccd(
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S += λmin*I
+    S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     verbose && println("initial obj = ", group_maxent_obj(L, C, m))
