@@ -596,7 +596,6 @@ function solve_group_block_update(
             elseif method == :mvr_block
                 S11_new, opt_success = solve_group_MVR_single_block(Σ11, ub, D21, D22inv, m)
             end
-            !opt_success && continue
             # check if objective improves
             obj_improves = false
             Stmp .= S
@@ -643,9 +642,9 @@ function group_block_objective(Σ, S, m, method)
             obj += abs(Σ[i, j] - S[i, j])
         end
     elseif occursin("maxent", string(method))
-        obj += logdet((m+1)/m*Σ - S) + m*logdet(S)
+        obj += logdet((m+1)/m*Σ - S + 1e-8I) + m*logdet(S + 1e-8I)
     elseif occursin("mvr", string(method))
-        obj += m^2*logdet(inv(S)) + tr(inv((m+1)/m*Σ - S))
+        obj += m^2*tr(inv(S + 1e-8I)) + tr(inv((m+1)/m*Σ - S + 1e-8I))
     else
         error("methods can only be :sdp_block, :maxent_block, or :mvr_block")
     end
