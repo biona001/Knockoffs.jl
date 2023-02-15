@@ -92,23 +92,30 @@ function fit_lasso(
         groups_full = repeat(groups, inner=m+1) # since X and X̃ is interleaved, each group length is repeated m times
     end
     # compute feature importance statistics and allocate necessary knockoff-filter variables
-    βs, a0s = Vector{T}[], T[]
+    βs, a0s, selected, Ws = Vector{T}[], T[], Vector{Int}[], Vector{T}[]
     for fdr in fdrs
         # apply knockoff-filter based on target fdr
-        β_filtered = isnothing(groups) ? 
-            extract_beta(βestim, fdr, merged_ko.original, merged_ko.knockoff, filter_method) : 
-            extract_beta(βestim, fdr, groups_full, merged_ko.original, merged_ko.knockoff, filter_method)
+        β_filtered, W = isnothing(groups) ? 
+            extract_beta(βestim, fdr, merged_ko.original, 
+            merged_ko.knockoff, filter_method) : 
+            extract_beta(βestim, fdr, groups_full, 
+            merged_ko.original, merged_ko.knockoff, filter_method)
         # debias the estimates if requested
         if !isnothing(debias) && count(!iszero, β_filtered) > 0
             a0 = isnothing(groups) ? 
                 debias!(β_filtered, X, y; method=debias, d=d, kwargs...) : 
-                debias!(β_filtered, X, y, groups; method=debias, d=d, stringent=stringent, kwargs...)
+                debias!(β_filtered, X, y, groups; method=debias, d=d, 
+                stringent=stringent, kwargs...)
         end
         # save beta and intercept
         push!(βs, β_filtered)
         push!(a0s, a0)
+        sel_idx = findall(!iszero, β_filtered)
+        push!(selected, isnothing(groups) ? sel_idx : unique(groups[sel_idx]))
+        push!(Ws, W)
     end
-    return LassoKnockoffFilter(y, X, ko, merged_ko, m, βs, a0s, fdrs, d, debias)
+    return LassoKnockoffFilter(
+        y, X, ko, merged_ko, m, βs, a0s, selected, Ws, fdrs, d, debias)
 end
 
 function fit_marginal(
@@ -128,12 +135,12 @@ function fit_marginal(
     for j in 1:p
         data[:, 2] .= @view(X[:, j])
         result = glm(data, y, d, canonicallink(d))
-        X_pvals[j] = -log10(coeftable(result).cols[4][2])
+        X_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
     end
     for j in 1:m*p
         data[:, 2] .= @view(X̃[:, j])
         result = glm(data, y, d, canonicallink(d))
-        X̃_pvals[j] = -log10(coeftable(result).cols[4][2])
+        X̃_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
     end
     # check if groups exist (todo: do I really need groups_full defined)
     groups = nothing
@@ -145,15 +152,17 @@ function fit_marginal(
     original = collect(1:p)
     knockoff = [[mm*p + k for mm in 1:m] for k in 1:p] # knockoff[i] are indices of X̃_pvals that contain knockoffs for var i
     selected = Vector{Int}[]
+    Ws = Vector{T}[]
     for fdr in fdrs
-        sel = isnothing(groups) ? 
+        W, sel = isnothing(groups) ? 
             select_features([X_pvals; X̃_pvals], original, knockoff, fdr; 
             filter_method=filter_method) :
             select_features([X_pvals; X̃_pvals], original, knockoff, groups_full,
             fdr; filter_method=filter_method)
         push!(selected, sel)
+        push!(Ws, W)
     end
-    return MarginalKnockoffFilter(y, X, ko, m, X_pvals, X̃_pvals, selected, fdrs, d)
+    return MarginalKnockoffFilter(y, X, ko, Ws, m, selected, fdrs, d)
 end
 
 function debias!(
