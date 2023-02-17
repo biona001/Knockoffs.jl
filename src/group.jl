@@ -1,4 +1,36 @@
 """
+    group_block_objective(Σ, S, m, method)
+
+Evaluate the objective for SDP/MVR/ME. This is not an efficient function, so it
+should only be called at the start and end of each algorithm. 
+
+# Inputs
++ `Σ`: Covariance or correlation matrix for original data
++ `S`: Optimization variable (group-block-diagonal)
++ `m`: Number of knockoffs to generate for each variable
++ `method`: The optimization method for group knockoffs
+"""
+function group_block_objective(Σ::AbstractMatrix{T}, S::AbstractMatrix{T}, 
+    m::Int, method) where T
+    size(Σ) == size(S) || error("expected size(Σ) == size(S)")
+    obj = zero(eltype(Σ))
+    if occursin("sdp", string(method)) || occursin("equi", string(method))
+        @inbounds for j in axes(Σ, 2)
+            @simd for i in axes(Σ, 1)
+                obj += abs(Σ[i, j] - S[i, j])
+            end
+        end
+    elseif occursin("maxent", string(method))
+        obj += logdet((m+1)/m*Σ - S + 1e-8I) + m*logdet(S + 1e-8I)
+    elseif occursin("mvr", string(method))
+        obj += m^2*tr(inv(S + 1e-8I)) + tr(inv((m+1)/m*Σ - S + 1e-8I))
+    else
+        error("unrecognized method: method should be one of $GROUP_KNOCKOFFS")
+    end
+    return obj
+end
+
+"""
     modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ; [m], [nrep], [covariance_approximator])
     modelX_gaussian_group_knockoffs(X, method, groups; [m], [nrep], [covariance_approximator])
 
@@ -20,7 +52,7 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
     * `:sdp`: Fully general SDP group knockoffs based on coodinate descent
     * `:sdp_block`: Fully general SDP group knockoffs where each block is solved exactly 
-    using an interior point solver. 
+        using an interior point solver. 
     * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
         generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
 + `groups`: Vector of group membership
@@ -158,7 +190,7 @@ function modelX_gaussian_rep_group_knockoffs(
     # X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
     # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
 
-    # sample multiple knockoffs
+    # sample multiple knockoffs (todo: sample each independently)
     Σ11inv = inv(Σ11)
     Σ11inv_Σ12 = Σ11inv * Σ12
     S_Σ11inv_Σ12 = S * Σ11inv_Σ12 # r × (p-r)
@@ -284,10 +316,18 @@ function solve_s_group(
             S, γs, obj = solve_group_MVR_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent
             S, γs, obj = solve_group_max_entropy_ccd(Σcor, Sblocks; m=m, kwargs...)
-        elseif method == :maxent_subopt
-            S, γs, obj = solve_group_max_entropy_suboptimal(Σcor, Sblocks)
+        elseif method == :maxent_old
+            S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :mvr_old
+            S, γs, obj = solve_group_MVR_ccd_old(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :sdp_old
+            S, γs, obj = solve_group_SDP_ccd_old(Σcor, Sblocks; m=m, kwargs...)
+        # elseif method == :maxent_subopt
+        #     S, γs, obj = solve_group_max_entropy_suboptimal(Σcor, Sblocks)
         elseif method == :maxent_pca
-            S, γs, obj = solve_group_max_entropy_pca(Σcor, m, groups)
+            S, γs, obj = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :maxent_pca_zihuai
+            S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, groups)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -557,6 +597,7 @@ function solve_group_block_update(
     perm = collect(1:p)
     # initialize S/A/D matrices
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S ./= 2
     A = (m+1)/m * Σ
     D = A - S
     Stmp = copy(S)
@@ -633,24 +674,6 @@ function solve_group_block_update(
     return S, T[], obj
 end
 
-# this evaluate the objective for SDP/MVR/ME
-function group_block_objective(Σ, S, m, method)
-    size(Σ) == size(S) || error("expected size(Σ) == size(S)")
-    obj = zero(eltype(Σ))
-    if occursin("sdp", string(method))
-        for j in axes(Σ, 2), i in axes(Σ, 1)
-            obj += abs(Σ[i, j] - S[i, j])
-        end
-    elseif occursin("maxent", string(method))
-        obj += logdet((m+1)/m*Σ - S + 1e-8I) + m*logdet(S + 1e-8I)
-    elseif occursin("mvr", string(method))
-        obj += m^2*tr(inv(S + 1e-8I)) + tr(inv((m+1)/m*Σ - S + 1e-8I))
-    else
-        error("methods can only be :sdp_block, :maxent_block, or :mvr_block")
-    end
-    return obj
-end
-
 function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMatrix{T}) where T
     p = size(Σg, 1)
     size(Σg) == size(Sg) || error("group_sdp_objective_single_block: Expected size of Σg and Sg to be equal")
@@ -712,7 +735,7 @@ function solve_group_SDP_ccd(
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false,
-    backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
+    backtrack::Bool = true
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
@@ -734,8 +757,7 @@ function solve_group_SDP_ccd(
     t2 = zero(T) # time for forward/backward solving
     t3 = zero(T) # time for solving offdiag 1D optimization problems
     # preallocated vectors for efficiency
-    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
-    x, ỹ, storage = zeros(p), zeros(p), zeros(p)
+    u, v, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
     for l in 1:niter
         max_delta = zero(T)
         offset = 0
@@ -748,7 +770,7 @@ function solve_group_SDP_ccd(
                 # compute feasible region
                 fill!(ej, 0)
                 ej[j] = 1
-                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
+                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej)
                 t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
                 ub = 1 / sum(abs2, u) - λmin
                 lb = -1 / sum(abs2, v) + λmin
@@ -774,7 +796,7 @@ function solve_group_SDP_ccd(
                 ej[j], ei[i] = 1, 1
                 # compute aii, ajj, aij, bii, bjj, bij
                 t2 += @elapsed begin
-                    ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ei)
+                    ldiv!(u, UpperTriangular(L.factors)', ei)
                     ldiv!(v, UpperTriangular(L.factors)', ej)
                     aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
                     ldiv!(u, UpperTriangular(C.factors)', ei)
@@ -825,7 +847,7 @@ function solve_group_MVR_ccd(
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false,
-    backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
+    backtrack::Bool = true
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
@@ -841,52 +863,76 @@ function solve_group_MVR_ccd(
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    M = LowerTriangular(copy(S)) # used as storage for evaluating objective
-    verbose && println("initial obj = ", group_mvr_obj!(M, L, C, m))
+    obj = group_block_objective(Σ, S, m, :mvr)
+    verbose && println("initial obj = ", obj)
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
     t3 = zero(T) # time for solving offdiag 1D optimization problems
     # preallocated vectors for efficiency
-    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
-    vn, vd, storage = zeros(p), zeros(p), zeros(p)
+    u, v, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
     for l in 1:niter
         max_delta = zero(T)
         offset = 0
         for b in 1:blocks
             #
-            # optimize diagonal entries
+            # optimize diagonal entries. Note: cannot reuse code from ungrouped
+            # knockoff case because S is no longer diagonal, need new alg
             #
             for idx in 1:group_sizes[b]
                 j = idx + offset
                 fill!(ej, 0)
                 ej[j] = 1
-                # compute cn and cd as detailed in eq 72
-                t2 += @elapsed forward_backward!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
-                cn = -sum(abs2, vn)
-                # find vd as the solution to L*vd = ej
-                t2 += @elapsed ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
-                cd = sum(abs2, vd)
-                # solve quadratic optimality condition in eq 71
-                δj = solve_quadratic(cn, cd, S[j, j], m)
-                # ensure new S[j, j] is in feasible region
-                fill!(ej, 0)
-                ej[j] = 1
-                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
-                t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
-                ub = 1 / sum(abs2, u) - λmin
-                lb = -1 / sum(abs2, v) + λmin
+                # compute ajj, bjj, cjj, djj
+                t2 += @elapsed begin
+                    ldiv!(v, UpperTriangular(L.factors)', ej)
+                    ldiv!(u, UpperTriangular(C.factors)', ej)
+                    ajj, bjj = dot(v, v), dot(u, u)
+                    forward_backward!(v, C, ej, storage)
+                    forward_backward!(u, L, ej, storage)
+                    cjj, djj = dot(v, v), dot(u, u)
+                end
+                slope = -m^2*cjj/(1+bjj) + djj/(1-ajj)
+                # compute δ that is within feasible region
+                ub = 1 / ajj - λmin
+                lb = -1 / bjj + λmin
                 lb ≥ ub && continue
-                δj = clamp(δj, lb, ub)
-                abs(δj) < 1e-15 && continue
-                # update s
-                S[j, j] += δj
-                # rank 1 update to cholesky factor
-                t1 += @elapsed δj = update_diag_chol_mvr!(
-                    S, M, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack
+                δ = slope < 0 ? ub : lb
+                # update S if objective improves
+                change_obj = δ*slope
+                if backtrack && (change_obj > 0 || abs(δ) < 1e-15 || isnan(δ))
+                    continue
+                end
+                S[j, j] += δ
+                obj += change_obj
+
+                # new_obj = obj + change_obj
+                # @show δ
+                # @show obj
+                # @show change_obj
+                # @show new_obj
+                # true_obj = group_block_objective(Σ, S, m, :mvr)
+                # true_obj2 = group_mvr_obj(L, C, m)
+                # @show true_obj, true_obj2
+                # fdsa
+
+                # @show S
+
+                # new1 = m^2*tr(inv(S))
+                # new2 = tr(inv((m+1)/m*Σ - S))
+                # @show eigmin((m+1)/m*Σ - S)
+                # println("new1 = $new1, new2 = $new2")
+
+                # true_obj = group_block_objective(Σ, S, m, :mvr)
+                # println("($j,$j): true_obj = $true_obj, obj = $obj, change_obj = $change_obj, δ = $δ")
+                # fdsa
+
+                # rank 1 update to cholesky factors
+                t1 += @elapsed update_cholesky_diag!(
+                    L, C, j, δ, ej, u, choldowndate!, cholupdate!
                 )
                 # update convergence tol
-                abs(δj) > max_delta && (max_delta = abs(δj))
+                abs(δ) > max_delta && (max_delta = abs(δ))
             end
             #
             # optimize off-diagonal entries
@@ -897,14 +943,14 @@ function solve_group_MVR_ccd(
                 ej[j], ei[i] = 1, 1
                 # compute aii, ajj, aij, bii, bjj, bij
                 t2 += @elapsed begin
-                    ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ei)
+                    ldiv!(u, UpperTriangular(L.factors)', ei)
                     ldiv!(v, UpperTriangular(L.factors)', ej)
                     aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
                     ldiv!(u, UpperTriangular(C.factors)', ei)
                     ldiv!(v, UpperTriangular(C.factors)', ej)
                     bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
                     # compute cii, cjj, cij, dii, djj, dij
-                    forward_backward!(u, C, ei, storage) # solves C*C'*u = ei for u via forward-backward substitution
+                    forward_backward!(u, C, ei, storage)
                     forward_backward!(v, C, ej, storage)
                     cij, cii, cjj = dot(u, v), dot(u, u), dot(v, v)
                     forward_backward!(u, L, ei, storage)
@@ -931,12 +977,17 @@ function solve_group_MVR_ccd(
                     lb, ub, Brent(), show_trace=false, abs_tol=0.0001
                 )
                 δ = clamp(opt.minimizer, lb, ub)
+                change_obj = opt.minimum
+                if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ)
+                    continue
+                end
                 # update S
+                obj += change_obj
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
-                t1 += @elapsed δ = update_offdiag_chol_mvr!(
-                    S, M, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack
+                # update cholesky factors
+                t1 += @elapsed update_cholesky_offdiag!(
+                    L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -944,12 +995,30 @@ function solve_group_MVR_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = group_mvr_obj!(M, L, C, m)
+            # obj = group_mvr_obj!(L, C, m)
             println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, T[], group_mvr_obj!(M, L, C, m)
+    return S, T[], obj
+end
+
+# efficient and numerically stable way to evaluate max entropy objective 
+# logdet((m+1)/m*Σ-S) + m*logdet(S) where
+# C is cholesky factor of S and L is cholesky factor of (m+1)/m*Σ-S
+function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
+    return logdet(L) + m*logdet(C)
+end
+
+function group_mvr_obj(L::Cholesky, C::Cholesky, m::Int, 
+    storage::LowerTriangular{T}=LowerTriangular(zeros(size(L)))) where T
+    copyto!(storage, I)
+    ldiv!(C.L, storage)
+    obj = m^2 * sum(abs2, storage)
+    copyto!(storage, I)
+    ldiv!(L.L, storage)
+    obj += sum(abs2, storage)
+    return obj
 end
 
 function solve_group_max_entropy_ccd(
@@ -974,68 +1043,66 @@ function solve_group_max_entropy_ccd(
     # initialize S matrix and compute initial cholesky factor
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S += λmin*I
-    S ./= 2
+    # S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    verbose && println("initial obj = ", group_maxent_obj(L, C, m))
+    obj = group_maxent_obj(L, C, m)
+    verbose && println("initial obj = ", obj)
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
     t3 = zero(T) # time for solving offdiag 1D optimization problems
     # preallocated vectors for efficiency
-    x, ỹ = zeros(p), zeros(p)
     u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
     for l in 1:niter
         max_delta = zero(T)
         offset = 0
         for b in 1:blocks
             #
-            # optimize diagonal entries
+            # optimize diagonal entries. Note: cannot reuse code from ungrouped
+            # knockoff case because S is no longer diagonal, need new alg
             #
             for idx in 1:group_sizes[b]
                 j = idx + offset
-                @simd for i in 1:p
-                    ỹ[i] = (m+1)/m * Σ[i, j]
-                end
-                ỹ[j] = 0
-                # compute x as the solution to L*x = ỹ
-                t2 += @elapsed ldiv!(x, UpperTriangular(L.factors)', ỹ) # non-allocating version of ldiv!(x, L.L, ỹ)
-                x_l2sum = sum(abs2, x)
-                # compute zeta and c as in alg 2.2 of askari et al
-                ζ = (m+1)/m * Σ[j, j] - S[j, j]
-                c = (ζ * x_l2sum) / (ζ + x_l2sum)
-                # solve optimality condition in eq 75 of spector et al 2020
-                sj_new = ((m+1)/m * Σ[j, j] - c) / 2
-                # ensure new S[j, j] is in feasible region
+                # compute new S[j, j]
                 fill!(ej, 0)
                 ej[j] = 1
-                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(u, L.L, ej)
+                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej)
                 t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
-                ub = 1 / sum(abs2, u) - λmin
-                lb = -1 / sum(abs2, v) + λmin
+                ajj, bjj = dot(u, u), dot(v, v)
+                sj_new = (m*bjj-ajj) / ((m+1)*ajj*bjj)
+                # ensure feasibility
+                ub = 1 / ajj - λmin
+                lb = -1 / bjj + λmin
                 lb ≥ ub && continue
                 δ = clamp(sj_new - S[j, j], lb, ub)
-                abs(δ) < 1e-15 && continue
-                # update S
+                # update S if objective improves
+                change_obj = log(1 - δ*ajj) + m*log(1 + δ*bjj)
+                if backtrack && (change_obj < 0 || abs(δ) < 1e-15 || isnan(δ))
+                    continue
+                end
                 S[j, j] += δ
+                obj += change_obj
                 # rank 1 update to cholesky factors
-                t1 += @elapsed δ = update_diag_chol_maxent!(
-                    S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack
+                t1 += @elapsed update_cholesky_diag!(
+                    L, C, j, δ, ej, u, choldowndate!, cholupdate!
                 )
+                # true_obj = group_maxent_obj(L, C, m)
+                # println("($j,$j): true_obj = $true_obj, obj = $obj, change_obj = $change_obj, δ = $δ")
+                # fdsa
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
             end
             #
             # optimize off-diagonal entries
             #
-            obj = group_maxent_obj(L, C, m)
             for idx1 in 1:group_sizes[b], idx2 in idx1+1:group_sizes[b]
                 i, j = idx2 + offset, idx1 + offset
                 fill!(ej, 0); fill!(ei, 0)
                 ej[j], ei[i] = 1, 1
                 # compute aii, ajj, aij, bii, bjj, bij
                 t2 += @elapsed begin
-                    ldiv!(u, UpperTriangular(L.factors)', ei) # non-allocating version of ldiv!(u, L.L, ei)
+                    ldiv!(u, UpperTriangular(L.factors)', ei)
                     ldiv!(v, UpperTriangular(L.factors)', ej)
                     aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
                     ldiv!(u, UpperTriangular(C.factors)', ei)
@@ -1068,8 +1135,8 @@ function solve_group_max_entropy_ccd(
                 S[i, j] += δ
                 S[j, i] += δ
                 # update cholesky factors
-                t1 += @elapsed δ = update_offdiag_chol_maxent!(
-                    L, C, x, i, j, ei, ej, δ, choldowndate!, cholupdate!
+                t1 += @elapsed update_cholesky_offdiag!(
+                    L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -1077,8 +1144,10 @@ function solve_group_max_entropy_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = group_maxent_obj(L, C, m)
-            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+            # true_obj = group_maxent_obj(L, C, m)
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = " * 
+                "$(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
+                "t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
@@ -1092,7 +1161,6 @@ function offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj)
     in1 ≤ 0 || in2 ≤ 0 && return typemin(δ)
     return -log(in1) - m*log(in2)
 end
-
 function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij, dii, djj)
     denom1 = (1 + δ*bij)^2 - δ^2*bii*bjj
     denom2 = (1 - δ*aij)^2 - δ^2*aii*ajj
@@ -1101,266 +1169,47 @@ function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij
     return numer1 / denom1 + numer2 / denom2
 end
 
-function group_mvr_obj!(M::LowerTriangular{T}, L::Cholesky, C::Cholesky, m::Int) where T
-    copyto!(M, I)
-    ldiv!(C.L, M)
-    obj = m^2 * sum(abs2, M)
-    copyto!(M, I)
-    ldiv!(L.L, M)
-    obj += sum(abs2, M)
-    return obj
-end
-
-function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
-    return logdet(L) + m*logdet(C)
-end
-
-function update_diag_chol_sdp!(S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholupdate!, backtrack = true)
-    obj_old = abs(Σ[j, j] - S[j, j])
-    new_obj = abs(Σ[j, j] - S[j, j] - δj)
-    if backtrack && new_obj > obj_old
-        # undo the update if objective got worse
-        S[j, j] -= δj
-        return zero(typeof(δj))
-    end
-    # update cholesky factors
-    fill!(ei, 0)
-    fill!(ej, 0)
-    ej[j] = ei[j] = sqrt(abs(δj))
-    if δj > 0
-        choldowndate!(L, ej)
-        cholupdate!(C, ei)
-    else
-        cholupdate!(L, ej)
-        choldowndate!(C, ei)
-    end
-    return δj
-end
-
-function update_offdiag_chol_sdp!(S, Σ, L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!, backtrack = true)
-    obj_old = abs(Σ[i, j] - S[i, j])
-    new_obj = abs(Σ[i, j] - S[i, j] - δ)
-    if backtrack && new_obj > obj_old
-        # undo the update if objective got worse
-        S[i, j] -= δ
-        S[j, i] -= δ
-        return zero(typeof(δj))
-    end
-    # update cholesky factor L
-    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+function update_cholesky_diag!(L, C, j, δ, store1, store2, 
+    choldowndate!, cholupdate!)
+    fill!(store1, 0); fill!(store2, 0)
+    store1[j] = store2[j] = sqrt(abs(δ))
     if δ > 0
-        choldowndate!(L, storage)
-        cholupdate!(L, ei)
-        cholupdate!(L, ej)
+        choldowndate!(L, store1)
+        cholupdate!(C, store2)
+    else
+        cholupdate!(L, store1)
+        choldowndate!(C, store2)
+    end
+    return nothing
+end
+
+function update_cholesky_offdiag!(
+    L, C, i, j, δ, store1, store2, store3, choldowndate!, cholupdate!)
+    # update cholesky factor L
+    fill!(store1, 0); fill!(store2, 0); fill!(store3, 0)
+    store1[j] = store1[i] = store2[i] = store3[j] = sqrt(abs(δ))
+    if δ > 0
+        choldowndate!(L, store1)
+        cholupdate!(L, store2)
+        cholupdate!(L, store3)
     else 
-        cholupdate!(L, storage)
-        choldowndate!(L, ei)
-        choldowndate!(L, ej)
+        cholupdate!(L, store1)
+        choldowndate!(L, store2)
+        choldowndate!(L, store3)
     end
     # update cholesky factor C
-    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
+    fill!(store1, 0); fill!(store2, 0); fill!(store3, 0)
+    store1[j] = store1[i] = store2[i] = store3[j] = sqrt(abs(δ))
     if δ > 0
-        cholupdate!(C, storage)
-        choldowndate!(C, ei)
-        choldowndate!(C, ej)
+        cholupdate!(C, store1)
+        choldowndate!(C, store2)
+        choldowndate!(C, store3)
     else
-        choldowndate!(C, storage)
-        cholupdate!(C, ei)
-        cholupdate!(C, ej)
+        choldowndate!(C, store1)
+        cholupdate!(C, store2)
+        cholupdate!(C, store3)
     end
-    return δ
-end
-
-function update_diag_chol_mvr!(S, M, L, C, j, ei, ej, δj, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_mvr_obj!(M, L, C, m))
-    fill!(ei, 0)
-    fill!(ej, 0)
-    ej[j] = ei[j] = sqrt(abs(δj))
-    if δj > 0
-        choldowndate!(L, ej)
-        cholupdate!(C, ei)
-    else
-        cholupdate!(L, ej)
-        choldowndate!(C, ei)
-    end
-    !backtrack && return δj
-    # if objective didn't decrease, undo the update
-    new_obj = group_mvr_obj!(M, L, C, m)
-    failed = new_obj > obj_old
-    if backtrack && failed
-        S[j, j] -= δj
-        fill!(ei, 0)
-        fill!(ej, 0)
-        ej[j] = ei[j] = sqrt(abs(δj))
-        if δj > 0
-            cholupdate!(L, ej)
-            choldowndate!(C, ei)
-        else
-            choldowndate!(L, ej)
-            cholupdate!(C, ei)
-        end
-    end
-    return failed ? 0 : δj
-end
-
-function update_offdiag_chol_mvr!(S, M, L, C, storage, i, j, ei, ej, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_mvr_obj!(M, L, C, m))
-    # update cholesky factor L
-    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-    if δ > 0
-        choldowndate!(L, storage)
-        cholupdate!(L, ei)
-        cholupdate!(L, ej)
-    else 
-        cholupdate!(L, storage)
-        choldowndate!(L, ei)
-        choldowndate!(L, ej)
-    end
-    # update cholesky factor C
-    fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-    storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-    if δ > 0
-        cholupdate!(C, storage)
-        choldowndate!(C, ei)
-        choldowndate!(C, ej)
-    else
-        choldowndate!(C, storage)
-        cholupdate!(C, ei)
-        cholupdate!(C, ej)
-    end
-    !backtrack && return δ
-    # if objective didn't decrease, undo the update
-    new_obj = group_mvr_obj!(M, L, C, m)
-    failed = new_obj > obj_old
-    if backtrack && failed
-        S[i, j] -= δ
-        S[j, i] -= δ
-        # undo cholesky update to L
-        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ > 0
-            choldowndate!(L, ej)
-            choldowndate!(L, ei)
-            cholupdate!(L, storage)
-        else 
-            cholupdate!(L, ej)
-            cholupdate!(L, ei)
-            choldowndate!(L, storage)
-        end
-        # update cholesky factor C
-        fill!(storage, 0); fill!(ei, 0); fill!(ej, 0)
-        storage[j] = storage[i] = ei[i] = ej[j] = sqrt(abs(δ))
-        if δ > 0
-            cholupdate!(C, ej)
-            cholupdate!(C, ei)
-            choldowndate!(C, storage)
-        else
-            choldowndate!(C, ej)
-            choldowndate!(C, ei)
-            cholupdate!(C, storage)
-        end
-    end
-    return failed ? zero(typeof(δ)) : δ
-end
-
-function update_diag_chol_maxent!(S, L, C, x, j, ỹ, δ, m, choldowndate!, cholupdate!, backtrack = true)
-    backtrack && (obj_old = group_maxent_obj(L, C, m))
-    fill!(x, 0); fill!(ỹ, 0)
-    x[j] = ỹ[j] = sqrt(abs(δ))
-    if δ > 0
-        choldowndate!(L, x)
-        cholupdate!(C, ỹ)
-    else
-        cholupdate!(L, x)
-        choldowndate!(C, ỹ)
-    end
-    !backtrack && return δ
-    # if objective didn't increase, undo the update
-    new_obj = group_maxent_obj(L, C, m)
-    failed = new_obj < obj_old
-    if backtrack && failed
-        S[j, j] -= δ
-        fill!(x, 0); fill!(ỹ, 0)
-        x[j] = ỹ[j] = sqrt(abs(δ))
-        if δ > 0
-            cholupdate!(L, x)
-            choldowndate!(C, ỹ)
-        else
-            choldowndate!(L, x)
-            cholupdate!(C, ỹ)
-        end
-    end
-    return failed ? 0 : δ
-end
-
-function update_offdiag_chol_maxent!(L, C, x, i, j, ei, ej, δ, choldowndate!, cholupdate!)
-    # update cholesky factor L
-    fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-    x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-    if δ > 0
-        choldowndate!(L, x)
-        cholupdate!(L, ei)
-        cholupdate!(L, ej)
-    else 
-        cholupdate!(L, x)
-        choldowndate!(L, ei)
-        choldowndate!(L, ej)
-    end
-    # update cholesky factor C
-    fill!(x, 0); fill!(ei, 0); fill!(ej, 0)
-    x[j] = x[i] = ei[i] = ej[j] = sqrt(abs(δ))
-    if δ > 0
-        cholupdate!(C, x)
-        choldowndate!(C, ei)
-        choldowndate!(C, ej)
-    else
-        choldowndate!(C, x)
-        cholupdate!(C, ei)
-        cholupdate!(C, ej)
-    end
-    return δ
-end
-
-# SDP construction for ME by choosing S_g = γ_g * Σ_{g,g}
-# todo: multiple knockoffs, check objective value is correct
-function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockDiagonal)
-    p = size(Σ, 1)
-    G = length(Σblocks.blocks)
-    group_sizes = size.(Σblocks.blocks, 1)
-    # calculate Db = bdiag(Σ_{11}^{-1/2}, ..., Σ_{GG}^{-1/2})
-    Db = Matrix{eltype(Σ)}[]
-    for Σbi in Σblocks.blocks
-        push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
-    end
-    Db = BlockDiagonal(Db)
-    λ = Symmetric(2Db * Σ * Db) |> eigvals
-    reverse!(λ)
-    # solve non-linear objective using Ipopt
-    model = Model(() -> Ipopt.Optimizer())
-    set_optimizer_attribute(model, "print_level", 0)
-    variant_to_group = zeros(Int, p)
-    offset = 1
-    for (idx, g) in enumerate(group_sizes)
-        variant_to_group[offset:offset+g-1] .= idx
-        offset += g
-    end
-    @variable(model, 0 <= γ[1:G] <= minimum(λ)) # todo: should this be γ[g] ≤ the corresponding λ?
-    @NLobjective(model, Max, 
-        sum(group_sizes[g] * log(γ[g]) for g in 1:G) + 
-        sum(log(λ[i] - γ[variant_to_group[i]]) for i in 1:p)
-    )
-    JuMP.optimize!(model)
-    success = check_model_solution(model)
-    if !success
-        @warn "Optimization unsuccessful, solution may be inaccurate"
-    end
-    # convert solution to vector and return resulting block diagonal matrix
-    γs = convert(Vector{Float64}, clamp!(JuMP.value.(γ), 0, 1))
-    S = BlockDiagonal(γs[1] .* Σblocks.blocks)
-    return S, γs, objective_value(model)
+    return nothing
 end
 
 """

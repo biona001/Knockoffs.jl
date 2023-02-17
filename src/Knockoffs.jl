@@ -77,7 +77,8 @@ export
     hc_partition_groups, 
     id_partition_groups,
     normalize_col, 
-    normalize_col!
+    normalize_col!,
+    group_block_objective
 
 include("struct.jl")
 include("fixed.jl")
@@ -96,6 +97,7 @@ include("predict.jl")
 include("group.jl")
 include("ipad.jl")
 include("R.jl")
+include("ccd_old.jl")
 
 const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
 const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_ccd, :sdp_full, :mvr, :maxent, :maxent_subopt]
