@@ -258,7 +258,7 @@ function solve_s_group(
     length(groups) == size(Σ, 1) || 
         error("Length of groups should be equal to dimension of Σ")
     max_group_size = countmap(groups) |> values |> collect |> maximum
-    if max_group_size > 50 && method != :equi
+    if max_group_size > 50 && method != :equi && !occursin("pca", string(method))
         @warn "Maximum group size is $max_group_size, optimization may be slow. " * 
             "Consider running `modelX_gaussian_rep_group_knockoffs` to speed up convergence."
         flush(stdout)
@@ -928,7 +928,7 @@ function solve_group_MVR_ccd(
                 # fdsa
 
                 # rank 1 update to cholesky factors
-                t1 += @elapsed update_cholesky_diag!(
+                t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δ, ej, u, choldowndate!, cholupdate!
                 )
                 # update convergence tol
@@ -986,7 +986,7 @@ function solve_group_MVR_ccd(
                 S[i, j] += δ
                 S[j, i] += δ
                 # update cholesky factors
-                t1 += @elapsed update_cholesky_offdiag!(
+                t1 += @elapsed rank2_cholesky_update!(
                     L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
@@ -1084,7 +1084,7 @@ function solve_group_max_entropy_ccd(
                 S[j, j] += δ
                 obj += change_obj
                 # rank 1 update to cholesky factors
-                t1 += @elapsed update_cholesky_diag!(
+                t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δ, ej, u, choldowndate!, cholupdate!
                 )
                 # true_obj = group_maxent_obj(L, C, m)
@@ -1135,7 +1135,7 @@ function solve_group_max_entropy_ccd(
                 S[i, j] += δ
                 S[j, i] += δ
                 # update cholesky factors
-                t1 += @elapsed update_cholesky_offdiag!(
+                t1 += @elapsed rank2_cholesky_update!(
                     L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
@@ -1169,7 +1169,7 @@ function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij
     return numer1 / denom1 + numer2 / denom2
 end
 
-function update_cholesky_diag!(L, C, j, δ, store1, store2, 
+function rank1_cholesky_update!(L, C, j, δ, store1, store2, 
     choldowndate!, cholupdate!)
     fill!(store1, 0); fill!(store2, 0)
     store1[j] = store2[j] = sqrt(abs(δ))
@@ -1183,7 +1183,7 @@ function update_cholesky_diag!(L, C, j, δ, store1, store2,
     return nothing
 end
 
-function update_cholesky_offdiag!(
+function rank2_cholesky_update!(
     L, C, i, j, δ, store1, store2, store3, choldowndate!, cholupdate!)
     # update cholesky factor L
     fill!(store1, 0); fill!(store2, 0); fill!(store3, 0)
@@ -1210,6 +1210,80 @@ function update_cholesky_offdiag!(
         cholupdate!(C, store3)
     end
     return nothing
+end
+
+function solve_group_max_entropy_pca(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # compute eigenfactorization for Σ blocks
+    evals, evecs = eigen(Sblocks)
+    # initialize S matrix and compute initial matrices
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += λmin*I
+    S ./= 2
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    C = cholesky(Symmetric(S))
+    # intial objective
+    obj = group_maxent_obj(L, C, m)
+    verbose && println("initial obj = $obj")
+    # some timers
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    # preallocated vectors for efficiency
+    u, w = zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        for v in eachcol(evecs)
+            # get necessary constants
+            t2 += @elapsed begin
+                ldiv!(w, UpperTriangular(L.factors)', v)
+                ldiv!(u, UpperTriangular(C.factors)', v)
+                vt_Sinv_v = dot(u, u)
+                vt_Dinv_v = dot(w, w)
+            end
+            # compute δ ∈ [lb, ub]
+            δ = (m*vt_Sinv_v - vt_Dinv_v) / ((m+1)*vt_Sinv_v*vt_Dinv_v)
+            lb = -1 / vt_Sinv_v
+            ub = 1 / vt_Dinv_v
+            δ = clamp(δ, lb, ub)
+            # compute new objective
+            change_obj = log(1 - δ*vt_Dinv_v) + m*log(1 + δ*vt_Sinv_v)
+            if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ)
+                continue
+            end
+            # update S_new = S + δ*v*v'
+            t1 += @elapsed BLAS.ger!(δ, v, v, S)
+            obj += change_obj
+            # update cholesky factors (must use robust updates since v is dense)
+            u .= sqrt(abs(δ)) .* v
+            w .= sqrt(abs(δ)) .* v
+            t1 += @elapsed begin
+                if δ > 0
+                    LinearAlgebra.lowrankdowndate!(L, u)
+                    LinearAlgebra.lowrankupdate!(C, w)
+                else
+                    LinearAlgebra.lowrankupdate!(L, u)
+                    LinearAlgebra.lowrankdowndate!(C, w)
+                end
+            end
+            # track convergence
+            abs(δ) > max_delta && (max_delta = abs(δ))
+        end
+        if verbose
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = " * 
+                "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
+        end
+        # check convergence
+        max_delta < tol && break 
+    end
+    return S, T[], obj
 end
 
 """
