@@ -322,12 +322,8 @@ function solve_s_group(
             S, γs, obj = solve_group_MVR_ccd_old(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :sdp_old
             S, γs, obj = solve_group_SDP_ccd_old(Σcor, Sblocks; m=m, kwargs...)
-        # elseif method == :maxent_subopt
-        #     S, γs, obj = solve_group_max_entropy_suboptimal(Σcor, Sblocks)
         elseif method == :maxent_pca
             S, γs, obj = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
-        elseif method == :maxent_pca_zihuai
-            S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, groups)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end

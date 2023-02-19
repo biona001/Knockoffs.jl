@@ -28,7 +28,6 @@ using SCS
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
 using LowRankApprox: id
-using RCall
 
 @reexport using GLM
 
@@ -96,7 +95,6 @@ include("ghost.jl")
 include("predict.jl")
 include("group.jl")
 include("ipad.jl")
-include("R.jl")
 include("ccd_old.jl")
 
 const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
