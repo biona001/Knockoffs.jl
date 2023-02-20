@@ -454,7 +454,7 @@ function solve_group_SDP_subopt_correct(
     # return solution
     γs = JuMP.value.(γ)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = group_block_objective(Σ, S, m, method)
+    obj = group_block_objective(Σ, S, m, :sdp)
     return S, γs, obj
 end
 
@@ -600,10 +600,10 @@ function solve_group_block_update(
     perm = collect(1:p)
     # initialize S/A/D matrices
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += 1e-6I
     S ./= 2
     A = (m+1)/m * Σ
     D = A - S
-    Stmp = copy(S)
     # compute initial objective value
     obj = group_block_objective(Σ, S, m, method)
     verbose && println("Init obj = $obj")
@@ -638,20 +638,11 @@ function solve_group_block_update(
             elseif method == :maxent_block
                 S11_new, opt_success = solve_group_maxent_single_block(Σ11, ub, m)
             elseif method == :mvr_block
-                S11_new, opt_success = solve_group_MVR_single_block(Σ11, ub, D21, D22inv, m)
+                S11_new, opt_success = solve_group_MVR_single_block(
+                    Σ11, ub, D21, D22inv, m)
             end
-            # check if objective improves
-            obj_improves = false
-            Stmp .= S
-            Stmp[1:g, 1:g] .= S11_new
-            new_obj = group_block_objective(Σ, Stmp, m, method)
-            if method == :sdp_block || method == :mvr_block
-                new_obj < obj && (obj_improves = true; obj = new_obj)
-            else
-                new_obj > obj && (obj_improves = true; obj = new_obj)
-            end
-            # only update if optimization was successful and objective improves
-            if opt_success && obj_improves
+            # only update if optimization was successful
+            if opt_success
                 # find max difference between previous block S
                 for i in eachindex(S11_new)
                     if abs(S11_new[i] - S11[i]) > max_delta
@@ -671,7 +662,10 @@ function solve_group_block_update(
             sort!(perm)
             offset += g
         end
-        verbose && println("Iter $l δ = $max_delta, obj = $obj")
+        if verbose
+            obj = group_block_objective(Σ, S, m, method)
+            println("Iter $l: obj = $obj, δ = $max_delta")
+        end
         max_delta < tol && break 
     end
     return S, T[], obj
