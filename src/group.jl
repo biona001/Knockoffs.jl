@@ -21,9 +21,10 @@ function group_block_objective(Σ::AbstractMatrix{T}, S::AbstractMatrix{T},
             end
         end
     elseif occursin("maxent", string(method))
-        obj += logdet((m+1)/m*Σ - S + 1e-8I) + m*logdet(S + 1e-8I)
+        obj = logdet((m+1)/m*Σ - S + 1e-8I) + m*logdet(S + 1e-8I)
     elseif occursin("mvr", string(method))
-        obj += m^2*tr(inv(S + 1e-8I)) + tr(inv((m+1)/m*Σ - S + 1e-8I))
+        # obj += m^2*tr(inv(S + 1e-8I)) + tr(inv((m+1)/m*Σ - S + 1e-8I))
+        obj = m^2*tr(inv(S)) + tr(inv((m+1)/m*Σ - S))
     else
         error("unrecognized method: method should be one of $GROUP_KNOCKOFFS")
     end
@@ -324,6 +325,8 @@ function solve_s_group(
             S, γs, obj = solve_group_SDP_ccd_old(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_pca
             S, γs, obj = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :mvr_pca
+            S, γs, obj = solve_group_MVR_pca(Σcor, Sblocks; m=m, kwargs...)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -879,7 +882,7 @@ function solve_group_MVR_ccd(
                 j = idx + offset
                 fill!(ej, 0)
                 ej[j] = 1
-                # compute ajj, bjj, cjj, djj
+                # compute ajj, bjj, cjj, djj which defines the feasible region
                 t2 += @elapsed begin
                     ldiv!(v, UpperTriangular(L.factors)', ej)
                     ldiv!(u, UpperTriangular(C.factors)', ej)
@@ -888,41 +891,19 @@ function solve_group_MVR_ccd(
                     forward_backward!(u, L, ej, storage)
                     cjj, djj = dot(v, v), dot(u, u)
                 end
-                slope = -m^2*cjj/(1+bjj) + djj/(1-ajj)
                 # compute δ that is within feasible region
                 ub = 1 / ajj - λmin
                 lb = -1 / bjj + λmin
                 lb ≥ ub && continue
-                δ = slope < 0 ? ub : lb
+                x1, x2 = diag_mvr_obj_root(m, ajj, bjj, cjj, djj)
+                δ = lb < x1 < ub ? x1 : x2
                 # update S if objective improves
-                change_obj = δ*slope
+                change_obj = -m^2*δ*cjj/(1+δ*bjj) + δ*djj/(1-δ*ajj)
                 if backtrack && (change_obj > 0 || abs(δ) < 1e-15 || isnan(δ))
                     continue
                 end
                 S[j, j] += δ
                 obj += change_obj
-
-                # new_obj = obj + change_obj
-                # @show δ
-                # @show obj
-                # @show change_obj
-                # @show new_obj
-                # true_obj = group_block_objective(Σ, S, m, :mvr)
-                # true_obj2 = group_mvr_obj(L, C, m)
-                # @show true_obj, true_obj2
-                # fdsa
-
-                # @show S
-
-                # new1 = m^2*tr(inv(S))
-                # new2 = tr(inv((m+1)/m*Σ - S))
-                # @show eigmin((m+1)/m*Σ - S)
-                # println("new1 = $new1, new2 = $new2")
-
-                # true_obj = group_block_objective(Σ, S, m, :mvr)
-                # println("($j,$j): true_obj = $true_obj, obj = $obj, change_obj = $change_obj, δ = $δ")
-                # fdsa
-
                 # rank 1 update to cholesky factors
                 t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δ, ej, u, choldowndate!, cholupdate!
@@ -991,8 +972,11 @@ function solve_group_MVR_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            # obj = group_mvr_obj!(L, C, m)
-            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+            # obj_true = group_block_objective(Σ, S, m, :mvr)
+            # @show obj, obj_true
+            println("Iter $l: obj = $obj, δ = $max_delta, " * 
+                "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2))," * 
+                "t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
@@ -1150,7 +1134,8 @@ function solve_group_max_entropy_ccd(
     return S, T[], group_maxent_obj(L, C, m)
 end
 
-# objective function to minimize when optimizing off-diagonal entries in max entropy group knockoffs
+# objective function to minimize when optimizing diagonal or offdiagnal entries
+# in max entropy and MVR group knockoffs
 function offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj)
     in1 = (1 - δ*aij)^2 - δ^2*aii*ajj
     in2 = (1 + δ*bij)^2 - δ^2*bjj*bii
@@ -1163,6 +1148,14 @@ function offdiag_mvr_obj(δ, m, aij, aii, ajj, bij, bii, bjj, cij, cii, cjj, dij
     numer1 = -m^2 * δ * ((cij*bij - cjj*bii - cii*bjj + cij*bij)*δ + 2cij)
     numer2 = δ * ((-dij*aij + djj*aii + dii*ajj - dij*aij)*δ + 2dij)
     return numer1 / denom1 + numer2 / denom2
+end
+function diag_mvr_obj_root(m, ajj, bjj, cjj, djj)
+    a = (-ajj^2*m^2*cjj + bjj^2*djj)
+    b = 2ajj*m^2*cjj + 2bjj*djj
+    c = djj - m^2*cjj
+    x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
+    x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
+    return x1, x2
 end
 
 function rank1_cholesky_update!(L, C, j, δ, store1, store2, 
@@ -1260,6 +1253,92 @@ function solve_group_max_entropy_pca(
             # update cholesky factors (must use robust updates since v is dense)
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
+            t1 += @elapsed begin
+                if δ > 0
+                    LinearAlgebra.lowrankdowndate!(L, u)
+                    LinearAlgebra.lowrankupdate!(C, w)
+                else
+                    LinearAlgebra.lowrankupdate!(L, u)
+                    LinearAlgebra.lowrankdowndate!(C, w)
+                end
+            end
+            # track convergence
+            abs(δ) > max_delta && (max_delta = abs(δ))
+        end
+        if verbose
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = " * 
+                "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
+        end
+        # check convergence
+        max_delta < tol && break 
+    end
+    return S, T[], obj
+end
+
+function solve_group_MVR_pca(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # compute eigenfactorization for Σ blocks
+    evals, evecs = eigen(Sblocks)
+    # initialize S matrix and compute initial matrices
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += λmin*I
+    S ./= 2
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    C = cholesky(Symmetric(S))
+    # intial objective
+    obj = group_block_objective(Σ, S, m, :mvr)
+    verbose && println("initial obj = $obj")
+    # some timers
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    # preallocated vectors for efficiency
+    u, w, storage = zeros(p), zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        for v in eachcol(evecs)
+            # get necessary constants
+            t2 += @elapsed begin
+                ldiv!(w, UpperTriangular(L.factors)', v)
+                ldiv!(u, UpperTriangular(C.factors)', v)
+                vt_Sinv_v = dot(u, u)
+                vt_Dinv_v = dot(w, w)
+                forward_backward!(w, L, v, storage)
+                forward_backward!(u, C, v, storage)
+                vt_Dinv2_v = dot(w, w)
+                vt_Sinv2_v = dot(u, u)
+            end
+            # compute δ ∈ [lb, ub]
+            slope = (-m^2*vt_Sinv2_v/(1+vt_Sinv_v)) + vt_Dinv2_v/(1-vt_Dinv_v)
+            lb = -1 / vt_Sinv_v + λmin
+            ub = 1 / vt_Dinv_v - λmin
+
+
+            δ = slope > 0 ? lb : ub
+            # compute new objective
+            change_obj = δ * slope
+            if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ)
+                continue
+            end
+            # update S_new = S + δ*v*v'
+            t1 += @elapsed BLAS.ger!(δ, v, v, S)
+            obj += change_obj
+            # update cholesky factors (must use robust updates since v is dense)
+            u .= sqrt(abs(δ)) .* v
+            w .= sqrt(abs(δ)) .* v
+
+            # @show δ
+            # @show eigmin(S)
+            # @show eigmin((m+1)/m * Σ - S + 2λmin*I)
+            # @show change_obj
+
             t1 += @elapsed begin
                 if δ > 0
                     LinearAlgebra.lowrankdowndate!(L, u)

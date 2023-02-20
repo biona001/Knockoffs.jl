@@ -146,7 +146,7 @@ function solve_group_MVR_ccd_old(
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     num_var = sum(abs2, group_sizes)
-    verbose && println("solve_group_MVR_ccd: Optimizing $(num_var) variables")
+    verbose && println("solve_group_MVR_ccd_old: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
