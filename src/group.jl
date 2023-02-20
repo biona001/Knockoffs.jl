@@ -267,12 +267,13 @@ function solve_s_group(
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
-    Σcor = iscor ? Σ : Symmetric(cov2cor!(Σ.data, σs))
+    Σcor = Symmetric(cov2cor(Σ.data, σs))
     # if groups not contiguous, permute columns/rows of Σ so that they are contiguous
     perm = sortperm(groups)
+    group_permuted = copy(groups)
     permuted = false
     if !issorted(groups)
-        permute!(groups, perm)
+        permute!(group_permuted, perm)
         Σcor.data .= @view(Σcor.data[perm, perm])
         permuted = true
     end
@@ -292,7 +293,7 @@ function solve_s_group(
         # for other cases we initialize with equi solution
         blocks = Matrix{T}[]
         for g in unique_groups
-            idx = findall(x -> x == g, groups)
+            idx = findall(x -> x == g, group_permuted)
             push!(blocks, Σcor[idx, idx])
         end
         Sblocks = BlockDiagonal(blocks)
@@ -337,7 +338,6 @@ function solve_s_group(
     end
     # permuate S and Σ back to the original noncontiguous group structure
     if permuted
-        invpermute!(groups, perm)
         iperm = invperm(perm)
         S .= @view(S[iperm, iperm])
         Σcor.data .= @view(Σcor.data[iperm, iperm])
