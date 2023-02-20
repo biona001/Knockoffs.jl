@@ -325,8 +325,12 @@ function solve_s_group(
             S, γs, obj = solve_group_SDP_ccd_old(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_pca
             S, γs, obj = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :maxent_pca_zihuai
+            S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, groups)
         elseif method == :mvr_pca
             S, γs, obj = solve_group_MVR_pca(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :sdp_pca
+            S, γs, obj = solve_group_SDP_pca(Σcor, Sblocks; m=m, kwargs...)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -810,8 +814,8 @@ function solve_group_SDP_ccd(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # feasible region criteria due to computational reasons
-                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
-                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
+                lb = max(s1, d1, -2 / (bii + 2bij + bjj)) + λmin
+                ub = min(s2, d2, 2 / (aii + 2aij + ajj)) - λmin
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 δ = clamp(Σ[i, j] - S[i, j], lb, ub)
@@ -821,7 +825,7 @@ function solve_group_SDP_ccd(
                 S[j, i] += δ
                 # rank 2 update to cholesky factors
                 t1 += @elapsed rank2_cholesky_update!(
-                    L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
+                    L, C, i, j, δ, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -943,8 +947,8 @@ function solve_group_MVR_ccd(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # feasible region criteria due to computational reasons
-                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
-                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
+                lb = max(s1, d1, -2 / (bii + 2bij + bjj)) + λmin
+                ub = min(s2, d2, 2 / (aii + 2aij + ajj)) - λmin
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 t3 += @elapsed opt = optimize(
@@ -965,7 +969,7 @@ function solve_group_MVR_ccd(
                 S[j, i] += δ
                 # update cholesky factors
                 t1 += @elapsed rank2_cholesky_update!(
-                    L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
+                    L, C, i, j, δ, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -1022,9 +1026,11 @@ function solve_group_max_entropy_ccd(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
+    @info "Initializing CCD maxent with 5 iterations of PCA-CCD"
+    # S, _, _ = solve_group_max_entropy_pca(Σ, Sblocks, m=m, niter=5, verbose=true)
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S += λmin*I
-    # S ./= 2
+    S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     obj = group_maxent_obj(L, C, m)
@@ -1098,8 +1104,8 @@ function solve_group_max_entropy_ccd(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # feasible region criteria due to computational reasons
-                lb = max(s1, d1, -1 / (bii + 2bij + bjj)) + λmin
-                ub = min(s2, d2, 1 / (aii + 2aij + ajj)) - λmin
+                lb = max(s1, d1, -2 / (bii + 2bij + bjj)) + λmin
+                ub = min(s2, d2, 2 / (aii + 2aij + ajj)) - λmin
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 t3 += @elapsed opt = optimize(
@@ -1117,7 +1123,7 @@ function solve_group_max_entropy_ccd(
                 S[j, i] += δ
                 # update cholesky factors
                 t1 += @elapsed rank2_cholesky_update!(
-                    L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
+                    L, C, i, j, δ, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -1175,30 +1181,28 @@ function rank1_cholesky_update!(L, C, j, δ, store1, store2,
 end
 
 function rank2_cholesky_update!(
-    L, C, i, j, δ, store1, store2, store3, choldowndate!, cholupdate!)
+    L, C, i, j, δ, store1, store2, choldowndate!, cholupdate!)
     # update cholesky factor L
-    fill!(store1, 0); fill!(store2, 0); fill!(store3, 0)
-    store1[j] = store1[i] = store2[i] = store3[j] = sqrt(abs(δ))
+    fill!(store1, 0); fill!(store2, 0)
+    store1[j] = store1[i] = store2[j] = sqrt(abs(δ/2))
+    store2[i] = -sqrt(abs(δ/2))
     if δ > 0
         choldowndate!(L, store1)
         cholupdate!(L, store2)
-        cholupdate!(L, store3)
     else 
         cholupdate!(L, store1)
         choldowndate!(L, store2)
-        choldowndate!(L, store3)
     end
     # update cholesky factor C
-    fill!(store1, 0); fill!(store2, 0); fill!(store3, 0)
-    store1[j] = store1[i] = store2[i] = store3[j] = sqrt(abs(δ))
+    fill!(store1, 0); fill!(store2, 0)
+    store1[j] = store1[i] = store2[j] = sqrt(abs(δ/2))
+    store2[i] = -sqrt(abs(δ/2))
     if δ > 0
         cholupdate!(C, store1)
         choldowndate!(C, store2)
-        choldowndate!(C, store3)
     else
         choldowndate!(C, store1)
         cholupdate!(C, store2)
-        cholupdate!(C, store3)
     end
     return nothing
 end

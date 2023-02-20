@@ -1,6 +1,6 @@
 # Zihuai's R code for solving ME problem using PCA
 # must install the following R packages: RSpectra, Matrix
-function solve_group_max_entropy_pca(
+function solve_group_max_entropy_pca_zihuai(
     Sigma::AbstractMatrix{T}, # covariance matrix
     M::Int, # number of knockoffs
     clusters::AbstractVector # group membership
@@ -81,7 +81,7 @@ function solve_group_max_entropy_pca(
         inv.S<-Matrix(diag(1/S[1,1],p))#Matrix(diag(1/min(eigen.fit$values),p))
         obj<-sum(log((M+1)/M*eigen.fit$values-min(eigen.fit$values)))+M*p*log(min(eigen.fit$values))#log(det(E))+M*log(det(S))
         #obj<-0
-        #print(obj)
+        print(obj)
         
         new.obj<-obj
         for(i in 1:maxit){
@@ -103,7 +103,7 @@ function solve_group_max_entropy_pca(
             }
             new.obj<-new.obj+change_obj
             if(change_obj/abs(new.obj)<=0.001){break}
-            # print(new.obj)
+            print(new.obj)
         }
         
         # Compensate for numerical errors (feasibility)
