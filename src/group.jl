@@ -756,7 +756,7 @@ function solve_group_SDP_ccd(
     t2 = zero(T) # time for forward/backward solving
     t3 = zero(T) # time for solving offdiag 1D optimization problems
     # preallocated vectors for efficiency
-    u, v, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
     for l in 1:niter
         max_delta = zero(T)
         offset = 0
@@ -779,9 +779,9 @@ function solve_group_SDP_ccd(
                 abs(δj) < 1e-15 && continue
                 # update S
                 S[j, j] += δj
-                # rank 1 update to cholesky factor
-                t1 += @elapsed δj = update_diag_chol_sdp!(
-                    S, Σ, L, C, j, ei, ej, δj, choldowndate!, cholupdate!, backtrack
+                # rank 1 update to cholesky factors
+                t1 += @elapsed rank1_cholesky_update!(
+                    L, C, jj, δj, ej, u, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δj) > max_delta && (max_delta = abs(δj))
@@ -815,13 +815,13 @@ function solve_group_SDP_ccd(
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 δ = clamp(Σ[i, j] - S[i, j], lb, ub)
-                (abs(δ) < 1e-15 || isnan(δ)) && continue
+                (abs(δ) < 1e-15 || isnan(δ) || isinf(δ)) && continue
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                # update cholesky factors (if backtrack = true, this also undos the update if objective doesn't improve)
-                t1 += @elapsed δ = update_offdiag_chol_sdp!(
-                    S, Σ, L, C, storage, i, j, ei, ej, δ, choldowndate!, cholupdate!, backtrack
+                # rank 2 update to cholesky factors
+                t1 += @elapsed rank2_cholesky_update!(
+                    L, C, i, j, δ, ej, u, v, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
@@ -830,7 +830,9 @@ function solve_group_SDP_ccd(
         end
         if verbose
             obj = group_block_objective(Σ, S, m, :sdp)
-            println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
+            println("Iter $l: obj = $obj, δ = $max_delta, " * 
+                "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
+                "t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
@@ -845,8 +847,7 @@ function solve_group_MVR_ccd(
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
-    verbose::Bool = false,
-    backtrack::Bool = true
+    verbose::Bool = false
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
@@ -899,7 +900,7 @@ function solve_group_MVR_ccd(
                 δ = lb < x1 < ub ? x1 : x2
                 # update S if objective improves
                 change_obj = -m^2*δ*cjj/(1+δ*bjj) + δ*djj/(1-δ*ajj)
-                if backtrack && (change_obj > 0 || abs(δ) < 1e-15 || isnan(δ))
+                if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                     continue
                 end
                 S[j, j] += δ
@@ -955,7 +956,7 @@ function solve_group_MVR_ccd(
                 )
                 δ = clamp(opt.minimizer, lb, ub)
                 change_obj = opt.minimum
-                if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ)
+                if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                     continue
                 end
                 # update S
@@ -1058,7 +1059,7 @@ function solve_group_max_entropy_ccd(
                 δ = clamp(sj_new - S[j, j], lb, ub)
                 # update S if objective improves
                 change_obj = log(1 - δ*ajj) + m*log(1 + δ*bjj)
-                if backtrack && (change_obj < 0 || abs(δ) < 1e-15 || isnan(δ))
+                if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                     continue
                 end
                 S[j, j] += δ
@@ -1107,7 +1108,7 @@ function solve_group_max_entropy_ccd(
                 )
                 δ = clamp(opt.minimizer, lb, ub)
                 change_obj = -opt.minimum
-                if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ)
+                if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                     continue
                 end
                 obj += change_obj
@@ -1153,8 +1154,9 @@ function diag_mvr_obj_root(m, ajj, bjj, cjj, djj)
     a = (-ajj^2*m^2*cjj + bjj^2*djj)
     b = 2ajj*m^2*cjj + 2bjj*djj
     c = djj - m^2*cjj
-    x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
-    x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
+    a == c == 0 && return 0, 0
+    x1 = (-b + sqrt(b^2 - 4a*c)) / (2a)
+    x2 = (-b - sqrt(b^2 - 4a*c)) / (2a)
     return x1, x2
 end
 
@@ -1244,7 +1246,7 @@ function solve_group_max_entropy_pca(
             δ = clamp(δ, lb, ub)
             # compute new objective
             change_obj = log(1 - δ*vt_Dinv_v) + m*log(1 + δ*vt_Sinv_v)
-            if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ)
+            if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                 continue
             end
             # update S_new = S + δ*v*v'
@@ -1308,37 +1310,31 @@ function solve_group_MVR_pca(
             t2 += @elapsed begin
                 ldiv!(w, UpperTriangular(L.factors)', v)
                 ldiv!(u, UpperTriangular(C.factors)', v)
-                vt_Sinv_v = dot(u, u)
-                vt_Dinv_v = dot(w, w)
+                vt_Sinv_v = dot(u, u) # bjj
+                vt_Dinv_v = dot(w, w) # ajj
                 forward_backward!(w, L, v, storage)
                 forward_backward!(u, C, v, storage)
-                vt_Dinv2_v = dot(w, w)
-                vt_Sinv2_v = dot(u, u)
+                vt_Dinv2_v = dot(w, w) # djj
+                vt_Sinv2_v = dot(u, u) # cjj
             end
-            # compute δ ∈ [lb, ub]
-            slope = (-m^2*vt_Sinv2_v/(1+vt_Sinv_v)) + vt_Dinv2_v/(1-vt_Dinv_v)
+            # compute δ that is within feasible region
             lb = -1 / vt_Sinv_v + λmin
             ub = 1 / vt_Dinv_v - λmin
-
-
-            δ = slope > 0 ? lb : ub
-            # compute new objective
-            change_obj = δ * slope
-            if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ)
+            lb ≥ ub && continue
+            x1, x2 = diag_mvr_obj_root(m, vt_Dinv_v, vt_Sinv_v, 
+                vt_Sinv2_v, vt_Dinv2_v)
+            δ = lb < x1 < ub ? x1 : lb < x2 < ub ? x2 : NaN
+            # update S_new = S + δ*v*v' if objective improves
+            change_obj = -m^2*δ*vt_Sinv2_v/(1+δ*vt_Sinv_v) + 
+                δ*vt_Dinv2_v/(1-δ*vt_Dinv_v)
+            if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                 continue
             end
-            # update S_new = S + δ*v*v'
-            t1 += @elapsed BLAS.ger!(δ, v, v, S)
             obj += change_obj
+            t1 += @elapsed BLAS.ger!(δ, v, v, S)
             # update cholesky factors (must use robust updates since v is dense)
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
-
-            # @show δ
-            # @show eigmin(S)
-            # @show eigmin((m+1)/m * Σ - S + 2λmin*I)
-            # @show change_obj
-
             t1 += @elapsed begin
                 if δ > 0
                     LinearAlgebra.lowrankdowndate!(L, u)
