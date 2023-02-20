@@ -162,7 +162,8 @@ function fit_marginal(
         push!(selected, sel)
         push!(Ws, W)
     end
-    return MarginalKnockoffFilter(y, X, ko, Ws, m, selected, fdrs, d)
+    return MarginalKnockoffFilter(y, X, ko, Ws, m, X_pvals, X̃_pvals, 
+        selected, fdrs, d)
 end
 
 function debias!(

@@ -571,6 +571,22 @@ function solve_group_MVR_single_block(
     return JuMP.value.(S), success
 end
 
+function initialize_S(Σ, Σblocks, m::Int, method, verbose)
+    if occursin("maxent", string(method))
+        verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
+        S, _, _ = solve_group_max_entropy_pca(Σ, Σblocks, m=m, niter=10, 
+            verbose=verbose)
+    elseif occursin("mvr", string(method))
+        verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
+        S, _, _ = solve_group_MVR_pca(Σ, Σblocks, m=m, niter=10, verbose=verbose)
+    else
+        # todo: CCD-PCA for SDP
+        S, _, _ = solve_group_equi(Σ, Σblocks, m=m)
+        S = (1-1e-6)S + 1e-6*I
+    end
+    return S
+end
+
 """
 # Todo
 + somehow avoid reallocating ub every iteration
@@ -599,14 +615,12 @@ function solve_group_block_update(
     group_sizes = size.(Sblocks.blocks, 1)
     perm = collect(1:p)
     # initialize S/A/D matrices
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S += 1e-6I
-    S ./= 2
+    S = initialize_S(Σ, Sblocks, m, method, verbose)
     A = (m+1)/m * Σ
     D = A - S
     # compute initial objective value
     obj = group_block_objective(Σ, S, m, method)
-    verbose && println("Init obj = $obj")
+    verbose && println("Init obj = $obj, with $blocks unique blocks to optimze")
     # begin block updates
     for l in 1:niter
         offset = 0
@@ -732,23 +746,21 @@ function solve_group_SDP_ccd(
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false,
-    backtrack::Bool = true
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     num_var = sum(abs2, group_sizes)
-    verbose && println("solve_group_SDP_ccd: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S += λmin*I
-    S ./= 2
+    S = initialize_S(Σ, Sblocks, m, :sdp, verbose)
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    verbose && println("initial obj = ", group_block_objective(Σ, S, m, :sdp))
+    obj = group_block_objective(Σ, S, m, :sdp)
+    verbose && 
+        println("Full CCD initial obj = $obj, $(num_var) optimization variables")
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -851,21 +863,16 @@ function solve_group_MVR_ccd(
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     num_var = sum(abs2, group_sizes)
-    verbose && println("solve_group_MVR_ccd: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    verbose && println("Initializing CCD mvr with 10 iterations of PCA-CCD")
-    S, _, _ = solve_group_MVR_pca(Σ, Sblocks, m=m, niter=10, verbose=verbose)
-    # S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    # S += λmin*I
-    # S ./= 2
-    verbose && println("Starting CCD MVR")
+    S = initialize_S(Σ, Sblocks, m, :mvr, verbose)
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     obj = group_block_objective(Σ, S, m, :mvr)
-    verbose && println("initial obj = ", obj)
+    verbose && 
+        println("Full CCD initial obj = $obj, $(num_var) optimization variables")
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -1012,27 +1019,21 @@ function solve_group_max_entropy_ccd(
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false,
-    backtrack::Bool = true
     ) where T
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     num_var = sum(abs2, group_sizes)
-    verbose && println("solve_group_max_entropy_ccd: Optimizing $(num_var) variables")
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    verbose && println("Initializing CCD maxent with 10 iterations of PCA-CCD")
-    S, _, _ = solve_group_max_entropy_pca(Σ, Sblocks, m=m, niter=10, verbose=verbose)
-    # S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    # S += λmin*I
-    # S ./= 2
-    verbose && println("Starting CCD maxent")
+    S = initialize_S(Σ, Sblocks, m, :maxent, verbose)
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     obj = group_maxent_obj(L, C, m)
-    verbose && println("initial obj = ", obj)
+    verbose && 
+        println("Full CCD initial obj = $obj, $(num_var) optimization variables")
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving

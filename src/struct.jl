@@ -137,8 +137,8 @@ struct MarginalKnockoffFilter{T} <: KnockoffFilter
     # merged_ko :: Knockoff # A MergedKnockoff struct
     Ws :: Vector{Vector{T}} # p vector of feature importance
     m :: Int # number of knockoffs per feature generated
-    # Xpvals :: Vector{T} # -log10 p-values for the original variables
-    # X̃pvals :: Vector{T} # -log10 p-values for the knockoff variables
+    Xpvals :: Vector{T} # -log10 p-values for the original variables
+    X̃pvals :: Vector{T} # -log10 p-values for the knockoff variables
     selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
     fdr_target :: Vector{T} # target FDR level for each τs and βs
     d :: UnivariateDistribution # distribution of y
