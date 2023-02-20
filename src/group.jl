@@ -779,7 +779,7 @@ function solve_group_SDP_ccd(
                 S[j, j] += δj
                 # rank 1 update to cholesky factors
                 t1 += @elapsed rank1_cholesky_update!(
-                    L, C, jj, δj, ej, u, choldowndate!, cholupdate!
+                    L, C, j, δj, ej, u, choldowndate!, cholupdate!
                 )
                 # update convergence tol
                 abs(δj) > max_delta && (max_delta = abs(δj))
@@ -856,9 +856,12 @@ function solve_group_MVR_ccd(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S += λmin*I
-    S ./= 2
+    verbose && println("Initializing CCD mvr with 10 iterations of PCA-CCD")
+    S, _, _ = solve_group_MVR_pca(Σ, Sblocks, m=m, niter=10, verbose=verbose)
+    # S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    # S += λmin*I
+    # S ./= 2
+    verbose && println("Starting CCD MVR")
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     obj = group_block_objective(Σ, S, m, :mvr)
@@ -1020,11 +1023,12 @@ function solve_group_max_entropy_ccd(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    @info "Initializing CCD maxent with 5 iterations of PCA-CCD"
-    # S, _, _ = solve_group_max_entropy_pca(Σ, Sblocks, m=m, niter=5, verbose=true)
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S += λmin*I
-    S ./= 2
+    verbose && println("Initializing CCD maxent with 10 iterations of PCA-CCD")
+    S, _, _ = solve_group_max_entropy_pca(Σ, Sblocks, m=m, niter=10, verbose=verbose)
+    # S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    # S += λmin*I
+    # S ./= 2
+    verbose && println("Starting CCD maxent")
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     obj = group_maxent_obj(L, C, m)
