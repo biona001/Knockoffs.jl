@@ -334,6 +334,8 @@ function solve_s_group(
             S, γs, obj, _, _ = solve_group_SDP_pca(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_hybrid
             S, γs, obj = solve_group_max_entropy_hybrid(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :mvr_hybrid
+            S, γs, obj = solve_group_mvr_hybrid(Σcor, Sblocks; m=m, kwargs...)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -618,7 +620,7 @@ function solve_group_block_update(
     group_sizes = size.(Sblocks.blocks, 1)
     perm = collect(1:p)
     # initialize S/A/D matrices
-    S = initialize_S(Σ, Sblocks, m, method, verbose)
+    S, _, _ = initialize_S(Σ, Sblocks, m, method, verbose)
     A = (m+1)/m * Σ
     D = A - S
     # compute initial objective value
@@ -758,7 +760,7 @@ function solve_group_SDP_ccd(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S = initialize_S(Σ, Sblocks, m, :sdp, verbose)
+    S, _, _ = initialize_S(Σ, Sblocks, m, :sdp, verbose)
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
     obj = group_block_objective(Σ, S, m, :sdp)
@@ -870,18 +872,34 @@ function solve_group_MVR_ccd(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S = initialize_S(Σ, Sblocks, m, :mvr, verbose)
-    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
-    C = cholesky(Symmetric(S))
+    S, L, C = initialize_S(Σ, Sblocks, m, :mvr, verbose)
     obj = group_block_objective(Σ, S, m, :mvr)
     verbose && 
         println("Full CCD initial obj = $obj, $(num_var) optimization variables")
-    # some timers
+    # preallocated vectors for efficiency
+    u, v, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
+    # CCD iterations
+    obj, _ = _mvr_ccd_iter!(
+        S, L, C,
+        obj, m, group_sizes, niter, tol, λmin, verbose,
+        cholupdate!, choldowndate!,
+        u, v, ei, ej, storage
+    )
+    return S, T[], obj, L, C
+end
+
+function _mvr_ccd_iter!(
+    S, L, C, # main matrix variables
+    obj, m, group_sizes, niter, tol, λmin, verbose, # constants
+    cholupdate!, choldowndate!, # cholesky update functions
+    u, v, ei, ej, storage # storages
+    )
+    T = eltype(S)
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
     t3 = zero(T) # time for solving offdiag 1D optimization problems
-    # preallocated vectors for efficiency
-    u, v, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
+    blocks = length(group_sizes)
+    converged = false
     for l in 1:niter
         max_delta = zero(T)
         offset = 0
@@ -984,15 +1002,16 @@ function solve_group_MVR_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            # obj_true = group_block_objective(Σ, S, m, :mvr)
-            # @show obj, obj_true
             println("Iter $l: obj = $obj, δ = $max_delta, " * 
                 "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2))," * 
                 "t3 = $(round(t3, digits=2))")
         end
-        max_delta < tol && break 
+        if max_delta < tol
+            converged = true
+            break 
+        end
     end
-    return S, T[], obj, L, C
+    return obj, converged
 end
 
 # efficient and numerically stable way to evaluate max entropy objective 
@@ -1024,7 +1043,6 @@ function solve_group_max_entropy_ccd(
     verbose::Bool = false,
     ) where T
     p = size(Σ, 1)
-    blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
     num_var = sum(abs2, group_sizes)
     # whether to use robust cholesky updates or not
@@ -1098,9 +1116,6 @@ function _maxent_ccd_iter!(
                 t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δ, ej, u, choldowndate!, cholupdate!
                 )
-                # true_obj = group_maxent_obj(L, C, m)
-                # println("($j,$j): true_obj = $true_obj, obj = $obj, change_obj = $change_obj, δ = $δ")
-                # fdsa
                 # update convergence tol
                 abs(δ) > max_delta && (max_delta = abs(δ))
             end
@@ -1395,7 +1410,7 @@ function solve_group_MVR_pca(
     S, _ = solve_group_equi(Σ, Sblocks, m=m)
     S += λmin*I
     S ./= 2
-    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    L = cholesky(Symmetric((m+1)/m * Σ - S))
     C = cholesky(Symmetric(S))
     # intial objective
     obj = group_block_objective(Σ, S, m, :mvr)
@@ -1405,6 +1420,24 @@ function solve_group_MVR_pca(
     t2 = zero(T) # time for forward/backward solving
     # preallocated vectors for efficiency
     u, w, storage = zeros(p), zeros(p), zeros(p)
+    # PCA-CCD iterations
+    obj, _ = _mvr_pca_ccd_iter!(
+        S, L, C, evecs, Σ,
+        obj, m, niter, tol, verbose,
+        u, w, storage
+    )
+    return S, T[], obj, L, C
+end
+
+function _mvr_pca_ccd_iter!(
+    S, L, C, evecs, Σ, # main matrix variables
+    obj, m, niter, tol, verbose, # constants
+    u, w, storage # storages
+    )
+    T = eltype(S)
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    converged = false
     for l in 1:niter
         max_delta = zero(T)
         for v in eachcol(evecs)
@@ -1420,8 +1453,8 @@ function solve_group_MVR_pca(
                 vt_Sinv2_v = dot(u, u) # cjj
             end
             # compute δ that is within feasible region
-            lb = -1 / vt_Sinv_v + λmin
-            ub = 1 / vt_Dinv_v - λmin
+            lb = -1 / vt_Sinv_v
+            ub = 1 / vt_Dinv_v
             lb ≥ ub && continue
             x1, x2 = diag_mvr_obj_root(m, vt_Dinv_v, vt_Sinv_v, 
                 vt_Sinv2_v, vt_Dinv2_v)
@@ -1454,7 +1487,63 @@ function solve_group_MVR_pca(
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
         end
         # check convergence
-        max_delta < tol && break 
+        if max_delta < tol
+            converged = true
+            break
+        end
+    end
+    return obj, converged
+end
+
+function solve_group_mvr_hybrid(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    outer_iter::Int = 10,
+    inner_pca_iter::Int = 10,
+    inner_ccd_iter::Int = 5,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    group_sizes = size.(Sblocks.blocks, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # compute eigenfactorization for Σ blocks
+    evals, evecs = eigen(Sblocks)
+    # initialize S matrix and compute initial matrices
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += λmin*I
+    S ./= 2
+    L = cholesky(Symmetric((m+1)/m * Σ - S))
+    C = cholesky(Symmetric(S))
+    obj = group_block_objective(Σ, S, m, :mvr)
+    verbose && 
+        println("MVR hybrid CCD initial obj = $obj")
+    # preallocated vectors for efficiency
+    u, w, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
+    for i in 1:outer_iter
+        # PCA iterations
+        obj, converged1 = _mvr_pca_ccd_iter!(
+            S, L, C, evecs, Σ, 
+            obj, m, inner_pca_iter, tol, verbose,
+            u, w, storage
+        )
+        # Full CCD iterations
+        obj, converged2 = _mvr_ccd_iter!(
+            S, L, C,
+            obj, m, group_sizes, inner_ccd_iter, tol, λmin, verbose,
+            cholupdate!, choldowndate!,
+            u, w, ei, ej, storage
+        )
+        # check convergence
+        if verbose
+            println("\n Hybrid PCA-CCD iter $i: obj = $obj")
+        end
+        converged1 && converged2 && break
     end
     return S, T[], obj, L, C
 end
