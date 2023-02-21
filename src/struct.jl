@@ -124,7 +124,8 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
     selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
-    Ws :: Vector{Vector{T}} # p vector of feature importance
+    W :: Vector{T} # length p vector of feature importance
+    τs :: Vector{T} # threshold for significance. For fdr fdr_target[i], τ[i] is threshold, and all W ≥ τ[i] is selected
     fdr_target :: Vector{T} # target FDR level for each τs and βs
     d :: UnivariateDistribution # distribution of y
     debias :: Union{Nothing, Symbol} # how βs and a0 have been debiased (`nothing` for not debiased)
@@ -134,8 +135,8 @@ struct MarginalKnockoffFilter{T} <: KnockoffFilter
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
-    # merged_ko :: Knockoff # A MergedKnockoff struct
-    Ws :: Vector{Vector{T}} # p vector of feature importance
+    W :: Vector{T} # length p vector of feature importance
+    τs :: Vector{T} # threshold for significance. For fdr fdr_target[i], τ[i] is threshold, and all W ≥ τ[i] is selected
     m :: Int # number of knockoffs per feature generated
     Xpvals :: Vector{T} # -log10 p-values for the original variables
     X̃pvals :: Vector{T} # -log10 p-values for the knockoff variables

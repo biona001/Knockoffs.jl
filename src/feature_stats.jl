@@ -2,7 +2,9 @@
     select_features(β, original, knockoff, fdr, [method])
     select_features(β, original, knockoff, groups, fdr, [method])
 
-Returns a `Vector{Int}` that includes the selected variables. 
+Returns a `Vector{Int}` that includes the selected variables, the `W` statistic 
+that measures each feature's importance score, and the threshold `τ` that
+constitutes the threshold for selection. 
 
 # Inputs
 + `β`: (m+1)p × 1 vector of feature importance statistics for the original and knockoff features
@@ -32,7 +34,8 @@ function select_features(
     if m == 1 # single knockoff uses coefficient-difference statistic
         W = coefficient_diff(β, original, vcat(knockoff...))
         τ = threshold(W, fdr, filter_method)
-        return W, findall(x -> x ≥ τ, W)
+        selected = findall(x -> x ≥ τ, W)
+        return W, selected, τ
     end
     # multiple simultaneous knockoffs
     κ = zeros(Int, p) # κ[i] stores which of m knockoffs has largest importance score (κ[i]==0 if original variable has largest score)
@@ -62,14 +65,8 @@ function select_features(
     end
     # compute multi-knockoff selection threshold
     τ̂ = mk_threshold(τ, κ, m, fdr, filter_method)
-    # compute selected indices based on τ̂
-    selected = Int[]
-    for i in 1:p
-        if W[i] ≥ τ̂
-            push!(selected, i)
-        end
-    end
-    return W, selected
+    selected = findall(x -> x ≥ τ̂, W)
+    return W, selected, τ̂
 end
 
 function select_features(
@@ -91,22 +88,25 @@ function select_features(
     if m == 1 # single knockoff uses coefficient-difference statistic
         W = coefficient_diff(β, groups, original, vcat(knockoff...))
         τ = threshold(W, fdr, filter_method)
-        return W, findall(x -> x ≥ τ, W) # returns selected groups
+        selected = findall(x -> x ≥ τ, W)
+        return W, selected, τ
     end
-    # multiple simultaneous knockoffs
+    # multiple simultaneous knockoffs Tg = mean(sum(β[g]))
     κ = zeros(Int, g) # κ[i] stores which of m knockoff groups has largest importance score (κ[i]==0 if original group has largest score)
     τ = zeros(T, g)   # τ[i] stores (T0 - median(T1,...,Tm)) where T0,...,Tm are ordered statistics
-    W = zeros(T, g)   # W[i] stores (original_effect - mk_filter(importance scores of knockoffs)) * I(original beta has largest effect compared to all its knockoffs)
+    W = zeros(T, g)   # W[i] stores (original_effect - mk_filter(importance scores of knockoffs)) * I(original beta has largest effect compared to all its knockoffs) / group size
     T̃ = zeros(T, m)   # preallocated vector storing feature importance score for knockoff
     ordered = zeros(T, m + 1) # preallocated vector storing ordered statistics of the m+1 variables
     original_variable_groups = groups[original]
     for i in unique_groups
         group_idx = findall(x -> x == i, groups)
+        group_size = length(group_idx) / (m+1) # i and its m knockoffs
         # compute importance score of group i's original features
         original_effect = zero(T)
         for j in group_idx ∩ original
             original_effect += abs(β[j])
         end
+        original_effect /= group_size
         # compute importance score of group i's m knockoffs
         fill!(T̃, 0)
         group_members = findall(x -> x == i, original_variable_groups) # group_members are original variables that belong to current group
@@ -115,6 +115,7 @@ function select_features(
                 T̃[idx] += abs(β[jj])
             end
         end
+        T̃ ./= group_size
         # find index of largest importance score among m+1 (original + m knockoff) features
         T̃max, max_idx = findmax(T̃)
         if T̃max > original_effect
@@ -128,17 +129,11 @@ function select_features(
         T0 = ordered[1]
         τ[i] = T0 - mk_filter(@view(ordered[2:end]))
         W[i] = (original_effect - mk_filter(T̃)) * (original_effect ≥ T̃max)
-        # average over group size
-        W[i] /= length(group_idx) / (m+1) # var i and its m knockoffs contributed m+1 times 
     end
-    τ̂ = mk_threshold(τ, κ, m, fdr, filter_method) # multi-knockoff selection threshold
-    selected = Int[]
-    for i in 1:g
-        if W[i] ≥ τ̂
-            push!(selected, i)
-        end
-    end
-    return W, selected
+    # multi-knockoff selection
+    τ̂ = mk_threshold(τ, κ, m, fdr, filter_method)
+    selected = findall(x -> x ≥ τ̂, W)
+    return W, selected, τ̂
 end
 
 """
@@ -214,14 +209,14 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     p = length(original)
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     # select variables using knockoff filter
-    W, selected_idx = select_features(β̂_knockoff, original, knockoff, fdr, 
+    W, selected_idx, τ = select_features(β̂_knockoff, original, knockoff, fdr, 
         filter_method=filter_method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, p)
     for i in selected_idx
         β[i] = β̂_knockoff[original[i]]
     end
-    return β, W
+    return β, W, τ
 end
 
 function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
@@ -230,7 +225,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
     # first handle errors
     0 ≤ fdr ≤ 1 || error("Target FDR should be between 0 and 1 but got $fdr")
     # select variables using knockoff filter
-    W, selected_groups = select_features(β̂_knockoff, original, knockoff, groups, 
+    W, selected_groups, τ = select_features(β̂_knockoff, original, knockoff, groups, 
         fdr, filter_method=filter_method)
     # construct the full β, thresholding indices that are not selected
     β = zeros(T, length(β̂_knockoff))
@@ -238,5 +233,5 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vec
         group_idx = findall(x -> x == g, groups)
         β[group_idx] .= @view(β̂_knockoff[group_idx])
     end
-    return β[original], W
+    return β[original], W, τ
 end

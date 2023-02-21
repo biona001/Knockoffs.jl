@@ -92,10 +92,10 @@ function fit_lasso(
         groups_full = repeat(groups, inner=m+1) # since X and X̃ is interleaved, each group length is repeated m times
     end
     # compute feature importance statistics and allocate necessary knockoff-filter variables
-    βs, a0s, selected, Ws = Vector{T}[], T[], Vector{Int}[], Vector{T}[]
+    βs, a0s, selected, W, τs = Vector{T}[], T[], Vector{Int}[], T[], T[]
     for fdr in fdrs
         # apply knockoff-filter based on target fdr
-        β_filtered, W = isnothing(groups) ? 
+        β_filtered, W, τ = isnothing(groups) ? 
             extract_beta(βestim, fdr, merged_ko.original, 
             merged_ko.knockoff, filter_method) : 
             extract_beta(βestim, fdr, groups_full, 
@@ -112,10 +112,10 @@ function fit_lasso(
         push!(a0s, a0)
         sel_idx = findall(!iszero, β_filtered)
         push!(selected, isnothing(groups) ? sel_idx : unique(groups[sel_idx]))
-        push!(Ws, W)
+        push!(τs, τ)
     end
     return LassoKnockoffFilter(
-        y, X, ko, merged_ko, m, βs, a0s, selected, Ws, fdrs, d, debias)
+        y, X, ko, merged_ko, m, βs, a0s, selected, W, τs, fdrs, d, debias)
 end
 
 function fit_marginal(
@@ -136,11 +136,13 @@ function fit_marginal(
         data[:, 2] .= @view(X[:, j])
         result = glm(data, y, d, canonicallink(d))
         X_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
+        # X_pvals[j] = coeftable(result).cols[1][2] # effect size
     end
     for j in 1:m*p
         data[:, 2] .= @view(X̃[:, j])
         result = glm(data, y, d, canonicallink(d))
         X̃_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
+        # X̃_pvals[j] = coeftable(result).cols[1][2]
     end
     # check if groups exist (todo: do I really need groups_full defined)
     groups = nothing
@@ -152,17 +154,17 @@ function fit_marginal(
     original = collect(1:p)
     knockoff = [[mm*p + k for mm in 1:m] for k in 1:p] # knockoff[i] are indices of X̃_pvals that contain knockoffs for var i
     selected = Vector{Int}[]
-    Ws = Vector{T}[]
+    W, τs = T[], T[]
     for fdr in fdrs
-        W, sel = isnothing(groups) ? 
+        W, sel, τ = isnothing(groups) ? 
             select_features([X_pvals; X̃_pvals], original, knockoff, fdr; 
             filter_method=filter_method) :
             select_features([X_pvals; X̃_pvals], original, knockoff, groups_full,
             fdr; filter_method=filter_method)
         push!(selected, sel)
-        push!(Ws, W)
+        push!(τs, τ)
     end
-    return MarginalKnockoffFilter(y, X, ko, Ws, m, X_pvals, X̃_pvals, 
+    return MarginalKnockoffFilter(y, X, ko, W, τs, m, X_pvals, X̃_pvals, 
         selected, fdrs, d)
 end
 
