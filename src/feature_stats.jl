@@ -111,7 +111,7 @@ function select_features(
         fill!(T̃, 0)
         group_members = findall(x -> x == i, original_variable_groups) # group_members are original variables that belong to current group
         for j in group_members
-            for (idx, jj) in enumerate(knockoff[j])
+            for (idx, jj) in enumerate(knockoff[j]) # knockoff[j] stores indices of the jth variable's m knockoff
                 T̃[idx] += abs(β[jj])
             end
         end

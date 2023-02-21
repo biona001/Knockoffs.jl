@@ -313,11 +313,11 @@ function solve_s_group(
         elseif method == :sdp
             S, γs, obj = solve_group_SDP_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :sdp_full
-            S, γs, obj = solve_group_SDP_full(Σcor, Sblocks; m=m)
+            S, γs, obj, _, _ = solve_group_SDP_full(Σcor, Sblocks; m=m)
         elseif method == :mvr
-            S, γs, obj = solve_group_MVR_ccd(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_MVR_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent
-            S, γs, obj = solve_group_max_entropy_ccd(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_max_entropy_ccd(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_old
             S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :mvr_old
@@ -325,13 +325,15 @@ function solve_s_group(
         elseif method == :sdp_old
             S, γs, obj = solve_group_SDP_ccd_old(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_pca
-            S, γs, obj = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :maxent_pca_zihuai
             S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, groups)
         elseif method == :mvr_pca
-            S, γs, obj = solve_group_MVR_pca(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_MVR_pca(Σcor, Sblocks; m=m, kwargs...)
         elseif method == :sdp_pca
-            S, γs, obj = solve_group_SDP_pca(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_SDP_pca(Σcor, Sblocks; m=m, kwargs...)
+        elseif method == :maxent_hybrid
+            S, γs, obj = solve_group_max_entropy_hybrid(Σcor, Sblocks; m=m, kwargs...)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -574,17 +576,18 @@ end
 function initialize_S(Σ, Σblocks, m::Int, method, verbose)
     if occursin("maxent", string(method))
         verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
-        S, _, _ = solve_group_max_entropy_pca(Σ, Σblocks, m=m, niter=10, 
+        S, _, _, L, C = solve_group_max_entropy_pca(Σ, Σblocks, m=m, niter=10, 
             verbose=verbose)
     elseif occursin("mvr", string(method))
         verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
-        S, _, _ = solve_group_MVR_pca(Σ, Σblocks, m=m, niter=10, verbose=verbose)
+        S, _, _, L, C = solve_group_MVR_pca(Σ, Σblocks, m=m, niter=10, verbose=verbose)
     else
         # todo: CCD-PCA for SDP
         S, _, _ = solve_group_equi(Σ, Σblocks, m=m)
         S = (1-1e-6)S + 1e-6*I
+        L, C = nothing, nothing # todo
     end
-    return S
+    return S, L, C
 end
 
 """
@@ -846,7 +849,7 @@ function solve_group_SDP_ccd(
         end
         max_delta < tol && break 
     end
-    return S, T[], group_block_objective(Σ, S, m, :sdp)
+    return S, T[], group_block_objective(Σ, S, m, :sdp), L, C
 end
 
 function solve_group_MVR_ccd(
@@ -989,7 +992,7 @@ function solve_group_MVR_ccd(
         end
         max_delta < tol && break 
     end
-    return S, T[], obj
+    return S, T[], obj, L, C
 end
 
 # efficient and numerically stable way to evaluate max entropy objective 
@@ -1027,19 +1030,41 @@ function solve_group_max_entropy_ccd(
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
-    # initialize S matrix and compute initial cholesky factor
-    S = initialize_S(Σ, Sblocks, m, :maxent, verbose)
-    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix with PCA and compute initial cholesky factor
+    S, L, C = initialize_S(Σ, Sblocks, m, :maxent, verbose)
+    # S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    # S += λmin*I
+    # S ./= 2
+    # L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    # C = cholesky(Symmetric(S))
     obj = group_maxent_obj(L, C, m)
     verbose && 
         println("Full CCD initial obj = $obj, $(num_var) optimization variables")
-    # some timers
+    # preallocated vectors for efficiency
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    # coordinate descent iterations
+    obj, _ = _maxent_ccd_iter!(
+        S, L, C, 
+        obj, m, group_sizes, niter, tol, λmin, verbose, 
+        cholupdate!, choldowndate!,
+        u, v, ei, ej
+    )
+    obj = group_maxent_obj(L, C, m)
+    return S, T[], obj, L, C
+end
+
+function _maxent_ccd_iter!(
+    S, L, C, # main matrix variables
+    obj, m, group_sizes, niter, tol, λmin, verbose, # constants
+    cholupdate!, choldowndate!, # cholesky update functions
+    u, v, ei, ej, # storages
+    )
+    T = eltype(S)
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
     t3 = zero(T) # time for solving offdiag 1D optimization problems
-    # preallocated vectors for efficiency
-    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    blocks = length(group_sizes)
+    converged = false
     for l in 1:niter
         max_delta = zero(T)
         offset = 0
@@ -1135,9 +1160,12 @@ function solve_group_max_entropy_ccd(
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
         end
-        max_delta < tol && break 
+        if max_delta < tol
+            converged = true
+            break 
+        end
     end
-    return S, T[], group_maxent_obj(L, C, m)
+    return obj, converged
 end
 
 # objective function to minimize when optimizing diagonal or offdiagnal entries
@@ -1227,11 +1255,26 @@ function solve_group_max_entropy_pca(
     # intial objective
     obj = group_maxent_obj(L, C, m)
     verbose && println("initial obj = $obj")
-    # some timers
-    t1 = zero(T) # time for updating cholesky factors
-    t2 = zero(T) # time for forward/backward solving
     # preallocated vectors for efficiency
     u, w = zeros(p), zeros(p)
+    # PCA-CCD iterations
+    obj, _ = _maxent_pca_ccd_iter!(
+        S, L, C, evecs, 
+        obj, m, niter, tol, verbose,
+        u, w
+    )
+    return S, T[], obj, L, C
+end
+
+function _maxent_pca_ccd_iter!(
+    S, L, C, evecs, # main matrix variables
+    obj, m, niter, tol, verbose, # constants
+    u, w # storages
+    )
+    T = eltype(S)
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    converged = false
     for l in 1:niter
         max_delta = zero(T)
         for v in eachcol(evecs)
@@ -1275,9 +1318,65 @@ function solve_group_max_entropy_pca(
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
         end
         # check convergence
-        max_delta < tol && break 
+        if max_delta < tol
+            converged = true
+            break 
+        end
     end
-    return S, T[], obj
+    return obj, converged
+end
+
+function solve_group_max_entropy_hybrid(
+    Σ::AbstractMatrix{T}, 
+    Sblocks::BlockDiagonal;
+    outer_iter::Int = 10,
+    inner_pca_iter::Int = 10,
+    inner_ccd_iter::Int = 5,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    group_sizes = size.(Sblocks.blocks, 1)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # compute eigenfactorization for Σ blocks
+    evals, evecs = eigen(Sblocks)
+    # initialize S matrix and compute initial matrices
+    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S += λmin*I
+    S ./= 2
+    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    C = cholesky(Symmetric(S))
+    obj = group_maxent_obj(L, C, m)
+    verbose && 
+        println("Maxent hybrid CCD initial obj = $obj")
+    # preallocated vectors for efficiency
+    u, w, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    for i in 1:outer_iter
+        # PCA iterations
+        obj, converged1 = _maxent_pca_ccd_iter!(
+            S, L, C, evecs, 
+            obj, m, inner_pca_iter, tol, verbose,
+            u, w
+        )
+        # Full CCD iterations
+        obj, converged2 = _maxent_ccd_iter!(
+            S, L, C, 
+            obj, m, group_sizes, inner_ccd_iter, tol, λmin, verbose, 
+            cholupdate!, choldowndate!,
+            u, w, ei, ej
+        )
+        # check convergence
+        if verbose
+            println("\n Hybrid PCA-CCD iter $i: obj = $obj")
+        end
+        converged1 && converged2 && break
+    end
+    return S, T[], obj, L, C
 end
 
 function solve_group_MVR_pca(
@@ -1357,7 +1456,7 @@ function solve_group_MVR_pca(
         # check convergence
         max_delta < tol && break 
     end
-    return S, T[], obj
+    return S, T[], obj, L, C
 end
 
 """
