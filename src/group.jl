@@ -1,24 +1,24 @@
 """
-    group_block_objective(Σ, S, m, method)
+    group_block_objective(Σ, S, groups, m, method)
 
 Evaluate the objective for SDP/MVR/ME. This is not an efficient function, so it
-should only be called at the start and end of each algorithm. 
+should only be called at the start of each algorithm. 
 
 # Inputs
 + `Σ`: Covariance or correlation matrix for original data
 + `S`: Optimization variable (group-block-diagonal)
++ `groups`: Vector of group membership. Variable `i` belongs to group `groups[i]`
 + `m`: Number of knockoffs to generate for each variable
 + `method`: The optimization method for group knockoffs
 """
 function group_block_objective(Σ::AbstractMatrix{T}, S::AbstractMatrix{T}, 
-    m::Int, method) where T
+    groups::Vector{Int}, m::Int, method) where T
     size(Σ) == size(S) || error("expected size(Σ) == size(S)")
-    obj = zero(eltype(Σ))
     if occursin("sdp", string(method)) || occursin("equi", string(method))
-        @inbounds for j in axes(Σ, 2)
-            @simd for i in axes(Σ, 1)
-                obj += abs(Σ[i, j] - S[i, j])
-            end
+        obj = zero(eltype(Σ))
+        for g in unique(groups)
+            idx = findall(x -> x == g, groups)
+            obj += _sdp_block_objective(@view(Σ[idx, idx]), @view(S[idx, idx]))
         end
     elseif occursin("maxent", string(method))
         obj = logdet((m+1)/m*Σ - S + 1e-8I) + m*logdet(S + 1e-8I)
@@ -27,6 +27,18 @@ function group_block_objective(Σ::AbstractMatrix{T}, S::AbstractMatrix{T},
         obj = m^2*tr(inv(S)) + tr(inv((m+1)/m*Σ - S))
     else
         error("unrecognized method: method should be one of $GROUP_KNOCKOFFS")
+    end
+    return obj
+end
+
+# helper function to evaluate the SDP objective for a single block
+function _sdp_block_objective(Σg, Sg)
+    size(Σg) == size(Sg) || error("Expected size(Σg) == size(Sg)")
+    obj = zero(eltype(Σg))
+    @inbounds for j in axes(Σg, 2)
+        @simd for i in axes(Σg, 1)
+            obj += abs(Σg[i, j] - Sg[i, j])
+        end
     end
     return obj
 end
@@ -277,8 +289,7 @@ function solve_s_group(
         Σcor.data .= @view(Σcor.data[perm, perm])
         permuted = true
     end
-    unique_groups = unique(groups)
-    if length(unique_groups) == length(groups)
+    if length(unique(groups)) == length(groups)
         # solve ungroup knockoff problem
         s = solve_s(Symmetric(Σcor), 
             method == :sdp_subopt ? :sdp : method;
@@ -286,56 +297,47 @@ function solve_s_group(
         )
         S = Diagonal(s) |> Matrix
         γs = T[]
-        obj = zero(T) # non-grouped knockoffs do not compute objective
+        obj = group_block_objective(Σ, S, groups, m, method)
     else
-        # solve group knockoff problem
-        # grab Σgg blocks, for equicorrelated case we choose Sg = γΣg
-        # for other cases we initialize with equi solution
-        blocks = Matrix{T}[]
-        for g in unique_groups
-            idx = findall(x -> x == g, group_permuted)
-            push!(blocks, Σcor[idx, idx])
-        end
-        Sblocks = BlockDiagonal(blocks)
-        # solve optimization problem
+        # solve group knockoff optimization problem
         if method == :equi
-            S, γs, obj = solve_group_equi(Σcor, Sblocks; m=m)
+            S, γs, obj = solve_group_equi(Σcor, group_permuted; m=m)
         elseif method == :sdp_subopt
-            S, γs, obj = solve_group_SDP_subopt(Σcor, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_subopt(Σcor, group_permuted; m=m)
         elseif method == :sdp_subopt_correct
-            S, γs, obj = solve_group_SDP_subopt_correct(Σcor, Sblocks; m=m)
+            S, γs, obj = solve_group_SDP_subopt_correct(Σcor, group_permuted; m=m)
         elseif method == :sdp_block
-            S, γs, obj = solve_group_block_update(Σcor, Sblocks, method; m=m, kwargs...)
+            S, γs, obj = solve_group_block_update(Σcor, group_permuted, method; m=m, kwargs...)
         elseif method == :mvr_block
-            S, γs, obj = solve_group_block_update(Σcor, Sblocks, method; m=m, kwargs...)
+            S, γs, obj = solve_group_block_update(Σcor, group_permuted, method; m=m, kwargs...)
         elseif method == :maxent_block
-            S, γs, obj = solve_group_block_update(Σcor, Sblocks, method; m=m, kwargs...)
+            S, γs, obj = solve_group_block_update(Σcor, group_permuted, method; m=m, kwargs...)
         elseif method == :sdp
-            S, γs, obj = solve_group_SDP_ccd(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_SDP_ccd(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :sdp_full
-            S, γs, obj, _, _ = solve_group_SDP_full(Σcor, Sblocks; m=m)
+            S, γs, obj, _, _ = solve_group_SDP_full(Σcor, group_permuted; m=m)
         elseif method == :mvr
-            S, γs, obj, _, _ = solve_group_MVR_ccd(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_MVR_ccd(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent
-            S, γs, obj, _, _ = solve_group_max_entropy_ccd(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_max_entropy_ccd(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent_old
-            S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :mvr_old
-            S, γs, obj = solve_group_MVR_ccd_old(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_MVR_ccd_old(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :sdp_old
-            S, γs, obj = solve_group_SDP_ccd_old(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_SDP_ccd_old(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent_pca
-            S, γs, obj, _, _ = solve_group_max_entropy_pca(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_max_entropy_pca(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent_pca_zihuai
             S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, groups)
         elseif method == :mvr_pca
-            S, γs, obj, _, _ = solve_group_MVR_pca(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_MVR_pca(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :sdp_pca
-            S, γs, obj, _, _ = solve_group_SDP_pca(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj, _, _ = solve_group_SDP_pca(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent_hybrid
-            S, γs, obj = solve_group_max_entropy_hybrid(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_max_entropy_hybrid(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :mvr_hybrid
-            S, γs, obj = solve_group_mvr_hybrid(Σcor, Sblocks; m=m, kwargs...)
+            S, γs, obj = solve_group_mvr_hybrid(Σcor, group_permuted; m=m, kwargs...)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -352,6 +354,31 @@ function solve_s_group(
 end
 
 """
+    initialize_S(Σ, groups, m, method, verbose)
+
+Internal function to help initialize `S` to a good starting value, returns the
+final `S` matrix as well as the cholesky factorizations `L` and `C` where
++ L.L*L.U = cholesky((m+1)/m*Σ - S)
++ C.L*C.U = cholesky(S)
+"""
+function initialize_S(Σ, groups::Vector{Int}, m::Int, method, verbose)
+    if occursin("maxent", string(method))
+        verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
+        S, _, _, L, C = solve_group_max_entropy_pca(Σ, groups, m=m, niter=10, 
+            verbose=verbose)
+    elseif occursin("mvr", string(method))
+        verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
+        S, _, _, L, C = solve_group_MVR_pca(Σ, groups, m=m, niter=10, verbose=verbose)
+    else
+        # todo: CCD-PCA for SDP
+        S, _, _ = solve_group_equi(Σ, groups, m=m)
+        S = (1-1e-6)S + 1e-6*I
+        L, C = nothing, nothing # todo
+    end
+    return S, L, C
+end
+
+"""
 Computes A^{-1/2} via eigen-decomposition
 """
 function inverse_mat_sqrt(A::Symmetric; tol=1e-4)
@@ -360,6 +387,22 @@ function inverse_mat_sqrt(A::Symmetric; tol=1e-4)
         λ[i] < tol && (λ[i] = tol)
     end
     return ϕ * Diagonal(1 ./ sqrt.(λ)) * ϕ'
+end
+
+"""
+    block_diagonalize(Σ, groups)
+
+Internal function to block-diagonalize the covariance `Σ` according to groups. 
+Here `groups` is assumed sorted. 
+"""
+function block_diagonalize(Σ::AbstractMatrix, groups::Vector{Int})
+    issorted(groups) || error("groups is expected to be sorted!")
+    Σblocks = Matrix{eltype(Σ)}[]
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        push!(Σblocks, Σ[idx, idx])
+    end
+    return BlockDiagonal(Σblocks)
 end
 
 """
@@ -373,9 +416,10 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 """
 function solve_group_equi(
     Σ::AbstractMatrix, 
-    Σblocks::BlockDiagonal;
+    groups::Vector{Int};
     m::Int = 1 # number of knockoffs per feature to generate
     )
+    Σblocks = block_diagonalize(Σ, groups)
     Db = Matrix{eltype(Σ)}[]
     for Σbi in Σblocks.blocks
         push!(Db, inverse_mat_sqrt(Symmetric(Σbi)))
@@ -384,7 +428,8 @@ function solve_group_equi(
     λmin = Symmetric(Db * Σ * Db) |> eigmin
     γ = min(1, (m+1)/m * λmin)
     S = BlockDiagonal(γ .* Σblocks.blocks) |> Matrix
-    return S, [γ], zero(eltype(Σ))
+    obj = group_block_objective(Σ, S, groups, m, :equi)
+    return S, [γ], obj
 end
 
 """
@@ -397,12 +442,13 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 """
 function solve_group_SDP_subopt(
     Σ::AbstractMatrix, 
-    Σblocks::BlockDiagonal; 
+    groups::Vector{Int}; 
     m::Int = 1,
     verbose=false
     )
     model = Model(() -> Hypatia.Optimizer(verbose=verbose))
     # model = Model(() -> SCS.Optimizer())
+    Σblocks = block_diagonalize(Σ, groups)
     n = nblocks(Σblocks)
     block_sizes = size.(Σblocks.blocks, 1)
     @variable(model, 0 <= γ[1:n] <= 1)
@@ -417,17 +463,18 @@ function solve_group_SDP_subopt(
     # return solution
     γs = clamp!(JuMP.value.(γ), 0, 1)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = group_block_objective(Σ, S, m, :sdp_subopt)
+    obj = group_block_objective(Σ, S, groups, m, :sdp_subopt)
     return S, γs, obj
 end
 
 function solve_group_SDP_subopt_correct(
     Σ::AbstractMatrix, 
-    Σblocks::BlockDiagonal; 
+    groups::Vector{Int}; 
     m::Int = 1,
     verbose=false
     )
     model = Model(() -> Hypatia.Optimizer(verbose=verbose))
+    Σblocks = block_diagonalize(Σ, groups)
     n = nblocks(Σblocks)
     block_sizes = size.(Σblocks.blocks, 1)
     @variable(model, γ[1:n])
@@ -458,7 +505,7 @@ function solve_group_SDP_subopt_correct(
     # return solution
     γs = JuMP.value.(γ)
     S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = group_block_objective(Σ, S, m, :sdp)
+    obj = group_block_objective(Σ, S, groups, m, :sdp)
     return S, γs, obj
 end
 
@@ -575,23 +622,6 @@ function solve_group_MVR_single_block(
     return JuMP.value.(S), success
 end
 
-function initialize_S(Σ, Σblocks, m::Int, method, verbose)
-    if occursin("maxent", string(method))
-        verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
-        S, _, _, L, C = solve_group_max_entropy_pca(Σ, Σblocks, m=m, niter=10, 
-            verbose=verbose)
-    elseif occursin("mvr", string(method))
-        verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
-        S, _, _, L, C = solve_group_MVR_pca(Σ, Σblocks, m=m, niter=10, verbose=verbose)
-    else
-        # todo: CCD-PCA for SDP
-        S, _, _ = solve_group_equi(Σ, Σblocks, m=m)
-        S = (1-1e-6)S + 1e-6*I
-        L, C = nothing, nothing # todo
-    end
-    return S, L, C
-end
-
 """
 # Todo
 + somehow avoid reallocating ub every iteration
@@ -606,7 +636,7 @@ end
 """
 function solve_group_block_update(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal,
+    groups::Vector{Int},
     method::Symbol;
     m::Int = 1,
     tol=0.01, # converges when changes in s are all smaller than tol
@@ -616,15 +646,16 @@ function solve_group_block_update(
     method ∈ [:sdp_block, :maxent_block, :mvr_block] ||
         error("Expected method to be :sdp_block, :maxent_block, or :mvr_block")
     p = size(Σ, 1)
-    blocks = nblocks(Sblocks)
-    group_sizes = size.(Sblocks.blocks, 1)
+    unique_groups = unique(groups)
+    blocks = length(unique_groups)
+    group_sizes = [count(x -> x == g, groups) for g in unique_groups]
     perm = collect(1:p)
     # initialize S/A/D matrices
-    S, _, _ = initialize_S(Σ, Sblocks, m, method, verbose)
+    S, _, _ = initialize_S(Σ, groups, m, method, verbose)
     A = (m+1)/m * Σ
     D = A - S
     # compute initial objective value
-    obj = group_block_objective(Σ, S, m, method)
+    obj = group_block_objective(Σ, S, groups, m, method)
     verbose && println("Init obj = $obj, with $blocks unique blocks to optimze")
     # begin block updates
     for l in 1:niter
@@ -682,7 +713,7 @@ function solve_group_block_update(
             offset += g
         end
         if verbose
-            obj = group_block_objective(Σ, S, m, method)
+            obj = group_block_objective(Σ, S, groups, m, method)
             println("Iter $l: obj = $obj, δ = $max_delta")
         end
         max_delta < tol && break 
@@ -703,14 +734,14 @@ end
 # this code solves every variable in S simultaneously, i.e. not fixing any block 
 function solve_group_SDP_full(
     Σ::AbstractMatrix, 
-    Σblocks::BlockDiagonal; 
+    groups::Vector{Int}; 
     m::Int = 1,
     optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
     )
     model = Model(() -> optm)
     T = eltype(Σ)
     p = size(Σ, 1)
-    group_sizes = size.(Σblocks.blocks, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
     # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
     @variable(model, S[1:p, 1:p], Symmetric)
     # fix everything
@@ -738,13 +769,13 @@ function solve_group_SDP_full(
     @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
     JuMP.optimize!(model)
     check_model_solution(model)
-    obj = group_block_objective(Σ, S, m, method)
+    obj = group_block_objective(Σ, S, groups, m, method)
     return JuMP.value.(S), T[], obj
 end
 
 function solve_group_SDP_ccd(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -753,17 +784,18 @@ function solve_group_SDP_ccd(
     verbose::Bool = false,
     ) where T
     p = size(Σ, 1)
-    blocks = nblocks(Sblocks)
-    group_sizes = size.(Sblocks.blocks, 1)
+    unique_groups = unique(groups)
+    blocks = length(unique_groups)
+    group_sizes = [count(x -> x == g, groups) for g in unique_groups]
     num_var = sum(abs2, group_sizes)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _, _ = initialize_S(Σ, Sblocks, m, :sdp, verbose)
+    S, _, _ = initialize_S(Σ, groups, m, :sdp, verbose)
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    obj = group_block_objective(Σ, S, m, :sdp)
+    obj = group_block_objective(Σ, S, groups, m, :sdp)
     verbose && 
         println("Full CCD initial obj = $obj, $(num_var) optimization variables")
     # some timers
@@ -844,19 +876,19 @@ function solve_group_SDP_ccd(
             offset += group_sizes[b]
         end
         if verbose
-            obj = group_block_objective(Σ, S, m, :sdp)
+            obj = group_block_objective(Σ, S, groups, m, :sdp)
             println("Iter $l: obj = $obj, δ = $max_delta, " * 
                 "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, T[], group_block_objective(Σ, S, m, :sdp), L, C
+    return S, T[], group_block_objective(Σ, S, groups, m, :sdp), L, C
 end
 
 function solve_group_MVR_ccd(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -865,15 +897,14 @@ function solve_group_MVR_ccd(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    blocks = nblocks(Sblocks)
-    group_sizes = size.(Sblocks.blocks, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
     num_var = sum(abs2, group_sizes)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, L, C = initialize_S(Σ, Sblocks, m, :mvr, verbose)
-    obj = group_block_objective(Σ, S, m, :mvr)
+    S, L, C = initialize_S(Σ, groups, m, :mvr, verbose)
+    obj = group_block_objective(Σ, S, groups, m, :mvr)
     verbose && 
         println("Full CCD initial obj = $obj, $(num_var) optimization variables")
     # preallocated vectors for efficiency
@@ -1034,7 +1065,7 @@ end
 
 function solve_group_max_entropy_ccd(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -1043,14 +1074,14 @@ function solve_group_max_entropy_ccd(
     verbose::Bool = false,
     ) where T
     p = size(Σ, 1)
-    group_sizes = size.(Sblocks.blocks, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
     num_var = sum(abs2, group_sizes)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix with PCA and compute initial cholesky factor
-    S, L, C = initialize_S(Σ, Sblocks, m, :maxent, verbose)
-    # S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, L, C = initialize_S(Σ, groups, m, :maxent, verbose)
+    # S, _ = solve_group_equi(Σ, groups, m=m)
     # S += λmin*I
     # S ./= 2
     # L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
@@ -1183,8 +1214,8 @@ function _maxent_ccd_iter!(
     return obj, converged
 end
 
-# objective function to minimize when optimizing diagonal or offdiagnal entries
-# in max entropy and MVR group knockoffs
+# objective functions to minimize when optimizing diagonal or offdiagnal entries
+# in max entropy, MVR, or SDP group knockoffs
 function offdiag_maxent_obj(δ, m, aij, aii, ajj, bij, bii, bjj)
     in1 = (1 - δ*aij)^2 - δ^2*aii*ajj
     in2 = (1 + δ*bij)^2 - δ^2*bjj*bii
@@ -1206,6 +1237,14 @@ function diag_mvr_obj_root(m, ajj, bjj, cjj, djj)
     x1 = (-b + sqrt(b^2 - 4a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4a*c)) / (2a)
     return x1, x2
+end
+function pca_sdp_obj(δ, Σg, Sg, v)
+    size(Σg, 1) == size(Sg, 1) == length(v) || error("Dimension mismatch!")
+    obj = zero(eltype(v))
+    for i in eachindex(v), j in eachindex(v)
+        obj += abs(Σg[i, j] - Sg[i, j] - δ*v[i]*v[j])
+    end
+    return obj
 end
 
 function rank1_cholesky_update!(L, C, j, δ, store1, store2, 
@@ -1251,7 +1290,7 @@ end
 
 function solve_group_max_entropy_pca(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -1260,9 +1299,10 @@ function solve_group_max_entropy_pca(
     ) where T
     p = size(Σ, 1)
     # compute eigenfactorization for Σ blocks
-    evals, evecs = eigen(Sblocks)
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
     # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, _ = solve_group_equi(Σ, groups, m=m)
     S += λmin*I
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
@@ -1343,7 +1383,7 @@ end
 
 function solve_group_max_entropy_hybrid(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     outer_iter::Int = 10,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
@@ -1354,14 +1394,15 @@ function solve_group_max_entropy_hybrid(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    group_sizes = size.(Sblocks.blocks, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # compute eigenfactorization for Σ blocks
-    evals, evecs = eigen(Sblocks)
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    group_sizes = size.(Σblocks.blocks, 1)
     # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, _ = solve_group_equi(Σ, groups, m=m)
     S += λmin*I
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
@@ -1396,7 +1437,7 @@ end
 
 function solve_group_MVR_pca(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -1405,15 +1446,16 @@ function solve_group_MVR_pca(
     ) where T
     p = size(Σ, 1)
     # compute eigenfactorization for Σ blocks
-    evals, evecs = eigen(Sblocks)
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
     # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, _ = solve_group_equi(Σ, groups, m=m)
     S += λmin*I
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S))
     C = cholesky(Symmetric(S))
     # intial objective
-    obj = group_block_objective(Σ, S, m, :mvr)
+    obj = group_block_objective(Σ, S, groups, m, :mvr)
     verbose && println("initial obj = $obj")
     # some timers
     t1 = zero(T) # time for updating cholesky factors
@@ -1497,7 +1539,7 @@ end
 
 function solve_group_mvr_hybrid(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     outer_iter::Int = 10,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
@@ -1508,19 +1550,20 @@ function solve_group_mvr_hybrid(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
-    group_sizes = size.(Sblocks.blocks, 1)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # compute eigenfactorization for Σ blocks
-    evals, evecs = eigen(Sblocks)
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    group_sizes = size.(Σblocks.blocks, 1)
     # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, _ = solve_group_equi(Σ, groups, m=m)
     S += λmin*I
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S))
     C = cholesky(Symmetric(S))
-    obj = group_block_objective(Σ, S, m, :mvr)
+    obj = group_block_objective(Σ, S, groups, m, :mvr)
     verbose && 
         println("MVR hybrid CCD initial obj = $obj")
     # preallocated vectors for efficiency
