@@ -372,7 +372,8 @@ function initialize_S(Σ, groups::Vector{Int}, m::Int, method, verbose)
             ϵ *= 10
         end
         ϵ ≥ 1 && error("Error initialization. S cannot become PSD. Aborting")
-        L, C = nothing, nothing
+        L = cholesky(Symmetric((m+1)/m * Σ - S))
+        C = cholesky(Symmetric(S))
     elseif occursin("maxent", string(method))
         verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
         S, _, _, L, C = solve_group_max_entropy_pca(Σ, groups, m=m, niter=10, 
@@ -798,10 +799,8 @@ function solve_group_SDP_ccd(
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
-    # initialize S matrix and compute initial cholesky factor
-    S, _, _ = initialize_S(Σ, groups, m, :sdp, verbose)
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :sdp, verbose)
     obj = group_block_objective(Σ, S, groups, m, :sdp)
     verbose && 
         println("Full CCD initial obj = $obj, $(num_var) optimization variables")
@@ -1335,12 +1334,8 @@ function solve_group_max_entropy_pca(
     # compute eigenfactorization for Σ blocks
     Σblocks = block_diagonalize(Σ, groups)
     _, evecs = eigen(Σblocks)
-    # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, groups, m=m)
-    S += λmin*I
-    S ./= 2
-    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :equi, verbose)
     # intial objective
     obj = group_maxent_obj(L, C, m)
     verbose && println("initial obj = $obj")
@@ -1435,12 +1430,8 @@ function solve_group_max_entropy_hybrid(
     Σblocks = block_diagonalize(Σ, groups)
     _, evecs = eigen(Σblocks)
     group_sizes = size.(Σblocks.blocks, 1)
-    # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, groups, m=m)
-    S += λmin*I
-    S ./= 2
-    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :equi, verbose)
     obj = group_maxent_obj(L, C, m)
     verbose && 
         println("Maxent hybrid CCD initial obj = $obj")
@@ -1482,12 +1473,8 @@ function solve_group_MVR_pca(
     # compute eigenfactorization for Σ blocks
     Σblocks = block_diagonalize(Σ, groups)
     _, evecs = eigen(Σblocks)
-    # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, groups, m=m)
-    S += λmin*I
-    S ./= 2
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :equi, verbose)
     # intial objective
     obj = group_block_objective(Σ, S, groups, m, :mvr)
     verbose && println("initial obj = $obj")
@@ -1591,12 +1578,8 @@ function solve_group_mvr_hybrid(
     Σblocks = block_diagonalize(Σ, groups)
     _, evecs = eigen(Σblocks)
     group_sizes = size.(Σblocks.blocks, 1)
-    # initialize S matrix and compute initial matrices
-    S, _ = solve_group_equi(Σ, groups, m=m)
-    S += λmin*I
-    S ./= 2
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :equi, verbose)
     obj = group_block_objective(Σ, S, groups, m, :mvr)
     verbose && 
         println("MVR hybrid CCD initial obj = $obj")
@@ -1637,10 +1620,8 @@ function solve_group_SDP_pca(
     # compute eigenfactorization for Σ blocks
     Σblocks = block_diagonalize(Σ, groups)
     _, evecs = eigen(Σblocks)
-    # initialize S matrix and compute cholesky factors
-    S, _, _ = initialize_S(Σ, groups, m, :equi, verbose)
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :equi, verbose)
     # intial objective for each group
     group_objectives, group_idx = T[], Vector{Int}[]
     for g in unique(groups)
@@ -1765,10 +1746,8 @@ function solve_group_sdp_hybrid(
     Σblocks = block_diagonalize(Σ, groups)
     _, evecs = eigen(Σblocks)
     group_sizes = size.(Σblocks.blocks, 1)
-    # initialize S matrix and compute initial matrices
-    S, _, _ = initialize_S(Σ, groups, m, :equi, verbose)
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
-    C = cholesky(Symmetric(S))
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m, :equi, verbose)
     # intial objective for each group
     group_objectives, group_idx = T[], Vector{Int}[]
     for g in unique(groups)

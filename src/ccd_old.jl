@@ -1,6 +1,13 @@
+## This file contains depreciated code and will be removed soon 
+## The main problem was (1) Diagonal updates for MVR/ME re-used code from 
+## non-grouped knockoff solvers, which assumed S is a diagonal matrix. This 
+## does not violate any PSD and the solution seems generally good, but 
+## technically the updates are not correct. (2) The MVR solver required repeated
+## inversion of S and ((m+1)/mΣ-S) to backtrack, which is not necessary. 
+
 function solve_group_max_entropy_ccd_old(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -9,6 +16,8 @@ function solve_group_max_entropy_ccd_old(
     verbose::Bool = false,
     backtrack::Bool = true
     ) where T
+    Sblocks = block_diagonalize(Σ, groups)
+    # constants
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
@@ -18,7 +27,7 @@ function solve_group_max_entropy_ccd_old(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, _ = solve_group_equi(Σ, groups, m=m)
     S += λmin*I
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
@@ -133,7 +142,7 @@ end
 
 function solve_group_MVR_ccd_old(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -142,6 +151,8 @@ function solve_group_MVR_ccd_old(
     verbose::Bool = false,
     backtrack::Bool = false # if true, need to evaluate objective which involves matrix inverses
     ) where T
+    Sblocks = block_diagonalize(Σ, groups)
+    # constants
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
@@ -151,7 +162,7 @@ function solve_group_MVR_ccd_old(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
+    S, _ = solve_group_equi(Σ, groups, m=m)
     S += λmin*I
     S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
@@ -269,7 +280,7 @@ end
 
 function solve_group_SDP_ccd_old(
     Σ::AbstractMatrix{T}, 
-    Sblocks::BlockDiagonal;
+    groups::Vector{Int};
     niter::Int = 100,
     tol=0.01, # converges when changes in s are all smaller than tol,
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
@@ -278,6 +289,8 @@ function solve_group_SDP_ccd_old(
     verbose::Bool = false,
     backtrack::Bool = true
     ) where T
+    Sblocks = block_diagonalize(Σ, groups)
+    # constants
     p = size(Σ, 1)
     blocks = nblocks(Sblocks)
     group_sizes = size.(Sblocks.blocks, 1)
@@ -287,12 +300,12 @@ function solve_group_SDP_ccd_old(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _ = solve_group_equi(Σ, Sblocks, m=m)
-    S += λmin*I
-    S ./= 2
+    S, _ = solve_group_equi(Σ, groups, m=m)
+    # S += λmin*I
+    # S ./= 2
     L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
     C = cholesky(Symmetric(S))
-    verbose && println("initial obj = ", group_block_objective(Σ, S, m, :sdp))
+    verbose && println("initial obj = ", group_block_objective(Σ, S, groups, m, :sdp))
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -371,12 +384,12 @@ function solve_group_SDP_ccd_old(
             offset += group_sizes[b]
         end
         if verbose
-            obj = group_block_objective(Σ, S, m, :sdp)
+            obj = group_block_objective(Σ, S, groups, m, :sdp)
             println("Iter $l: obj = $obj, δ = $max_delta, t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), t3 = $(round(t3, digits=2))")
         end
         max_delta < tol && break 
     end
-    return S, T[], group_block_objective(Σ, S, m, :sdp)
+    return S, T[], group_block_objective(Σ, S, groups, m, :sdp)
 end
 
 function group_mvr_obj!(M::LowerTriangular{T}, L::Cholesky, C::Cholesky, m::Int) where T
@@ -416,7 +429,6 @@ function update_offdiag_chol_sdp!(S, Σ, L, C, storage, i, j, ei, ej, δ, choldo
     new_obj = abs(Σ[i, j] - S[i, j] - δ)
     if backtrack && new_obj > obj_old
         # undo the update if objective got worse
-        println("Reaced here 5")
         S[i, j] -= δ
         S[j, i] -= δ
         return zero(typeof(δ))
