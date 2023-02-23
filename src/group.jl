@@ -362,7 +362,16 @@ final `S` matrix as well as the cholesky factorizations `L` and `C` where
 + C.L*C.U = cholesky(S)
 """
 function initialize_S(Σ, groups::Vector{Int}, m::Int, method, verbose)
-    if occursin("maxent", string(method))
+    if occursin("equi", string(method))
+        S, _, _ = solve_group_equi(Σ, groups, m=m)
+        ϵ = 1e-8
+        while !isposdef(S)
+            S = (1-ϵ)S + ϵ*I
+            ϵ *= 10
+        end
+        ϵ ≥ 1 && error("Error initialization. S cannot become PSD. Aborting")
+        L, C = nothing, nothing
+    elseif occursin("maxent", string(method))
         verbose && println("Performing 10 PCA-CCD steps to prime main algorithm")
         S, _, _, L, C = solve_group_max_entropy_pca(Σ, groups, m=m, niter=10, 
             verbose=verbose)
@@ -371,9 +380,7 @@ function initialize_S(Σ, groups::Vector{Int}, m::Int, method, verbose)
         S, _, _, L, C = solve_group_MVR_pca(Σ, groups, m=m, niter=10, verbose=verbose)
     else
         # todo: CCD-PCA for SDP
-        S, _, _ = solve_group_equi(Σ, groups, m=m)
-        S = (1-1e-6)S + 1e-6*I
-        L, C = nothing, nothing # todo
+        error("Not implemented yet")
     end
     return S, L, C
 end
@@ -792,8 +799,8 @@ function solve_group_SDP_ccd(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix and compute initial cholesky factor
-    S, _, _ = initialize_S(Σ, groups, m, :sdp, verbose)
-    L = cholesky(Symmetric((m+1)/m * Σ - S + 2λmin*I))
+    S, _, _ = initialize_S(Σ, groups, m, :equi, verbose)
+    L = cholesky(Symmetric((m+1)/m * Σ - S))
     C = cholesky(Symmetric(S))
     obj = group_block_objective(Σ, S, groups, m, :sdp)
     verbose && 
@@ -1587,6 +1594,108 @@ function solve_group_mvr_hybrid(
             println("\n Hybrid PCA-CCD iter $i: obj = $obj")
         end
         converged1 && converged2 && break
+    end
+    return S, T[], obj, L, C
+end
+
+function solve_group_SDP_pca(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # compute eigenfactorization for Σ blocks
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    # initialize S matrix and compute cholesky factors
+    S, _, _ = initialize_S(Σ, groups, m, :equi, verbose)
+    L = cholesky(Symmetric((m+1)/m * Σ - S))
+    C = cholesky(Symmetric(S))
+    # intial objective for each group
+    group_objectives, group_idx = T[], Vector{Int}[]
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        obj_g = _sdp_block_objective(@view(Σ[idx, idx]), @view(S[idx, idx]))
+        push!(group_objectives, obj_g)
+        push!(group_idx, idx)
+    end
+    obj = sum(group_objectives)
+    verbose && println("initial obj = $obj")
+    # for each v, find its non-zero indices, and which group v updates
+    nz_indices, v_groups = Vector{Int}[], Int[]
+    for v in eachcol(evecs)
+        nz_idx = findall(!iszero, v)
+        g = findfirst(x -> x == nz_idx, group_idx) |> something
+        push!(nz_indices, nz_idx)
+        push!(v_groups, g)
+    end
+    # some timers
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    t3 = zero(T) # time for solving 1D optimization problems
+    # preallocated vectors for efficiency
+    u, w = zeros(p), zeros(p)
+    for l in 1:niter
+        max_delta = zero(T)
+        for (j, v) in enumerate(eachcol(evecs))
+            nz_idx = nz_indices[j]
+            v_group = v_groups[j]
+            # get necessary constants
+            t2 += @elapsed begin
+                ldiv!(w, UpperTriangular(L.factors)', v)
+                ldiv!(u, UpperTriangular(C.factors)', v)
+                vt_Sinv_v = dot(u, u)
+                vt_Dinv_v = dot(w, w)
+            end
+            # compute feasible region
+            lb = -1 / vt_Sinv_v
+            ub = 1 / vt_Dinv_v
+            lb ≥ ub && continue
+            # compute δ numerically
+            Σg, Sg = @view(Σ[nz_idx, nz_idx]), @view(S[nz_idx, nz_idx])
+            vg = @view(v[nz_idx])
+            t3 += @elapsed opt = optimize(
+                δ -> pca_sdp_obj(δ, Σg, Sg, vg),
+                lb, ub, Brent(), show_trace=false, abs_tol=0.0001
+            )
+            δ = clamp(opt.minimizer, lb, ub)
+            # find difference in objective
+            change_obj = opt.minimum - obj
+            if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
+                continue
+            end
+            # update S_new = S + δ*v*v'
+            t1 += @elapsed BLAS.ger!(δ, v, v, S)
+            obj += opt.minimum - group_objectives[v_group]
+            group_objectives[v_group] = opt.minimum
+            # update cholesky factors (must use robust updates since v is dense)
+            u .= sqrt(abs(δ)) .* v
+            w .= sqrt(abs(δ)) .* v
+            t1 += @elapsed begin
+                if δ > 0
+                    LinearAlgebra.lowrankdowndate!(L, u)
+                    LinearAlgebra.lowrankupdate!(C, w)
+                else
+                    LinearAlgebra.lowrankupdate!(L, u)
+                    LinearAlgebra.lowrankdowndate!(C, w)
+                end
+            end
+            # track convergence
+            abs(δ) > max_delta && (max_delta = abs(δ))
+        end
+        if verbose
+            # obj_true = group_block_objective(Σ, S, groups, m, :sdp)
+            println("Iter $l: obj = $obj, δ = $max_delta, t1 = " * 
+                "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))" * 
+                "$(round(t3, digits=2)), t3 = $(round(t3, digits=2))"
+            )
+        end
+        # check convergence
+        max_delta < tol && break 
     end
     return S, T[], obj, L, C
 end
