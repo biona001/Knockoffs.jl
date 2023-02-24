@@ -650,3 +650,214 @@ function solve_group_max_entropy_suboptimal(Σ::AbstractMatrix, Σblocks::BlockD
     S = BlockDiagonal(γs[1] .* Σblocks.blocks)
     return S, γs, objective_value(model)
 end
+
+
+
+
+function solve_group_SDP_ccd(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol,
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false,
+    ) where T
+    p = size(Σ, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
+    num_var = sum(abs2, group_sizes)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m)
+    obj = group_block_objective(Σ, S, groups, m, :sdp)
+    verbose && 
+        println("Full CCD initial obj = $obj, $(num_var) optimization variables")
+    # preallocated vectors for efficiency
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    # CCD iterations
+    obj, _ = _sdp_ccd_iter!(
+        S, L, C, Σ, groups,
+        obj, m, group_sizes, niter, tol, λmin, verbose,
+        cholupdate!, choldowndate!,
+        u, v, ei, ej
+    )
+    return S, T[], group_block_objective(Σ, S, groups, m, :sdp), L, C
+end
+
+function solve_group_MVR_ccd(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol,
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
+    num_var = sum(abs2, group_sizes)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # initialize S matrix and compute initial cholesky factor
+    S, L, C = initialize_S(Σ, groups, m)
+    obj = group_block_objective(Σ, S, groups, m, :mvr)
+    verbose && 
+        println("Full CCD initial obj = $obj, $(num_var) optimization variables")
+    # preallocated vectors for efficiency
+    u, v, ei, ej, storage = zeros(p), zeros(p), zeros(p), zeros(p), zeros(p)
+    # CCD iterations
+    obj, _ = _mvr_ccd_iter!(
+        S, L, C,
+        obj, m, group_sizes, niter, tol, λmin, verbose,
+        cholupdate!, choldowndate!,
+        u, v, ei, ej, storage
+    )
+    return S, T[], obj, L, C
+end
+
+
+function solve_group_max_entropy_ccd(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol,
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
+    verbose::Bool = false,
+    ) where T
+    p = size(Σ, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
+    num_var = sum(abs2, group_sizes)
+    # whether to use robust cholesky updates or not
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    # initialize S matrix with PCA and compute initial cholesky factor
+    S, L, C = initialize_S(Σ, groups, m)
+    obj = group_maxent_obj(L, C, m)
+    verbose && 
+        println("Full CCD initial obj = $obj, $(num_var) optimization variables")
+    # preallocated vectors for efficiency
+    u, v, ei, ej = zeros(p), zeros(p), zeros(p), zeros(p)
+    # coordinate descent iterations
+    obj, _ = _maxent_ccd_iter!(
+        S, L, C, 
+        obj, m, group_sizes, niter, tol, λmin, verbose, 
+        cholupdate!, choldowndate!,
+        u, v, ei, ej
+    )
+    obj = group_maxent_obj(L, C, m)
+    return S, T[], obj, L, C
+end
+
+
+function solve_group_max_entropy_pca(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # compute eigenfactorization for Σ blocks
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m)
+    # intial objective
+    obj = group_maxent_obj(L, C, m)
+    verbose && println("initial obj = $obj")
+    # preallocated vectors for efficiency
+    u, w = zeros(p), zeros(p)
+    # PCA-CCD iterations
+    obj, _ = _maxent_pca_ccd_iter!(
+        S, L, C, evecs, 
+        obj, m, niter, tol, verbose,
+        u, w
+    )
+    return S, T[], obj, L, C
+end
+
+
+function solve_group_MVR_pca(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # compute eigenfactorization for Σ blocks
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m)
+    # intial objective
+    obj = group_block_objective(Σ, S, groups, m, :mvr)
+    verbose && println("initial obj = $obj")
+    # some timers
+    t1 = zero(T) # time for updating cholesky factors
+    t2 = zero(T) # time for forward/backward solving
+    # preallocated vectors for efficiency
+    u, w, storage = zeros(p), zeros(p), zeros(p)
+    # PCA-CCD iterations
+    obj, _ = _mvr_pca_ccd_iter!(
+        S, L, C, evecs, Σ,
+        obj, m, niter, tol, verbose,
+        u, w, storage
+    )
+    return S, T[], obj, L, C
+end
+
+
+function solve_group_SDP_pca(
+    Σ::AbstractMatrix{T}, 
+    groups::Vector{Int};
+    niter::Int = 100,
+    tol=0.01, # converges when changes in s are all smaller than tol
+    m::Int = 1, # number of knockoffs per variable
+    verbose::Bool = false
+    ) where T
+    p = size(Σ, 1)
+    # compute eigenfactorization for Σ blocks
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    # initialize S matrix and initial cholesky factors
+    S, L, C = initialize_S(Σ, groups, m)
+    # intial objective for each group
+    group_objectives, group_idx = T[], Vector{Int}[]
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        obj_g = _sdp_block_objective(@view(Σ[idx, idx]), @view(S[idx, idx]))
+        push!(group_objectives, obj_g)
+        push!(group_idx, idx)
+    end
+    obj = sum(group_objectives)
+    verbose && println("initial obj = $obj")
+    # for each v, find its non-zero indices, and which group v updates
+    nz_indices, v_groups = Vector{Int}[], Int[]
+    for v in eachcol(evecs)
+        nz_idx = findall(!iszero, v)
+        g = findfirst(x -> x == nz_idx, group_idx) |> something
+        push!(nz_indices, nz_idx)
+        push!(v_groups, g)
+    end
+    # preallocated vectors for efficiency
+    u, w = zeros(p), zeros(p)
+    obj, _ = _sdp_pca_ccd_iter!(
+        S, L, C, evecs, Σ,
+        obj, niter, tol, verbose,
+        nz_indices, v_groups, group_objectives,
+        u, w, groups, m
+    )
+    return S, T[], obj, L, C
+end
