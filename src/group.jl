@@ -320,26 +320,14 @@ function solve_s_group(
             S, γs, obj, _, _ = solve_group_mvr_hybrid(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent
             S, γs, obj, _, _ = solve_group_max_entropy_hybrid(Σcor, group_permuted; m=m, kwargs...)
-        elseif method == :maxent_old
-            S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, group_permuted; m=m, kwargs...)
-        elseif method == :mvr_old
-            S, γs, obj = solve_group_MVR_ccd_old(Σcor, group_permuted; m=m, kwargs...)
-        elseif method == :sdp_old
-            S, γs, obj = solve_group_SDP_ccd_old(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :maxent_pca
-        #     S, γs, obj, _, _ = solve_group_max_entropy_pca(Σcor, group_permuted; m=m, kwargs...)
-        elseif method == :maxent_pca_zihuai
-            S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, group_permuted)
-        # elseif method == :mvr_pca
-        #     S, γs, obj, _, _ = solve_group_MVR_pca(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :sdp_pca
-        #     S, γs, obj, _, _ = solve_group_SDP_pca(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :maxent_hybrid
-        #     S, γs, obj = solve_group_max_entropy_hybrid(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :mvr_hybrid
-        #     S, γs, obj = solve_group_mvr_hybrid(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :sdp_hybrid
-        #     S, γs, obj = solve_group_sdp_hybrid(Σcor, group_permuted; m=m, kwargs...)
+        # elseif method == :maxent_old
+        #     S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, group_permuted; m=m, kwargs...)
+        # elseif method == :mvr_old
+        #     S, γs, obj = solve_group_MVR_ccd_old(Σcor, group_permuted; m=m, kwargs...)
+        # elseif method == :sdp_old
+        #     S, γs, obj = solve_group_SDP_ccd_old(Σcor, group_permuted; m=m, kwargs...)
+        # elseif method == :maxent_pca_zihuai
+        #     S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, group_permuted)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end
@@ -775,7 +763,7 @@ function solve_group_max_entropy_hybrid(
     outer_iter::Int = 100,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when changes in s are all smaller than tol
+    tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -826,7 +814,7 @@ function solve_group_sdp_hybrid(
     outer_iter::Int = 10,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when changes in s are all smaller than tol
+    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -851,12 +839,11 @@ function solve_group_sdp_hybrid(
     end
     obj = sum(group_objectives)
     verbose && println("SDP initial obj = $obj")
-    # for each v, find its non-zero indices, and which group v updates
-    nz_indices, v_groups = Vector{Int}[], Int[]
-    for v in eachcol(evecs)
-        nz_idx = findall(!iszero, v)
-        g = findfirst(x -> x == nz_idx, group_idx) |> something
-        push!(nz_indices, nz_idx)
+    # for each v, find which group v updates
+    v_groups = Int[]
+    for v in eachcol(V)
+        nz_idx = findfirst(!iszero, v) |> something
+        g = findfirst(x -> nz_idx in x, group_idx) |> something
         push!(v_groups, g)
     end
     # some timers
@@ -871,7 +858,7 @@ function solve_group_sdp_hybrid(
         converged1, obj, t1, t2, t3, iter = _sdp_pca_ccd_iter!(
             S, L, C, V, Σ,
             obj, inner_pca_iter, tol, t1, t2, t3, iter, 
-            nz_indices, v_groups, group_objectives,
+            group_idx, v_groups, group_objectives,
             cholupdate!, choldowndate!,
             u, w, groups, m, verbose=verbose
         )
@@ -894,7 +881,7 @@ function solve_group_mvr_hybrid(
     outer_iter::Int = 10,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when changes in s are all smaller than tol
+    tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -950,6 +937,7 @@ function _sdp_ccd_iter!(
     converged = niter == 0 ? true : false
     for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         offset = 0
         for b in 1:blocks
             #
@@ -973,7 +961,7 @@ function _sdp_ccd_iter!(
                 # end
                 # update S
                 S[j, j] += δj
-                obj += change_obj
+                obj_new += change_obj
                 # rank 1 update to cholesky factors
                 t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δj, ej, u, choldowndate!, cholupdate!
@@ -1017,7 +1005,7 @@ function _sdp_ccd_iter!(
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
-                obj += change_obj
+                obj_new += change_obj
                 # rank 2 update to cholesky factors
                 t1 += @elapsed rank2_cholesky_update!(
                     L, C, i, j, δ, u, v, choldowndate!, cholupdate!
@@ -1030,12 +1018,14 @@ function _sdp_ccd_iter!(
         if verbose
             # obj_true = group_block_objective(Σ, S, groups, m, :sdp)
             # @show obj_true
-            println("Iter $print_iter (CCD): obj = $obj, δ = $max_delta, " * 
+            println("Iter $print_iter (CCD): obj = $obj_new, δ = $max_delta, " * 
                 "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
         end
-        if max_delta < tol
+        change_obj = abs((obj_new - obj) / obj)
+        obj = obj_new
+        if change_obj < tol
             converged = true
             break 
         end
@@ -1054,6 +1044,7 @@ function _mvr_ccd_iter!(
     converged = niter == 0 ? true : false
     for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         offset = 0
         for b in 1:blocks
             #
@@ -1085,7 +1076,7 @@ function _mvr_ccd_iter!(
                     continue
                 end
                 S[j, j] += δ
-                obj += change_obj
+                obj_new += change_obj
                 # rank 1 update to cholesky factors
                 t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δ, ej, u, choldowndate!, cholupdate!
@@ -1141,7 +1132,7 @@ function _mvr_ccd_iter!(
                     continue
                 end
                 # update S
-                obj += change_obj
+                obj_new += change_obj
                 S[i, j] += δ
                 S[j, i] += δ
                 # update cholesky factors
@@ -1154,12 +1145,14 @@ function _mvr_ccd_iter!(
             offset += group_sizes[b]
         end
         if verbose
-            println("Iter $print_iter (CCD): obj = $obj, δ = $max_delta, " * 
+            println("Iter $print_iter (CCD): obj = $obj_new, δ = $max_delta, " * 
                 "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2))," * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
         end
-        if max_delta < tol
+        change_obj = abs((obj_new - obj) / obj)
+        obj = obj_new
+        if change_obj < tol
             converged = true
             break 
         end
@@ -1178,6 +1171,7 @@ function _maxent_ccd_iter!(
     converged = niter == 0 ? true : false
     for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         offset = 0
         for b in 1:blocks
             #
@@ -1204,7 +1198,7 @@ function _maxent_ccd_iter!(
                     continue
                 end
                 S[j, j] += δ
-                obj += change_obj
+                obj_new += change_obj
                 # rank 1 update to cholesky factors
                 t1 += @elapsed rank1_cholesky_update!(
                     L, C, j, δ, ej, u, choldowndate!, cholupdate!
@@ -1249,7 +1243,7 @@ function _maxent_ccd_iter!(
                 if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                     continue
                 end
-                obj += change_obj
+                obj_new += change_obj
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
@@ -1264,12 +1258,15 @@ function _maxent_ccd_iter!(
         end
         if verbose
             # true_obj = group_maxent_obj(L, C, m)
-            println("Iter $print_iter (CCD): obj = $obj, δ = $max_delta, t1 = " * 
+            # @show true_obj
+            println("Iter $print_iter (CCD): obj = $obj_new, δ = $max_delta, t1 = " * 
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
         end
-        if max_delta < tol
+        change_obj = abs((obj_new - obj) / obj)
+        obj = obj_new
+        if change_obj < tol
             converged = true
             break 
         end
@@ -1287,6 +1284,7 @@ function _maxent_pca_ccd_iter!(
     converged = niter == 0 ? true : false
     for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         for v in eachcol(evecs)
             # get necessary constants
             t2 += @elapsed begin
@@ -1307,7 +1305,7 @@ function _maxent_pca_ccd_iter!(
             end
             # update S_new = S + δ*v*v'
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
-            obj += change_obj
+            obj_new += change_obj
             # update cholesky factors (must use robust updates since v is dense)
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
@@ -1324,12 +1322,14 @@ function _maxent_pca_ccd_iter!(
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
         if verbose
-            println("Iter $(print_iter) (PCA): obj = $obj, δ = $max_delta, t1 = " * 
+            println("Iter $(print_iter) (PCA): obj = $obj_new, δ = $max_delta, t1 = " * 
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
             print_iter += 1
         end
         # check convergence
-        if max_delta < tol
+        change_obj = abs((obj_new - obj) / obj)
+        obj = obj_new
+        if change_obj < tol
             converged = true
             break 
         end
@@ -1347,6 +1347,7 @@ function _mvr_pca_ccd_iter!(
     converged = niter == 0 ? true : false
     for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         for v in eachcol(evecs)
             # get necessary constants
             t2 += @elapsed begin
@@ -1372,7 +1373,7 @@ function _mvr_pca_ccd_iter!(
             if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
                 continue
             end
-            obj += change_obj
+            obj_new += change_obj
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
             # update cholesky factors (must use robust updates since v is dense)
             u .= sqrt(abs(δ)) .* v
@@ -1390,12 +1391,14 @@ function _mvr_pca_ccd_iter!(
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
         if verbose
-            println("Iter $print_iter (PCA): obj = $obj, δ = $max_delta, t1 = " * 
+            println("Iter $print_iter (PCA): obj = $obj_new, δ = $max_delta, t1 = " * 
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
             print_iter += 1
         end
         # check convergence
-        if max_delta < tol
+        change_obj = abs((obj_new - obj) / obj)
+        obj = obj_new
+        if change_obj < tol
             converged = true
             break
         end
@@ -1406,7 +1409,7 @@ end
 function _sdp_pca_ccd_iter!(
     S, L, C, evecs, Σ, # main matrix variables
     obj, niter, tol, t1, t2, t3, print_iter, # constants
-    nz_indices, v_groups, group_objectives, # some precomputed variables
+    group_indices, v_groups, group_objectives, # some precomputed variables
     cholupdate!, choldowndate!, # cholesky update functions 
     u, w, groups, m; verbose=false # storages
     )
@@ -1414,9 +1417,10 @@ function _sdp_pca_ccd_iter!(
     converged = niter == 0 ? true : false
     for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         for (j, v) in enumerate(eachcol(evecs))
-            nz_idx = nz_indices[j]
             v_group = v_groups[j]
+            group_idx = group_indices[v_group]
             # get necessary constants
             t2 += @elapsed begin
                 ldiv!(w, UpperTriangular(L.factors)', v)
@@ -1429,8 +1433,8 @@ function _sdp_pca_ccd_iter!(
             ub = 1 / vt_Dinv_v
             lb ≥ ub && continue
             # compute δ numerically
-            Σg, Sg = @view(Σ[nz_idx, nz_idx]), @view(S[nz_idx, nz_idx])
-            vg = @view(v[nz_idx])
+            Σg, Sg = @view(Σ[group_idx, group_idx]), @view(S[group_idx, group_idx])
+            vg = @view(v[group_idx])
             t3 += @elapsed opt = optimize(
                 δ -> pca_sdp_obj(δ, Σg, Sg, vg),
                 lb, ub, Brent(), show_trace=false, abs_tol=0.0001
@@ -1443,7 +1447,7 @@ function _sdp_pca_ccd_iter!(
             # end
             # update S_new = S + δ*v*v'
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
-            obj += change_obj
+            obj_new += change_obj
             group_objectives[v_group] = opt.minimum
             # update cholesky factors (must use robust updates since v is dense)
             u .= sqrt(abs(δ)) .* v
@@ -1463,13 +1467,15 @@ function _sdp_pca_ccd_iter!(
         if verbose
             # obj_true = group_block_objective(Σ, S, groups, m, :sdp)
             # @show obj_true
-            println("Iter $print_iter (PCA): obj = $obj, δ = $max_delta, t1 = " * 
+            println("Iter $print_iter (PCA): obj = $obj_new, δ = $max_delta, t1 = " * 
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
         end
         # check convergence
-        if max_delta < tol
+        change_obj = abs((obj_new - obj) / obj)
+        obj = obj_new
+        if change_obj < tol
             converged = true
             break
         end
