@@ -804,6 +804,7 @@ function solve_group_max_entropy_hybrid(
         converged1, obj, t1, t2, t3, iter = _maxent_pca_ccd_iter!(
             S, L, C, V, 
             obj, m, inner_pca_iter, tol, t1, t2, t3, iter, 
+            cholupdate!, choldowndate!,
             u, w; verbose=verbose
         )
         # Full CCD iterations
@@ -871,6 +872,7 @@ function solve_group_sdp_hybrid(
             S, L, C, V, Σ,
             obj, inner_pca_iter, tol, t1, t2, t3, iter, 
             nz_indices, v_groups, group_objectives,
+            cholupdate!, choldowndate!,
             u, w, groups, m, verbose=verbose
         )
         # Full CCD iterations
@@ -921,6 +923,7 @@ function solve_group_mvr_hybrid(
         converged1, obj, t1, t2, t3, iter = _mvr_pca_ccd_iter!(
             S, L, C, V, Σ, 
             obj, m, inner_pca_iter, tol, t1, t2, t3, iter, 
+            cholupdate!, choldowndate!,
             u, w, storage, verbose=verbose
         )
         # Full CCD iterations
@@ -1277,6 +1280,7 @@ end
 function _maxent_pca_ccd_iter!(
     S, L, C, evecs, # main matrix variables
     obj, m, niter, tol, t1, t2, t3, print_iter, # constants
+    cholupdate!, choldowndate!, # cholesky update functions 
     u, w; verbose=false # storages
     )
     T = eltype(S)
@@ -1309,11 +1313,11 @@ function _maxent_pca_ccd_iter!(
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
                 if δ > 0
-                    LinearAlgebra.lowrankdowndate!(L, u)
-                    LinearAlgebra.lowrankupdate!(C, w)
+                    choldowndate!(L, u)
+                    cholupdate!(C, w)
                 else
-                    LinearAlgebra.lowrankupdate!(L, u)
-                    LinearAlgebra.lowrankdowndate!(C, w)
+                    cholupdate!(L, u)
+                    choldowndate!(C, w)
                 end
             end
             # track convergence
@@ -1336,6 +1340,7 @@ end
 function _mvr_pca_ccd_iter!(
     S, L, C, evecs, Σ, # main matrix variables
     obj, m, niter, tol, t1, t2, t3, print_iter, # constants
+    cholupdate!, choldowndate!, # cholesky update functions 
     u, w, storage; verbose=false # storages
     )
     T = eltype(S)
@@ -1374,11 +1379,11 @@ function _mvr_pca_ccd_iter!(
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
                 if δ > 0
-                    LinearAlgebra.lowrankdowndate!(L, u)
-                    LinearAlgebra.lowrankupdate!(C, w)
+                    choldowndate!(L, u)
+                    cholupdate!(C, w)
                 else
-                    LinearAlgebra.lowrankupdate!(L, u)
-                    LinearAlgebra.lowrankdowndate!(C, w)
+                    cholupdate!(L, u)
+                    choldowndate!(C, w)
                 end
             end
             # track convergence
@@ -1402,6 +1407,7 @@ function _sdp_pca_ccd_iter!(
     S, L, C, evecs, Σ, # main matrix variables
     obj, niter, tol, t1, t2, t3, print_iter, # constants
     nz_indices, v_groups, group_objectives, # some precomputed variables
+    cholupdate!, choldowndate!, # cholesky update functions 
     u, w, groups, m; verbose=false # storages
     )
     T = eltype(S)
@@ -1444,11 +1450,11 @@ function _sdp_pca_ccd_iter!(
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
                 if δ > 0
-                    LinearAlgebra.lowrankdowndate!(L, u)
-                    LinearAlgebra.lowrankupdate!(C, w)
+                    choldowndate!(L, u)
+                    cholupdate!(C, w)
                 else
-                    LinearAlgebra.lowrankupdate!(L, u)
-                    LinearAlgebra.lowrankdowndate!(C, w)
+                    cholupdate!(L, u)
+                    choldowndate!(C, w)
                 end
             end
             # track convergence
