@@ -329,7 +329,7 @@ function solve_s_group(
         # elseif method == :maxent_pca
         #     S, γs, obj, _, _ = solve_group_max_entropy_pca(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent_pca_zihuai
-            S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, groups)
+            S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, group_permuted)
         # elseif method == :mvr_pca
         #     S, γs, obj, _, _ = solve_group_MVR_pca(Σcor, group_permuted; m=m, kwargs...)
         # elseif method == :sdp_pca
@@ -391,10 +391,8 @@ end
     block_diagonalize(Σ, groups)
 
 Internal function to block-diagonalize the covariance `Σ` according to groups. 
-Here `groups` is assumed sorted. 
 """
 function block_diagonalize(Σ::AbstractMatrix, groups::Vector{Int})
-    issorted(groups) || error("groups is expected to be sorted!")
     Σblocks = Matrix{eltype(Σ)}[]
     for g in unique(groups)
         idx = findall(x -> x == g, groups)
@@ -784,17 +782,16 @@ function solve_group_max_entropy_hybrid(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
-    # compute eigenfactorization for Σ blocks
-    Σblocks = block_diagonalize(Σ, groups)
-    _, evecs = eigen(Σblocks)
-    group_sizes = size.(Σblocks.blocks, 1)
     # initialize S matrix, initial cholesky factors, and constants
     S, L, C = initialize_S(Σ, groups, m)
     obj = group_maxent_obj(L, C, m)
     verbose && println("Maxent initial obj = $obj")
+    # compute vectors for PCA updates
+    V = get_PCA_vectors(Σ, groups)
     # some timers
     t1 = zero(T) # time for updating cholesky factors
     t2 = zero(T) # time for forward/backward solving
@@ -804,20 +801,18 @@ function solve_group_max_entropy_hybrid(
     iter = 1
     for i in 1:outer_iter
         # PCA iterations
-        converged1, obj, t1, t2, t3 = _maxent_pca_ccd_iter!(
-            S, L, C, evecs, 
+        converged1, obj, t1, t2, t3, iter = _maxent_pca_ccd_iter!(
+            S, L, C, V, 
             obj, m, inner_pca_iter, tol, t1, t2, t3, iter, 
             u, w; verbose=verbose
         )
-        iter += inner_pca_iter
         # Full CCD iterations
-        converged2, obj, t1, t2, t3 = _maxent_ccd_iter!(
+        converged2, obj, t1, t2, t3, iter = _maxent_ccd_iter!(
             S, L, C, 
             obj, m, group_sizes, inner_ccd_iter, tol, λmin, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, ei, ej; verbose=verbose
         )
-        iter += inner_ccd_iter
         # check convergence
         converged1 && converged2 && break
     end
@@ -837,13 +832,12 @@ function solve_group_sdp_hybrid(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
-    # compute eigenfactorization for Σ blocks
-    Σblocks = block_diagonalize(Σ, groups)
-    _, evecs = eigen(Σblocks)
-    group_sizes = size.(Σblocks.blocks, 1)
+    # compute vectors for PCA updates
+    V = get_PCA_vectors(Σ, groups)
     # initialize S matrix and initial cholesky factors
     S, L, C = initialize_S(Σ, groups, m)
     # intial objective for each group
@@ -873,21 +867,19 @@ function solve_group_sdp_hybrid(
     iter = 1
     for i in 1:outer_iter
         # PCA iterations
-        converged1, obj, t1, t2, t3 = _sdp_pca_ccd_iter!(
-            S, L, C, evecs, Σ,
+        converged1, obj, t1, t2, t3, iter = _sdp_pca_ccd_iter!(
+            S, L, C, V, Σ,
             obj, inner_pca_iter, tol, t1, t2, t3, iter, 
             nz_indices, v_groups, group_objectives,
             u, w, groups, m, verbose=verbose
         )
-        iter += inner_pca_iter
         # Full CCD iterations
-        converged2, obj, t1, t2, t3 = _sdp_ccd_iter!(
+        converged2, obj, t1, t2, t3, iter = _sdp_ccd_iter!(
             S, L, C, Σ, groups,
             obj, m, group_sizes, inner_ccd_iter, tol, λmin, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, ei, ej, verbose=verbose
         )
-        iter += inner_ccd_iter
         # check convergence
         converged1 && converged2 && break
     end
@@ -907,13 +899,12 @@ function solve_group_mvr_hybrid(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
-    # compute eigenfactorization for Σ blocks
-    Σblocks = block_diagonalize(Σ, groups)
-    _, evecs = eigen(Σblocks)
-    group_sizes = size.(Σblocks.blocks, 1)
+    # compute vectors for PCA updates
+    V = get_PCA_vectors(Σ, groups)
     # initialize S matrix and initial cholesky factors
     S, L, C = initialize_S(Σ, groups, m)
     obj = group_block_objective(Σ, S, groups, m, :mvr)
@@ -927,20 +918,18 @@ function solve_group_mvr_hybrid(
     iter = 1
     for i in 1:outer_iter
         # PCA iterations
-        converged1, obj, t1, t2, t3 = _mvr_pca_ccd_iter!(
-            S, L, C, evecs, Σ, 
+        converged1, obj, t1, t2, t3, iter = _mvr_pca_ccd_iter!(
+            S, L, C, V, Σ, 
             obj, m, inner_pca_iter, tol, t1, t2, t3, iter, 
             u, w, storage, verbose=verbose
         )
-        iter += inner_pca_iter
         # Full CCD iterations
-        converged2, obj, t1, t2, t3 = _mvr_ccd_iter!(
+        converged2, obj, t1, t2, t3, iter = _mvr_ccd_iter!(
             S, L, C, Σ,
             obj, m, group_sizes, inner_ccd_iter, tol, λmin, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, ei, ej, storage, verbose=verbose
         )
-        iter += inner_ccd_iter
         # check convergence
         converged1 && converged2 && break
     end
@@ -1048,7 +1037,7 @@ function _sdp_ccd_iter!(
             break 
         end
     end
-    return converged, obj, t1, t2, t3
+    return converged, obj, t1, t2, t3, print_iter
 end
 
 function _mvr_ccd_iter!(
@@ -1172,7 +1161,7 @@ function _mvr_ccd_iter!(
             break 
         end
     end
-    return converged, obj, t1, t2, t3
+    return converged, obj, t1, t2, t3, print_iter
 end
 
 function _maxent_ccd_iter!(
@@ -1282,7 +1271,7 @@ function _maxent_ccd_iter!(
             break 
         end
     end
-    return converged, obj, t1, t2, t3
+    return converged, obj, t1, t2, t3, print_iter
 end
 
 function _maxent_pca_ccd_iter!(
@@ -1341,7 +1330,7 @@ function _maxent_pca_ccd_iter!(
             break 
         end
     end
-    return converged, obj, t1, t2, t3
+    return converged, obj, t1, t2, t3, print_iter
 end
 
 function _mvr_pca_ccd_iter!(
@@ -1406,7 +1395,7 @@ function _mvr_pca_ccd_iter!(
             break
         end
     end
-    return converged, obj, t1, t2, t3
+    return converged, obj, t1, t2, t3, print_iter
 end
 
 function _sdp_pca_ccd_iter!(
@@ -1479,7 +1468,7 @@ function _sdp_pca_ccd_iter!(
             break
         end
     end
-    return converged, obj, t1, t2, t3
+    return converged, obj, t1, t2, t3, print_iter
 end
 
 # efficient and numerically stable way to evaluate max entropy objective 
@@ -1871,11 +1860,12 @@ function choose_group_reps_adapt!(
 end
 choose_group_reps_adapt(G::AbstractMatrix, groups::AbstractVector; method=:id) = 
     choose_group_reps_adapt!(Int[], G, groups, method=method)
-    
+
 
 # faithful re-implementation of Trevor's R code. Probably not the most Julian/efficient Julia code
 # select_one and select_best_rss_subset will help us choose k representatives from each group
-# such that the RSS of the non-represented variables are minimized
+# such that the RSS of the non-represented variables are minimized. Earlier 
+# returned values are more important
 function select_one(C::AbstractMatrix, vlist, RSS0, tol=1e-12)
     dC = diag(C)
     rs = vec(sum(C.^2, dims=1)) ./ dC
@@ -1889,7 +1879,6 @@ function select_one(C::AbstractMatrix, vlist, RSS0, tol=1e-12)
 end
 function select_best_rss_subset(C::AbstractMatrix, k::Int)
     p = size(C, 2)
-    p ≤ k && return collect(1:p) # quick return
     indices = zeros(Int, k)
     RSS0 = p
     R2 = zeros(k)
@@ -2021,6 +2010,34 @@ function interpolative_decomposition(A::AbstractMatrix, rk::Int)
     # Run ID
     col_selected, redun_cols, T = id(A, rank=rk)
     return col_selected
+end
+
+function get_PCA_vectors(Σ::AbstractMatrix{T}, groups::AbstractVector{Int}) where T
+    p = size(Σ, 1)
+    p == size(Σ, 2) == length(groups) || 
+        error("Expected size(Σ, 1) == size(Σ, 2) == length(groups)")
+    # compute eigenfactorization for Σ blocks
+    Σblocks = block_diagonalize(Σ, groups)
+    _, evecs = eigen(Σblocks)
+    # compute ID for each block
+    # V2 = cholesky(Symmetric(Σblocks)).L
+    # add columns of Σblocks to result
+    # V2 = zeros(T, p, p)
+    # for (j, v) in enumerate(eachcol(Σblocks))
+    #     V2[:, j] .= v ./ norm(v)
+    # end
+    # purturb every element in the group equally
+    # V2 = zeros(T, p, p)
+    # for (j, g) in enumerate(unique(groups))
+    #     idx = findall(x -> x == g, groups)
+    #     V2[idx, j] .= 1 ./ sqrt(length(idx))
+    # end
+    # allow purturbion of only diagonal entries
+    V2 = zeros(T, p, p)
+    for i in 1:p
+        V2[i, i] = 1
+    end
+    return unique([evecs V2], dims=2)
 end
 
 # every `windowsize` SNPs form a group
