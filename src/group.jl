@@ -351,7 +351,7 @@ final `S` matrix as well as the cholesky factorizations `L` and `C` where
 + L.L*L.U = cholesky((m+1)/m*Σ - S)
 + C.L*C.U = cholesky(S)
 """
-function initialize_S(Σ, groups::Vector{Int}, m::Int)
+function initialize_S(Σ, groups::Vector{Int}, m::Int, method)
     S, _, _ = solve_group_equi(Σ, groups, m=m)
     ϵ = 1e-8
     while !isposdef(S)
@@ -359,7 +359,10 @@ function initialize_S(Σ, groups::Vector{Int}, m::Int)
         ϵ *= 10
         ϵ ≥ 1 && error("Error initialization. S cannot become PSD. Aborting")
     end
-    L = cholesky(Symmetric((m+1)/m * Σ - S))
+    if occursin("mvr", string(method))
+        S ./= 2 # for MVR, this empirically prevents bad boundary conditions
+    end
+    L = cholesky(Symmetric((m+1)/m * Σ - S + ϵ*I))
     C = cholesky(Symmetric(S))
     return S, L, C
 end
@@ -635,7 +638,7 @@ function solve_group_block_update(
     group_sizes = [count(x -> x == g, groups) for g in unique_groups]
     perm = collect(1:p)
     # initialize S/A/D matrices
-    S, _, _ = initialize_S(Σ, groups, m)
+    S, _, _ = initialize_S(Σ, groups, m, method)
     A = (m+1)/m * Σ
     D = A - S
     # compute initial objective value
@@ -764,7 +767,7 @@ function solve_group_max_entropy_hybrid(
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
     tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
-    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -775,7 +778,7 @@ function solve_group_max_entropy_hybrid(
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize S matrix, initial cholesky factors, and constants
-    S, L, C = initialize_S(Σ, groups, m)
+    S, L, C = initialize_S(Σ, groups, m, :maxent)
     obj = group_maxent_obj(L, C, m)
     verbose && println("Maxent initial obj = $obj")
     # compute vectors for PCA updates
@@ -791,14 +794,14 @@ function solve_group_max_entropy_hybrid(
         # PCA iterations
         converged1, obj, t1, t2, t3, iter = _maxent_pca_ccd_iter!(
             S, L, C, V, 
-            obj, m, inner_pca_iter, tol, t1, t2, t3, iter, 
+            obj, m, inner_pca_iter, tol, ϵ, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w; verbose=verbose
         )
         # Full CCD iterations
         converged2, obj, t1, t2, t3, iter = _maxent_ccd_iter!(
             S, L, C, 
-            obj, m, group_sizes, inner_ccd_iter, tol, λmin, t1, t2, t3, iter, 
+            obj, m, group_sizes, inner_ccd_iter, tol, ϵ, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, ei, ej; verbose=verbose
         )
@@ -815,7 +818,7 @@ function solve_group_sdp_hybrid(
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
-    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -828,7 +831,7 @@ function solve_group_sdp_hybrid(
     # compute vectors for PCA updates
     V = get_PCA_vectors(Σ, groups)
     # initialize S matrix and initial cholesky factors
-    S, L, C = initialize_S(Σ, groups, m)
+    S, L, C = initialize_S(Σ, groups, m, :sdp)
     # intial objective for each group
     group_objectives, group_idx = T[], Vector{Int}[]
     for g in unique(groups)
@@ -857,7 +860,7 @@ function solve_group_sdp_hybrid(
         # PCA iterations
         converged1, obj, t1, t2, t3, iter = _sdp_pca_ccd_iter!(
             S, L, C, V, Σ,
-            obj, inner_pca_iter, tol, t1, t2, t3, iter, 
+            obj, inner_pca_iter, tol, ϵ, t1, t2, t3, iter, 
             group_idx, v_groups, group_objectives,
             cholupdate!, choldowndate!,
             u, w, groups, m, verbose=verbose
@@ -865,7 +868,7 @@ function solve_group_sdp_hybrid(
         # Full CCD iterations
         converged2, obj, t1, t2, t3, iter = _sdp_ccd_iter!(
             S, L, C, Σ, groups,
-            obj, m, group_sizes, inner_ccd_iter, tol, λmin, t1, t2, t3, iter, 
+            obj, m, group_sizes, inner_ccd_iter, tol, ϵ, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, ei, ej, verbose=verbose
         )
@@ -882,7 +885,7 @@ function solve_group_mvr_hybrid(
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
     tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
-    λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
+    ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -895,7 +898,7 @@ function solve_group_mvr_hybrid(
     # compute vectors for PCA updates
     V = get_PCA_vectors(Σ, groups)
     # initialize S matrix and initial cholesky factors
-    S, L, C = initialize_S(Σ, groups, m)
+    S, L, C = initialize_S(Σ, groups, m, :mvr)
     obj = group_block_objective(Σ, S, groups, m, :mvr)
     verbose && println("MVR initial obj = $obj")
     # some timers
@@ -909,14 +912,14 @@ function solve_group_mvr_hybrid(
         # PCA iterations
         converged1, obj, t1, t2, t3, iter = _mvr_pca_ccd_iter!(
             S, L, C, V, Σ, 
-            obj, m, inner_pca_iter, tol, t1, t2, t3, iter, 
+            obj, m, inner_pca_iter, tol, ϵ, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, storage, verbose=verbose
         )
         # Full CCD iterations
         converged2, obj, t1, t2, t3, iter = _mvr_ccd_iter!(
             S, L, C, Σ,
-            obj, m, group_sizes, inner_ccd_iter, tol, λmin, t1, t2, t3, iter, 
+            obj, m, group_sizes, inner_ccd_iter, tol, ϵ, t1, t2, t3, iter, 
             cholupdate!, choldowndate!,
             u, w, ei, ej, storage, verbose=verbose
         )
@@ -928,7 +931,7 @@ end
 
 function _sdp_ccd_iter!(
     S, L, C, Σ, groups, # main matrix variables
-    obj, m, group_sizes, niter, tol, λmin, t1, t2, t3, print_iter, # constants
+    obj, m, group_sizes, niter, tol, ϵ, t1, t2, t3, print_iter, # constants
     cholupdate!, choldowndate!, # cholesky update functions
     u, v, ei, ej; verbose=false # storages
     )
@@ -950,15 +953,15 @@ function _sdp_ccd_iter!(
                 ej[j] = 1
                 t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej)
                 t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
-                ub = 1 / sum(abs2, u) - λmin
-                lb = -1 / sum(abs2, v) + λmin
+                ub = 1 / sum(abs2, u) - ϵ
+                lb = -1 / sum(abs2, v) + ϵ
                 lb ≥ ub && continue
                 # compute new δ, making sure it is in feasible region
                 δj = clamp(Σ[j, j] - S[j, j], lb, ub)
                 change_obj = abs(Σ[j, j]-S[j, j]-δj) - abs(Σ[j, j]-S[j, j])
-                # if change_obj > 0 || abs(δj) < 1e-15 || isnan(δj) || isinf(δj)
-                #     continue
-                # end
+                if abs(δj) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                    continue
+                end
                 # update S
                 S[j, j] += δj
                 obj_new += change_obj
@@ -993,15 +996,15 @@ function _sdp_ccd_iter!(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # feasible region criteria due to computational reasons
-                lb = max(s1, d1, -2 / (bii + 2bij + bjj)) + λmin
-                ub = min(s2, d2, 2 / (aii + 2aij + ajj)) - λmin
+                lb = max(s1, d1, -2 / (bii + 2bij + bjj)) + ϵ
+                ub = min(s2, d2, 2 / (aii + 2aij + ajj)) - ϵ
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 δ = clamp(Σ[i, j] - S[i, j], lb, ub)
                 change_obj = 2*abs(Σ[i, j]-S[i, j]-δ) - 2*abs(Σ[i, j]-S[i, j])
-                # if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
-                #     continue
-                # end
+                if abs(δ) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                    continue
+                end
                 # update S
                 S[i, j] += δ
                 S[j, i] += δ
@@ -1035,7 +1038,7 @@ end
 
 function _mvr_ccd_iter!(
     S, L, C, Σ, # main matrix variables
-    obj, m, group_sizes, niter, tol, λmin, t1, t2, t3, print_iter, # constants
+    obj, m, group_sizes, niter, tol, ϵ, t1, t2, t3, print_iter, # constants
     cholupdate!, choldowndate!, # cholesky update functions
     u, v, ei, ej, storage; verbose=false # storages
     )
@@ -1065,8 +1068,8 @@ function _mvr_ccd_iter!(
                     cjj, djj = dot(v, v), dot(u, u)
                 end
                 # compute δ that is within feasible region
-                ub = 1 / ajj
-                lb = -1 / bjj
+                ub = 1 / ajj - ϵ
+                lb = -1 / bjj + ϵ
                 lb ≥ ub && continue
                 x1, x2 = diag_mvr_obj_root(m, ajj, bjj, cjj, djj)
                 δ = lb < x1 < ub ? x1 : lb < x2 < ub ? x2 : NaN
@@ -1115,8 +1118,8 @@ function _mvr_ccd_iter!(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # feasible region criteria due to computational reasons
-                lb = max(s1, d1, -2 / (bii + 2bij + bjj))
-                ub = min(s2, d2, 2 / (aii + 2aij + ajj))
+                lb = max(s1, d1, -2 / (bii + 2bij + bjj) + ϵ)
+                ub = min(s2, d2, 2 / (aii + 2aij + ajj) - ϵ)
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 t3 += @elapsed opt = optimize(
@@ -1162,7 +1165,7 @@ end
 
 function _maxent_ccd_iter!(
     S, L, C, # main matrix variables
-    obj, m, group_sizes, niter, tol, λmin, t1, t2, t3, print_iter,  # constants
+    obj, m, group_sizes, niter, tol, ϵ, t1, t2, t3, print_iter,  # constants
     cholupdate!, choldowndate!, # cholesky update functions
     u, v, ei, ej; verbose = false # storages
     )
@@ -1188,8 +1191,8 @@ function _maxent_ccd_iter!(
                 ajj, bjj = dot(u, u), dot(v, v)
                 sj_new = (m*bjj-ajj) / ((m+1)*ajj*bjj)
                 # ensure feasibility
-                ub = 1 / ajj
-                lb = -1 / bjj
+                ub = 1 / ajj - ϵ
+                lb = -1 / bjj + ϵ
                 lb ≥ ub && continue
                 δ = clamp(sj_new - S[j, j], lb, ub)
                 # update S if objective improves
@@ -1230,8 +1233,8 @@ function _maxent_ccd_iter!(
                 s1 > s2 && ((s1, s2) = (s2, s1))
                 d1 > d2 && ((d1, d2) = (d2, d1))
                 # feasible region criteria due to computational reasons
-                lb = max(s1, d1, -2 / (bii + 2bij + bjj))
-                ub = min(s2, d2, 2 / (aii + 2aij + ajj))
+                lb = max(s1, d1, -2 / (bii + 2bij + bjj) + ϵ)
+                ub = min(s2, d2, 2 / (aii + 2aij + ajj) - ϵ)
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 t3 += @elapsed opt = optimize(
@@ -1276,7 +1279,7 @@ end
 
 function _maxent_pca_ccd_iter!(
     S, L, C, evecs, # main matrix variables
-    obj, m, niter, tol, t1, t2, t3, print_iter, # constants
+    obj, m, niter, tol, ϵ, t1, t2, t3, print_iter, # constants
     cholupdate!, choldowndate!, # cholesky update functions 
     u, w; verbose=false # storages
     )
@@ -1294,9 +1297,10 @@ function _maxent_pca_ccd_iter!(
                 vt_Dinv_v = dot(w, w)
             end
             # compute δ ∈ [lb, ub]
+            lb = -1 / vt_Sinv_v + ϵ
+            ub = 1 / vt_Dinv_v - ϵ
+            lb ≥ ub && continue
             δ = (m*vt_Sinv_v - vt_Dinv_v) / ((m+1)*vt_Sinv_v*vt_Dinv_v)
-            lb = -1 / vt_Sinv_v
-            ub = 1 / vt_Dinv_v
             δ = clamp(δ, lb, ub)
             # compute new objective
             change_obj = log(1 - δ*vt_Dinv_v) + m*log(1 + δ*vt_Sinv_v)
@@ -1339,7 +1343,7 @@ end
 
 function _mvr_pca_ccd_iter!(
     S, L, C, evecs, Σ, # main matrix variables
-    obj, m, niter, tol, t1, t2, t3, print_iter, # constants
+    obj, m, niter, tol, ϵ, t1, t2, t3, print_iter, # constants
     cholupdate!, choldowndate!, # cholesky update functions 
     u, w, storage; verbose=false # storages
     )
@@ -1361,8 +1365,8 @@ function _mvr_pca_ccd_iter!(
                 vt_Sinv2_v = dot(u, u) # cjj
             end
             # compute δ that is within feasible region
-            lb = -1 / vt_Sinv_v
-            ub = 1 / vt_Dinv_v
+            lb = -1 / vt_Sinv_v + ϵ
+            ub = 1 / vt_Dinv_v - ϵ
             lb ≥ ub && continue
             x1, x2 = diag_mvr_obj_root(m, vt_Dinv_v, vt_Sinv_v, 
                 vt_Sinv2_v, vt_Dinv2_v)
@@ -1408,7 +1412,7 @@ end
 
 function _sdp_pca_ccd_iter!(
     S, L, C, evecs, Σ, # main matrix variables
-    obj, niter, tol, t1, t2, t3, print_iter, # constants
+    obj, niter, tol, ϵ, t1, t2, t3, print_iter, # constants
     group_indices, v_groups, group_objectives, # some precomputed variables
     cholupdate!, choldowndate!, # cholesky update functions 
     u, w, groups, m; verbose=false # storages
@@ -1429,8 +1433,8 @@ function _sdp_pca_ccd_iter!(
                 vt_Dinv_v = dot(w, w)
             end
             # compute feasible region
-            lb = -1 / vt_Sinv_v
-            ub = 1 / vt_Dinv_v
+            lb = -1 / vt_Sinv_v + ϵ
+            ub = 1 / vt_Dinv_v - ϵ
             lb ≥ ub && continue
             # compute δ numerically
             Σg, Sg = @view(Σ[group_idx, group_idx]), @view(S[group_idx, group_idx])
@@ -1442,9 +1446,9 @@ function _sdp_pca_ccd_iter!(
             δ = clamp(opt.minimizer, lb, ub)
             # find difference in objective
             change_obj = opt.minimum - group_objectives[v_group]
-            # if change_obj > 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
-            #     continue
-            # end
+            if abs(δ) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                continue
+            end
             # update S_new = S + δ*v*v'
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
             obj_new += change_obj
@@ -1891,6 +1895,7 @@ function select_one(C::AbstractMatrix, vlist, RSS0, tol=1e-12)
 end
 function select_best_rss_subset(C::AbstractMatrix, k::Int)
     p = size(C, 2)
+    p ≤ k && return collect(1:p) # quick return
     indices = zeros(Int, k)
     RSS0 = p
     R2 = zeros(k)
