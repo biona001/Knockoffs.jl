@@ -374,7 +374,7 @@ end
 Keeps adding λI to Σ until the minimum eigenvalue > tol
 """
 function shift_until_PSD!(Σ::AbstractMatrix, tol=1e-4)
-    while eigmin(Σ) ≤ tol
+    while eigmin(Symmetric(Σ)) ≤ tol
         Σ += tol*I
     end
     return Σ
@@ -724,13 +724,14 @@ function lowrankupdate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Abst
 
     early_term = 0
     idx_start = something(findfirst(!iszero, v))
+    idx_end = something(findlast(!iszero, v))
     @inbounds for i = idx_start:n
 
         # Compute Givens rotation
         c, s, r = LinearAlgebra.givensAlgorithm(A[i,i], v[i])
 
         # check for early termination
-        if abs(s) < 1e-15
+        if abs(s) < 1e-15 && i ≥ idx_end
             early_term += 1
             early_term > 10 && break
         else
@@ -778,6 +779,7 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
 
     early_term = 0
     idx_start = something(findfirst(!iszero, v))
+    idx_end = something(findlast(!iszero, v))
     @inbounds for i = idx_start:n
 
         Aii = A[i,i]
@@ -791,7 +793,7 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
         c = sqrt(1 - abs2(s))
 
         # check for early termination
-        if abs(s) < 1e-15
+        if abs(s) < 1e-15 && i ≥ idx_end
             early_term += 1
             early_term > 10 && break
         else

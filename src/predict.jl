@@ -1,5 +1,5 @@
 function predict(
-    model::KnockoffFilter{T},
+    model::LassoKnockoffFilter{T},
     xtest::AbstractMatrix{T}
     ) where T
     ŷs = Vector{T}[]

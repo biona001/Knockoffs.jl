@@ -89,7 +89,9 @@ and Entropy Maximization" by Gimenez and Zou.
     and the next `p` columns store the second knockoff...etc
 
 # Todo
-When s is the zero vector, X̃ should be identical to X but it isn't
++ When s is the zero vector, X̃ should be identical to X but it isn't
++ Consider changing sampling code to using Distribution's MvNormal
++ For multiple knockoffs, can we avoid storing a pm × pm matrix in memory?
 """
 function condition(
     X::AbstractMatrix, 
@@ -110,9 +112,9 @@ function condition(
     end
     # todo: can we form Σ̃ using SymmetricToeplitz? 
     # So we don't need to actually store a matrix of size pm × pm in memory?
-    Σ̃ = repeat(Σ - C, m, m)
-    Σ̃ += BlockDiagonal([S for _ in 1:m])
-    μi = X - (X .- μ') * ΣinvS
+    Σ̃ = repeat(C - S, m, m)
+    Σ̃ += BlockDiagonal([S for _ in 1:m]) # note S is variable D in Gimenez and Zou
+    μi = X - (X .- μ') * ΣinvS # in Gaminez and Zou, μi = Dinv(Σ)μ-(I-Dinv(Σ))X = (algebra..) = X-(X.-μ')*ΣinvS
     μfull = repeat(μi, 1, m)
     L = cholesky(PositiveFactorizations.Positive, Symmetric(Σ̃)).L
     return μfull + randn(n, m*p) * L

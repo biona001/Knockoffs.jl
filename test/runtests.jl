@@ -206,15 +206,25 @@ end
     @test w[2] ≈ 0.5
     @test w[3] ≈ 0.4
 
-    # group knockoffs
+    # group knockoffs (use sum)
     β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5, 0.5, -0.1]
     groups = [1, 1, 1, 1, 2, 2, 2, 2]
     original = [1, 4, 6, 7]
     knockoff = [2, 3, 5, 8]
-    w = coefficient_diff(β, groups, original, knockoff)
+    w = coefficient_diff(β, groups, original, knockoff, compute_avg=false)
     @test length(w) == 2
     @test w[1] ≈ 1.8 - 0.5
     @test w[2] ≈ 1.0 - 0.2
+
+    # group knockoffs (use average)
+    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5, 0.5, -0.1]
+    groups = [1, 1, 1, 1, 2, 2, 2, 2]
+    original = [1, 4, 6, 7]
+    knockoff = [2, 3, 5, 8]
+    w = coefficient_diff(β, groups, original, knockoff, compute_avg=true)
+    @test length(w) == 2
+    @test w[1] ≈ (1 + 0.8 - 0.2 - 0.3) / 2
+    @test w[2] ≈ (0.5 + 0.5 - 0.1 - 0.1) / 2
 end
 
 # from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
@@ -295,9 +305,9 @@ end
     @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
 
     # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
-    @time sdp_filter = fit_lasso(y, X, Xko_sdp, debias=nothing)
-    @time mvr_filter = fit_lasso(y, X, Xko_mvr, debias=nothing)
-    @time me_filter = fit_lasso(y, X, Xko_maxent, debias=nothing)
+    @time sdp_filter = fit_lasso(y, Xko_sdp, debias=nothing)
+    @time mvr_filter = fit_lasso(y, Xko_mvr, debias=nothing)
+    @time me_filter = fit_lasso(y, Xko_maxent, debias=nothing)
 
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
     for i in eachindex(sdp_filter.fdr_target)
@@ -381,9 +391,9 @@ end
 
     # run lasso, followed up by debiasing
     Random.seed!(seed)
-    @time nodebias = fit_lasso(y, X, Xko, debias=nothing)
+    @time nodebias = fit_lasso(y, Xko, debias=nothing)
     Random.seed!(seed)
-    @time yesdebias = fit_lasso(y, X, Xko, debias=:ls)
+    @time yesdebias = fit_lasso(y, Xko, debias=:ls)
 
     # check that debiased result have same support as not debiasing
     for i in eachindex(nodebias.fdr_target)
@@ -541,22 +551,21 @@ end
     @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-10))
 
     # simulate some data
-    m = 100 # number of groups
+    groups = 100 # number of groups
     pi = 5  # features per group
     k = 10  # number of causal groups
     ρ = 0.4 # within group correlation
     γ = 0.2 # between group correlation
-    p = m * pi # number of features
+    p = groups * pi # number of features
     n = 1000 # sample size
-    groups = repeat(1:m, inner=5)
+    m = 5 # number of knockoffs per feature
+    groups = repeat(1:groups, inner=5)
     Σ = simulate_block_covariance(groups, ρ, γ)
     true_mu = zeros(p)
     X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1));
 
     # exact group knockoffs
-    m = 5 # 5 knockoffs per feature
-
     @time equi = modelX_gaussian_group_knockoffs(X, :equi, groups, true_mu, Σ, m=m)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - equi.S))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(equi.S))
@@ -564,6 +573,14 @@ end
     @time sdp = modelX_gaussian_group_knockoffs(X, :sdp, groups, true_mu, Σ, m=m)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp.S))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp.S))
+
+    # @time sdp_subopt = modelX_gaussian_group_knockoffs(X, :sdp_subopt, groups, true_mu, Σ, m=m)
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp_subopt.S))
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp_subopt.S))
+
+    # @time sdp_subopt_correct = modelX_gaussian_group_knockoffs(X, :sdp_subopt_correct, groups, true_mu, Σ, m=m)
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - sdp_subopt_correct.S))
+    # @test all(x -> x ≥ 0 || x ≈ 0, eigvals(sdp_subopt_correct.S))
 
     @time mvr = modelX_gaussian_group_knockoffs(X, :mvr, groups, true_mu, Σ, m=m, tol=0.001, verbose=true)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - mvr.S))
@@ -581,6 +598,31 @@ end
     @time me = modelX_gaussian_group_knockoffs(X, :maxent, groups, m=m)
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals((m+1)/m*Σ - me.S))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(me.S))
+
+    # test adjacency constrained hierachical clustering
+    distmat = rand(4, 4)
+    LinearAlgebra.copytri!(distmat, 'U')
+    group1 = [1, 2]
+    group2 = [3, 4]
+    val, pos = findmin(distmat[group1, group2])
+    @test val == Knockoffs.single_linkage_distance(distmat, group1, group2)
+
+    # test all groups in adj_constrained_hclust are contiguous
+    n = 100
+    p = 500
+    μ = zeros(p)
+    Σ = simulate_AR1(p, a=3, b=1)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    zscore!(X, mean(X, dims=1), std(X, dims=1))
+    distmat = cor(X)
+    @inbounds @simd for i in eachindex(distmat)
+        distmat[i] = 1 - abs(distmat[i])
+    end
+    groups = Knockoffs.adj_constrained_hclust(distmat, h=0.3)
+    for g in unique(groups)
+        idx = findall(x -> x == g, groups)
+        @test all(diff(idx) .== 1)
+    end
 end
 
 @testset "representative group knockoffs" begin
@@ -592,6 +634,37 @@ end
     true_mu = zeros(p)
     X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1))
+
+    #
+    # Some tests for defining groups and choosing representatives within groups
+    #
+    #Interpolative decomposition, selecting group reps by ID
+    nrep = 3
+    rep_method = :id
+    groups1, group_reps = id_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    @test countmap(groups1[group_reps]) |> values |> collect |> maximum == 3
+    groups1, group_reps = id_partition_groups(Symmetric(cor(X)), rep_method=rep_method, nrep=nrep)
+    @test countmap(groups1[group_reps]) |> values |> collect |> maximum == 3
+
+    #Interpolative decomposition, selecting group reps by Trevor's method
+    nrep = 2
+    rep_method = :rss
+    groups2, group_reps = id_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    @test countmap(groups2[group_reps]) |> values |> collect |> maximum == 2
+
+    #hierarchical clustering, using ID to choose reps
+    nrep = 2
+    rep_method = :id
+    groups, group_reps = hc_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    @test countmap(groups[group_reps]) |> values |> collect |> maximum == 2
+
+    #hierarchical clustering, using Trevor's method to choose reps
+    nrep = 1
+    rep_method = :rss
+    groups2, group_reps2 = hc_partition_groups(X, rep_method=rep_method, nrep=nrep)
+    groups2, group_reps2 = hc_partition_groups(Symmetric(cor(X)), rep_method=rep_method, nrep=nrep)
+    @test countmap(groups2[group_reps2]) |> values |> collect |> maximum == 1
+
     # 
     # single representative = running single variant knockoffs
     #
@@ -606,6 +679,15 @@ end
         verbose=false, # whether to print informative intermediate results
     )
     @test all(me.s .≈ rme.ko.s)
+
+    nrep = 5
+    groups, group_reps = id_partition_groups(X, rep_method=:id, nrep=nrep)
+    rme = modelX_gaussian_rep_group_knockoffs(
+        X, :maxent, true_mu, Σ, 
+        groups, group_reps, nrep=nrep
+    )
+    @test typeof(rme.ko.S) <: Matrix
+    offdiag_nz_idx = findall(!iszero, rme.ko.S - Diagonal(rme.ko.S))
 end
 
 @testset "group fit_lasso" begin

@@ -25,19 +25,34 @@ struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric}
     X::Matrix{T} # n × p design matrix
     X̃::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
-    S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
-    γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
+    S::BD # p × p block-diagonal matrix of the same size as Σ. S and (m+1)/m*Σ - S are both psd
+    γs::Vector{T} # for suboptimal group construction only. These are scalars chosen so that S_i = γ_i * Σ_i
     m::Int # number of knockoffs per feature generated
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
+    obj::T # final objective value of group knockoff
 end
 
-struct GaussianRepGroupKnockoff{T<:AbstractFloat} <: Knockoff
-    X::Matrix{T} # original n × p design matrix
-    ko::Union{GaussianKnockoff, GaussianGroupKnockoff} # knockoff struct of the representative variants
+struct GaussianRepGroupKnockoff{T<:AbstractFloat, S<:Symmetric} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
     group_reps::Vector{Int} # vector of representative variables (i.e. columns of X)
+    S11::Matrix{T} # r × r matrix from running group knockoffs optimization on the representatives. S11 and (m+1)/m*Σ11 - S11 are both psd
+    S::S # p × p matrix equal to [S11  S11*inv(Σ11)*Σ12; Σ21*inv(Σ11)*S11 Σ21*inv(Σ11)S11*inv(Σ11)*Σ12]
+    m::Int # number of knockoffs per feature generated
+    Σ::S # p × p symmetric covariance matrix. 
+    method::Symbol # method for solving s
+    obj::T # final objective value of group knockoff
     nrep::Int # number of representatives per group
+end
+
+struct IPADKnockoff{T<:AbstractFloat} <: Knockoff
+    X::Matrix{T} # n × p design matrix
+    X̃::Matrix{T} # n × mp knockoff of X
+    m::Int # number of knockoffs per feature generated
+    r::Int # rank of factor model
+    r_method::Symbol # method for choosing r
 end
 
 struct MergedKnockoff{T} <: Knockoff
@@ -98,7 +113,9 @@ indicating whether estimated effect size have been debiased with Lasso. The
 property. `τ` is the knockoff threshold, which controls the empirical FDR at 
 level `q`
 """
-struct KnockoffFilter{T}
+abstract type KnockoffFilter end
+
+struct LassoKnockoffFilter{T} <: KnockoffFilter
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
@@ -106,7 +123,24 @@ struct KnockoffFilter{T}
     m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
+    selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
+    W :: Vector{T} # length p vector of feature importance
+    τs :: Vector{T} # threshold for significance. For fdr fdr_target[i], τ[i] is threshold, and all W ≥ τ[i] is selected
     fdr_target :: Vector{T} # target FDR level for each τs and βs
     d :: UnivariateDistribution # distribution of y
     debias :: Union{Nothing, Symbol} # how βs and a0 have been debiased (`nothing` for not debiased)
+end
+
+struct MarginalKnockoffFilter{T} <: KnockoffFilter
+    y :: Vector{T} # n × 1 response vector
+    X :: Matrix{T} # n × p matrix of original features
+    ko :: Knockoff # A knockoff struct
+    W :: Vector{T} # length p vector of feature importance
+    τs :: Vector{T} # threshold for significance. For fdr fdr_target[i], τ[i] is threshold, and all W ≥ τ[i] is selected
+    m :: Int # number of knockoffs per feature generated
+    Xpvals :: Vector{T} # -log10 p-values for the original variables
+    X̃pvals :: Vector{T} # -log10 p-values for the knockoff variables
+    selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
+    fdr_target :: Vector{T} # target FDR level for each τs and βs
+    d :: UnivariateDistribution # distribution of y
 end
