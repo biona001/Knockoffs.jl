@@ -625,6 +625,7 @@ function solve_group_block_update(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int},
     method::Symbol;
+    ϵ::T = 1e-8, # small constant added to the matrix inverse in the constraint to enforce full rank
     m::Int = 1,
     tol=0.01, # converges when changes in s are all smaller than tol
     niter = 100, # max number of cyclic block updates
@@ -667,7 +668,7 @@ function solve_group_block_update(
             D12 = @view(D[1:g, g + 1:end])
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
-            D22inv = inv(D22 + 0.00001I)
+            D22inv = inv(D22 + ϵ*I)
             ub = Symmetric(A11 - D12 * D22inv * D21)
             # solve SDP/MVR/ME problem for current block
             if method == :sdp_block
@@ -766,7 +767,7 @@ function solve_group_max_entropy_hybrid(
     outer_iter::Int = 100,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -814,10 +815,10 @@ end
 function solve_group_sdp_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
-    outer_iter::Int = 10,
+    outer_iter::Int = 100,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
-    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    tol=0.000005, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -881,10 +882,10 @@ end
 function solve_group_mvr_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
-    outer_iter::Int = 10,
+    outer_iter::Int = 100,
     inner_pca_iter::Int = 10,
     inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -1310,7 +1311,7 @@ function _maxent_pca_ccd_iter!(
             # update S_new = S + δ*v*v'
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
             obj_new += change_obj
-            # update cholesky factors (must use robust updates since v is dense)
+            # update cholesky factors
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
@@ -1379,7 +1380,7 @@ function _mvr_pca_ccd_iter!(
             end
             obj_new += change_obj
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
-            # update cholesky factors (must use robust updates since v is dense)
+            # update cholesky factors
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
@@ -1453,7 +1454,7 @@ function _sdp_pca_ccd_iter!(
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
             obj_new += change_obj
             group_objectives[v_group] = opt.minimum
-            # update cholesky factors (must use robust updates since v is dense)
+            # update cholesky factors
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
