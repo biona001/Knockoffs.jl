@@ -1029,7 +1029,7 @@ function _sdp_ccd_iter!(
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1156,7 +1156,7 @@ function _mvr_ccd_iter!(
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1270,7 +1270,7 @@ function _maxent_ccd_iter!(
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1334,7 +1334,7 @@ function _maxent_pca_ccd_iter!(
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1403,7 +1403,7 @@ function _mvr_pca_ccd_iter!(
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break
         end
@@ -1480,7 +1480,7 @@ function _sdp_pca_ccd_iter!(
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break
         end
