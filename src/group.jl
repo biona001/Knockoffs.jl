@@ -843,6 +843,9 @@ function solve_group_sdp_hybrid(
     end
     obj = sum(group_objectives)
     verbose && println("SDP initial obj = $obj")
+    if obj < ϵ
+        return S, T[], obj, L, C # quick return
+    end
     # for each v, find which group v updates
     v_groups = Int[]
     for v in eachcol(V)
@@ -960,7 +963,7 @@ function _sdp_ccd_iter!(
                 # compute new δ, making sure it is in feasible region
                 δj = clamp(Σ[j, j] - S[j, j], lb, ub)
                 change_obj = abs(Σ[j, j]-S[j, j]-δj) - abs(Σ[j, j]-S[j, j])
-                if abs(δj) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                if abs(δj) < 1e-15 || isnan(δj) || isinf(δj) || change_obj > 0.01
                     continue
                 end
                 # update S
@@ -1003,7 +1006,7 @@ function _sdp_ccd_iter!(
                 # find δ ∈ [lb, ub] that maximizes objective
                 δ = clamp(Σ[i, j] - S[i, j], lb, ub)
                 change_obj = 2*abs(Σ[i, j]-S[i, j]-δ) - 2*abs(Σ[i, j]-S[i, j])
-                if abs(δ) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                if abs(δ) < 1e-15 || isnan(δ) || isinf(δ) || change_obj > 0.01
                     continue
                 end
                 # update S
@@ -1445,9 +1448,11 @@ function _sdp_pca_ccd_iter!(
                 lb, ub, Brent(), show_trace=false, abs_tol=0.0001
             )
             δ = clamp(opt.minimizer, lb, ub)
-            # find difference in objective
+            # find difference in objective (requiring objective to strictly
+            # improve causes algorithm to not move much, not really sure why,
+            # so I allow an update as long as objective doesn't get much worse)
             change_obj = opt.minimum - group_objectives[v_group]
-            if abs(δ) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+            if abs(δ) < 1e-15 || isnan(δ) || isinf(δ) || change_obj > 0.01
                 continue
             end
             # update S_new = S + δ*v*v'
