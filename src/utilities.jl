@@ -691,7 +691,8 @@ function simulate_block_covariance(
     groups::Vector{Int},
     ρ::T, # within group correlation 
     γ::T; # between group correlation
-    w::T = zero(T) # within group = Σg + vv' where v is vector of w*N(0, 1)
+    num_v::Int=0, # adds a rank 1 update Σ + v1*v1' + ... + vn*vn' where v is iid N(0, w)
+    w::T = one(T)
     ) where T <: AbstractFloat
     issorted(groups) || error("groups needs to be a sorted vector (i.e. continuous)")
     # form block diagonals to handle within group correlation
@@ -699,10 +700,13 @@ function simulate_block_covariance(
     for g in unique(groups)
         cnt = count(x -> x == g, groups)
         Σg = (1-ρ) * Matrix(I, cnt, cnt) + ρ * ones(cnt, cnt)
-        v = rand(Normal(0, w), cnt)
-        push!(Σ, Σg + v*v')
+        push!(Σ, Σg)
     end
-    Σ = Matrix(BlockDiagonal(Σ))
+    Σ = BlockDiagonal(Σ) |> Matrix
+    for i in 1:num_v
+        v = rand(Normal(0, w), length(groups))
+        BLAS.ger!(one(T), v, v, Σ) # Σ = Σ + vv'
+    end
     # now add between group correlation
     Σ[findall(iszero, Σ)] .= γ*ρ
     # rescale to correlation matrix
