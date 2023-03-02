@@ -120,6 +120,23 @@ end
 
 function fit_marginal(
     y::AbstractVector{T},
+    X::AbstractMatrix{T};
+    method::Symbol = :maxent,
+    d::Distribution=Normal(),
+    m::Int = 1,
+    fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
+    groups::Union{Nothing, AbstractVector{Int}} = nothing,
+    filter_method::Symbol = :knockoff_plus,
+    kwargs..., # arguments for glmnetcv
+    ) where T
+    ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
+        modelX_gaussian_group_knockoffs(X, method, groups, m=m)
+    return fit_marginal(y, ko, d=d, fdrs=fdrs, 
+        filter_method=filter_method; kwargs...)
+end
+
+function fit_marginal(
+    y::AbstractVector{T},
     ko::Knockoff;
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
@@ -129,20 +146,20 @@ function fit_marginal(
     X̃ = ko.X̃
     m = ko.m
     n, p = size(X)
-    # compute -log10(p-value) for each variable
-    X_pvals, X̃_pvals = zeros(p), zeros(m*p)
+    # compute marginal effect size for each variable
+    β, β̃ = zeros(p), zeros(m*p)
     data = ones(n, 2)
     for j in 1:p
         data[:, 2] .= @view(X[:, j])
         result = glm(data, y, d, canonicallink(d))
-        X_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
-        # X_pvals[j] = coeftable(result).cols[1][2] # effect size
+        # X_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
+        β[j] = coeftable(result).cols[1][2]
     end
     for j in 1:m*p
         data[:, 2] .= @view(X̃[:, j])
         result = glm(data, y, d, canonicallink(d))
-        X̃_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
-        # X̃_pvals[j] = coeftable(result).cols[1][2]
+        # X̃_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
+        β̃[j] = coeftable(result).cols[1][2]
     end
     # check if groups exist (todo: do I really need groups_full defined)
     groups = nothing
@@ -157,14 +174,14 @@ function fit_marginal(
     W, τs = T[], T[]
     for fdr in fdrs
         W, sel, τ = isnothing(groups) ? 
-            select_features([X_pvals; X̃_pvals], original, knockoff, fdr; 
+            select_features([β; β̃], original, knockoff, fdr; 
             filter_method=filter_method) :
-            select_features([X_pvals; X̃_pvals], original, knockoff, groups_full,
+            select_features([β; β̃], original, knockoff, groups_full,
             fdr; filter_method=filter_method)
         push!(selected, sel)
         push!(τs, τ)
     end
-    return MarginalKnockoffFilter(y, X, ko, W, τs, m, X_pvals, X̃_pvals, 
+    return MarginalKnockoffFilter(y, X, ko, W, τs, m, β, β̃, 
         selected, fdrs, d)
 end
 
