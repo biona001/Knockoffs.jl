@@ -1675,17 +1675,16 @@ variables most representative of each group will also be computed.
     `:id` (tends to select roughly independent variables) or `:rss` (tends to
     select more correlated variables)
 
-If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
-number of clusters is not less than `min_clusters` and their height is not 
-above `cutoff`.
+If `force_contiguous = false` and both `min_clusters` and `cutoff` are specified, 
+it is guaranteed that the number of clusters is not less than `min_clusters` and
+their height is not above `cutoff`. If `force_contiguous = true`, `min_clusters`
+keyword is ignored. 
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `rep_variables`: Columns of X selected as representatives. Each group have at 
++ `group_reps`: Columns of X selected as representatives. Each group have at 
     most `nrep` representatives. These are typically used to construct smaller
     group knockoff for extremely large groups
-+ `force_contiguous`: Whether groups are forced to be contiguous. If true,
-    we will run adjacency constrained hierarchical clustering. 
 """
 function hc_partition_groups(
     Σ::Symmetric;
@@ -1719,10 +1718,14 @@ hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, nrep = 1,
     adj_constrained_hclust(distmat::AbstractMatrix, h::Number)
 
 Performs (single-linkage) hierarchical clustering, forcing groups to be contiguous.
-We implement a bottom-up approach naively because `Clustering.jl` does not 
-support adjacency constraints (see https://github.com/JuliaStats/Clustering.jl/issues/230)
+After clustering, variables in different group is guaranteed to have distance 
+less than `h`. 
+
+Note: this is a custom (bottom-up) implementation because `Clustering.jl` does not 
+support adjacency constraints, see https://github.com/JuliaStats/Clustering.jl/issues/230
 """
-function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where T
+function adj_constrained_hclust(distmat::AbstractMatrix{T}; 
+    h::Number=0.3) where T
     0 ≤ h ≤ 1 || error("adj_constrained_hclust: expected 0 ≤ h ≤ 1 but got $h")
     p = size(distmat, 2)
     clusters = [[i] for i in 1:p] # initially all variables is its own cluster
@@ -1730,21 +1733,22 @@ function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where
         remaining_clusters = length(clusters)
         min_d, max_d = typemax(T), typemin(T)
         merge_left, merge_right = 0, 0 # clusters to be merged
-        # find min between-cluster distance among adjacent clusters
-        for left in 1:remaining_clusters-1
-            right = left + 1
-            d = single_linkage_distance(distmat, clusters[left], clusters[right])
+        # find min between-cluster distance
+        for left in 1:remaining_clusters, right in left+1:remaining_clusters
+            d = Knockoffs.single_linkage_distance(distmat, clusters[left], clusters[right])
             if d < min_d
                 merge_left, merge_right = left, right
                 min_d = d
             end
             d > max_d && (max_d = d)
         end
-        # merge 2 clusters with min distance
-        for i in clusters[merge_right]
-            push!(clusters[merge_left], i)
+        # merge 2 clusters (and all those in between) with min distance
+        for c in merge_left+1:merge_right
+            for i in clusters[c]
+                push!(clusters[merge_left], i)
+            end
         end
-        deleteat!(clusters, merge_right)
+        deleteat!(clusters, merge_left+1:merge_right)
         # check for convergence
         min_d ≥ h && break
     end
@@ -1753,6 +1757,7 @@ function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where
     for (i, cluster) in enumerate(clusters), g in cluster
         groups[g] = i
     end
+    issorted(groups) || error("adj_constrained_hclust did not produce contiguous groups")
     return groups
 end
 
@@ -1935,26 +1940,25 @@ end
 
 function assign_members_cor_adj!(groups, Σ, non_rep, rep_columns)
     issorted(rep_columns) || error("Expected rep_columns to be sorted")
-    for j in non_rep
-        group_on_right = searchsortedfirst(rep_columns, j)
-        if group_on_right > length(rep_columns) # no group on the right
-            nearest_rep = rep_columns[end]
+    rep_columns_tmp = copy(rep_columns)
+    for j in shuffle(non_rep)
+        group_on_right = searchsortedfirst(rep_columns_tmp, j)
+        if group_on_right > length(rep_columns_tmp) # no group on the right
+            nearest_rep = rep_columns_tmp[end]
+            push!(rep_columns_tmp, j)
         elseif group_on_right == 1 # j comes before the first group
-            nearest_rep = rep_columns[1]
+            nearest_rep = rep_columns_tmp[1]
+            insert!(rep_columns_tmp, 1, j)
         else # test which of the nearest representative is more correlated with j
-            left, right = rep_columns[group_on_right - 1], rep_columns[group_on_right]
+            left  = rep_columns_tmp[group_on_right - 1]
+            right = rep_columns_tmp[group_on_right]
             nearest_rep = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
         end
         # assign j to the group of its representative
         groups[j] = groups[nearest_rep]
+        insert!(rep_columns_tmp, group_on_right, j)
     end
-    # adhoc: second pass to ensure all groups are sorted, since routine above doesn't guarantee sorted
-    # e.g. [111 22 3 4 55555 6666 5 666] (need to convert 66665666 at the far right to a 66666666)
-    prev_group = 1
-    for i in eachindex(groups)
-        (groups[i] < prev_group) && (groups[i] = prev_group)
-        (groups[i] > prev_group) && (prev_group = groups[i])
-    end
+    issorted(groups) || error("assign_members_cor_adj!: groups not contiguous")
     return groups
 end
 
