@@ -297,7 +297,7 @@ function solve_s_group(
         )
         S = Diagonal(s) |> Matrix
         γs = T[]
-        obj = group_block_objective(Σ, S, groups, m, method)
+        obj = zero(T)
     else
         # solve group knockoff optimization problem
         if method == :equi
