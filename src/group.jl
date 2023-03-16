@@ -1588,8 +1588,8 @@ function rank2_cholesky_update!(
 end
 
 """
-    id_partition_groups(X::AbstractMatrix; [nrep], [rep_method], [nrep], [rss_target], [force_contiguous])
-    id_partition_groups(Σ::Symmetric; [nrep], [rep_method], [nrep], [rss_target], [force_contiguous])
+    id_partition_groups(X::AbstractMatrix; [nrep], [rss_target], [rep_threshold], [force_contiguous])
+    id_partition_groups(Σ::Symmetric; [nrep], [rss_target], [rep_threshold], [force_contiguous])
 
 Compute group members based on interpolative decompositions. An initial pass 
 first selects the most representative features such that regressing each 
@@ -1601,11 +1601,6 @@ features are assigned to groups
 + `G`: Either individual level data `X` or a correlation matrix `Σ`. If one
     inputs `Σ`, it must be wrapped in the `Symmetric` argument, otherwise
     we will treat it as individual level data
-+ `nrep`: Number of representative per group. Initial group representatives are
-    guaranteed to be selected
-+ `rep_method`: Method for selecting representatives for each group. Options are
-    `:id` (tends to select roughly independent variables) or `:rss` (tends to
-    select more correlated variables)
 + `rss_target`: Target residual level (greater than 0) for the first pass, smaller
     means more groups
 + `force_contiguous`: Whether groups are forced to be contiguous. If true,
@@ -1614,17 +1609,12 @@ features are assigned to groups
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `rep_variables`: Columns of X selected as representatives. Each group have at 
-    most `nrep` representatives. These are typically used to construct smaller
-    group knockoff for extremely large groups
 
 Note: interpolative decomposition is a stochastic algorithm. Set a seed to
 guarantee reproducible results. 
 """
 function id_partition_groups(
     G::AbstractMatrix;
-    nrep = 1,
-    rep_method = :id,
     rss_target = 0.25,
     force_contiguous = false
     )
@@ -1644,15 +1634,12 @@ function id_partition_groups(
     non_rep = setdiff(1:p, centers)
     force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
                        assign_members_cor!(groups, Σ, non_rep, centers)
-    # step 3: pick reprensetatives for each group. Centers are always selected
-    group_reps = centers
-    nrep > 1 && choose_group_reps!(group_reps, G, groups; method = rep_method, nrep = nrep)
-    return groups, group_reps
+    return groups
 end
 
 """
-    hc_partition_groups(X::AbstractMatrix; [rep_method], [cutoff], [min_clusters], [nrep], [force_contiguous])
-    hc_partition_groups(Σ::Symmetric; [rep_method], [cutoff], [min_clusters], [nrep], [force_contiguous])
+    hc_partition_groups(X::AbstractMatrix; [cutoff], [min_clusters], [force_contiguous])
+    hc_partition_groups(Σ::Symmetric; [cutoff], [min_clusters], [force_contiguous])
 
 Computes a group partition based on individual level data `X` or correlation 
 matrix `Σ` using single-linkage hierarchical clustering. By default, a list of
@@ -1667,10 +1654,6 @@ variables most representative of each group will also be computed.
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
-+ `nrep`: Number of representative per group. Defaults 1. If `nrep=1`, the 
-    representative will be selected by computing which element has the smallest
-    distance to all other elements in the cluster, i.e. the mediod. Otherise, 
-    we will run interpolative decomposition to select representatives
 + `rep_method`: Method for selecting representatives for each group. Options are
     `:id` (tends to select roughly independent variables) or `:rss` (tends to
     select more correlated variables)
@@ -1690,8 +1673,6 @@ function hc_partition_groups(
     Σ::Symmetric;
     cutoff = 0.7,
     min_clusters = 1,
-    nrep = 1,   
-    rep_method = :id,
     force_contiguous = false
     )
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
@@ -1707,12 +1688,14 @@ function hc_partition_groups(
         cluster_result = hclust(distmat; linkage=:single)
         groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
     end
-    # pick reprensetatives for each group
-    group_reps = choose_group_reps(Σ, groups; method = rep_method, nrep = nrep)
-    return groups, group_reps
+    return groups
 end
-hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, nrep = 1, rep_method=:id, force_contiguous=false) = 
-    hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, min_clusters=min_clusters, nrep=nrep, rep_method=rep_method, force_contiguous=force_contiguous)
+
+function hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, 
+    force_contiguous=false)
+    return hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, 
+        min_clusters=min_clusters, force_contiguous=force_contiguous)
+end
 
 """
     adj_constrained_hclust(distmat::AbstractMatrix, h::Number)
@@ -1777,69 +1760,27 @@ function single_linkage_distance(distmat::AbstractMatrix{T}, left::Vector{Int}, 
 end
 
 """
-    choose_group_reps(G::AbstractMatrix, groups::AbstractVector; nrep = 1)
-    choose_group_reps!(group_reps::Vector{Int}, C::AbstractMatrix, groups::AbstractVector; nrep = 1)
+    choose_group_reps(Σ::Symmetric, groups::AbstractVector, threshold=0.5)
+    choose_group_reps(X::AbstractMatrix, groups::AbstractVector, threshold=0.5)
+
+Chooses group representatives. If R is the set of selected variables within a
+group and O is the set of variables outside the group, then we keep adding
+variables to R until the proportion of variance explained by R divided by the
+proportion of variance explained by R and O exceeds `threshold`. 
 
 # Inputs
-+ `G`: Either individual level data `X` or the correlation matrix `Σ`. If one
-    inputs `Σ`, it must be wrapped in the `Symmetric` argument
++ First argument: Either individual level data `X` or the correlation matrix `Σ`.
+    If one inputs `Σ`, it must be wrapped in the `Symmetric` argument.
++ `groups`: Vector of group membership. 
++ `threshold`: Value between 0 and 1 that controls the number of 
+    representatives per group. Larger means more representatives (default 0.5)
 """
-function choose_group_reps!(
-    group_reps::Vector{Int}, 
-    G::AbstractMatrix, 
-    groups::AbstractVector;
-    method = "id", # id or rss
-    nrep = 1
-    )
-    unique_groups = unique(groups)
-    offset = length(group_reps) > 0 ? 1 : 0
-    if length(group_reps) > 0
-        # if reprensetatives are already present, they are considered "group centers"
-        # so check that there's only 1 rep per group
-        length(unique(groups[group_reps])) == length(unique_groups) || 
-            error("choose_group_reps!: if group_reps are supplied, " * 
-                "each group should have only 1 representative")
-    end
-    if method == :id
-        for g in unique_groups
-            group_idx = findall(x -> x == g, groups) # all variables in this group
-            group_members = setdiff!(group_idx, group_reps) # remove the representative
-            length(group_members) == 0 && continue
-            # Run ID on X[:, group_members] or cholesky of Σ[group_members, group_members]
-            A = typeof(G) <: Symmetric ? 
-                cholesky(PositiveFactorizations.Positive, Symmetric(G[group_members, group_members])).U :
-                @view(G[:, group_members])
-            rep_variables = interpolative_decomposition(A, nrep - offset)
-            for rep in rep_variables
-                push!(group_reps, group_members[rep])
-            end
-        end
-    elseif method == :rss
-        Σ = typeof(G) <: Symmetric ? G : cor(G)
-        for g in unique_groups
-            group_idx = findall(x -> x == g, groups) # all variables in this group
-            group_members = setdiff!(group_idx, group_reps) # remove the representative
-            length(group_members) == 0 && continue
-            # compute top representatives by minimizing RSS of un-selected variants
-            Σg = @view(Σ[group_members, group_members])
-            rep_variables = select_best_rss_subset(Σg, nrep - offset)
-            for rep in rep_variables
-                push!(group_reps, group_members[rep])
-            end
-        end
-    else 
-        error("choose_group_reps!: expected method to be :id or :rss")
-    end
-    return sort!(group_reps)
-end
-choose_group_reps(G::AbstractMatrix, groups::AbstractVector; method=:id, nrep = 1) = 
-    choose_group_reps!(Int[], G, groups, nrep=nrep, method=method)
-
 function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}, threshold=0.5) where T
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
-    0 ≤ threshold ≤ 1 || error("threshold should be in (0, 1) but was $threshold")
+    0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
     unique_groups = unique(groups)
     group_reps = Int[]
+    Σinv = inv(Σ)
     for g in unique_groups
         group_idx = findall(x -> x == g, groups) # all variables in this group
         O = findall(x -> x != g, groups) # all variables outside the group
@@ -1852,38 +1793,50 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}, threshold=0.5)
         Σg = @view(Σ[group_idx, group_idx])
         index = select_best_rss_subset(Σg, group_size) # indices in current groups
         indexΣ = group_idx[index] # indices in Σ
-        # @show index
-        # @show indexΣ
         # keep adding reps in current group until stopping criteria
         R = [indexΣ[1]]
+        push!(group_reps, indexΣ[1])
         for i in 2:group_size
             RO = union(R, O) # variables in R and O
             Rc = setdiff(indexΣ, R) # variables not yet selected
+            ROc = setdiff(1:size(Σ, 1), RO)
             Σ_RR_inv = inv(Σ[R, R])
+            # Σ_RORO_inv = inv(Σ[RO, RO])
+            Σ_RORO_inv = @view(Σinv[RO, RO]) - 
+                Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
+            # compute ratio of variation explained by j
             ratio = zero(T)
             for j in Rc
                 Σ_Rj = @view(Σ[R, j])
                 Σ_ROj = @view(Σ[RO, j])
                 R2_R = dot(Σ_Rj, Σ_RR_inv, Σ_Rj)
-                R2_RO = dot(Σ_ROj, inv(Σ[RO, RO]), Σ_ROj)
-                # print(R2_R, ", ")
-                # print(R2_RO, ", ")
-                # print(R2_R / R2_RO, ", ")
+                R2_RO = dot(Σ_ROj, Σ_RORO_inv, Σ_ROj)
+                R2_R / R2_RO
                 ratio += R2_R / R2_RO
             end
-            # print("\n")
             ratio /= length(Rc)
+            # Σ_Rj = @view(Σ[R, Rc])
+            # Σ_ROj = @view(Σ[RO, Rc])
+            # R2_R = Σ_Rj' * Σ_RR_inv * Σ_Rj
+            # R2_RO = Σ_ROj' * Σ_RORO_inv * Σ_ROj
+            # ratio = mean(diag(R2_R ./ R2_RO))
             if ratio > threshold
-                @show ratio
-                flush(stdout)
                 break
             else
                 # select ith variable
-                push!(R, indexΣ[i]); push!(group_reps, indexΣ[i])
+                push!(R, indexΣ[i])
+                push!(group_reps, indexΣ[i])
             end
         end
     end
     return group_reps
+end
+
+function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}, threshold=0.5,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
+    )
+    Σapprox = cov(covariance_approximator, X)
+    return choose_group_reps(Σapprox, groups, threshold)
 end
 
 # faithful re-implementation of Trevor's R code. Probably not the most Julian/efficient Julia code
