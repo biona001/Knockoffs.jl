@@ -183,26 +183,48 @@ function modelX_gaussian_rep_group_knockoffs(
     verbose::Bool = false,
     kwargs... # extra arguments for solve_s_group
     ) where T
-    n, p = size(X)
-
     # compute group representatives
-    group_reps = choose_group_reps(Symmetric(Σ), groups, rep_threshold)
-    group_size = countmap(groups[group_reps]) |> values |> collect
-    r = length(group_reps)
-    verbose && println("$r representatives for $p variables, $(sum(abs2, group_size)) optimization variables"); flush(stdout)
+    group_reps = choose_group_reps(Symmetric(Σ), groups, threshold=rep_threshold)
 
-    # Compute S matrix on the representatives
-    non_reps = setdiff(1:p, group_reps)
-    Σ11 = Σ[group_reps, group_reps] # no view because Σ11 needs to be inverted later
-    Σ12 = @views Σ[group_reps, non_reps]
-    Σ22 = @views Σ[non_reps, non_reps]
-    S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
+    # compute (block-diagonal) S on representatives and form larger (dense) D
+    S, D, obj = solve_s_graphical_group(method, Symmetric(Σ), groups, 
+        group_reps, m=m, verbose=verbose, kwargs...)
 
     # this samples 1 knockoff
     # Xr = @views X[:, group_reps]
     # Xc = @views X[:, non_reps]
     # X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
     # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
+
+    # sample multiple knockoffs (todo: sample each independently)
+    X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
+
+    return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
+        Symmetric(D), m, Symmetric(Σ), method, obj)
+end
+
+function solve_s_graphical_group(
+    method::Symbol,
+    Σ::AbstractMatrix{T}, # p × p
+    groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
+    group_reps::AbstractVector{Int}; # Vector{Int} of representatives
+    m::Int = 1,
+    verbose::Bool = false,
+    kwargs... # extra arguments for solve_s_group
+    ) where T
+    p = size(Σ, 1)
+    group_size = countmap(groups[group_reps]) |> values |> collect
+    r = length(group_reps)
+    verbose && println("$r representatives for $p variables, " * 
+        "$(sum(abs2, group_size)) optimization variables"); flush(stdout)
+
+    # Compute S matrix on the representatives
+    non_reps = setdiff(1:p, group_reps)
+    Σ11 = Σ[group_reps, group_reps] # no view because Σ11 needs to be inverted later
+    Σ12 = @views Σ[group_reps, non_reps]
+    Σ22 = @views Σ[non_reps, non_reps]
+    S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; 
+        m=m, verbose=verbose, kwargs...)
 
     # sample multiple knockoffs (todo: sample each independently)
     Σ11inv = inv(Σ11)
@@ -212,12 +234,10 @@ function modelX_gaussian_rep_group_knockoffs(
     D[group_reps, group_reps] .= S
     D[group_reps, non_reps] .= S_Σ11inv_Σ12
     D[non_reps, group_reps] .= S_Σ11inv_Σ12'
-    D[non_reps, non_reps] .= Σ22 - (Σ12' * Σ11inv * Σ12) + (Σ11inv_Σ12' * S * Σ11inv_Σ12)
-    # @show eigmin(Symmetric(D))
-    X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
+    D[non_reps, non_reps] .= Σ22 - 
+        (Σ12' * Σ11inv * Σ12) + (Σ11inv_Σ12' * S * Σ11inv_Σ12)
 
-    return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
-        Symmetric(D), m, Symmetric(Σ), method, obj)
+    return S, D, obj
 end
 
 """
@@ -1761,8 +1781,8 @@ function single_linkage_distance(distmat::AbstractMatrix{T}, left::Vector{Int}, 
 end
 
 """
-    choose_group_reps(Σ::Symmetric, groups::AbstractVector, threshold=0.5)
-    choose_group_reps(X::AbstractMatrix, groups::AbstractVector, threshold=0.5)
+    choose_group_reps(Σ::Symmetric, groups::AbstractVector; threshold=0.5)
+    choose_group_reps(X::AbstractMatrix, groups::AbstractVector; threshold=0.5)
 
 Chooses group representatives. If R is the set of selected variables within a
 group and O is the set of variables outside the group, then we keep adding
@@ -1776,7 +1796,7 @@ proportion of variance explained by R and O exceeds `threshold`.
 + `threshold`: Value between 0 and 1 that controls the number of 
     representatives per group. Larger means more representatives (default 0.5)
 """
-function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}, threshold=0.5) where T
+function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5) where T
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
     unique_groups = unique(groups)
@@ -1833,11 +1853,11 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}, threshold=0.5)
     return sort!(group_reps)
 end
 
-function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}, threshold=0.5,
+function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
     )
     Σapprox = cov(covariance_approximator, X)
-    return choose_group_reps(Σapprox, groups, threshold)
+    return choose_group_reps(Σapprox, groups, threshold=threshold)
 end
 
 # faithful re-implementation of Trevor's R code. Probably not the most Julian/efficient Julia code

@@ -45,6 +45,7 @@ export
     # solvers
     solve_s, 
     solve_s_group,
+    solve_s_graphical_group,
     # utilities for running knockoff filter
     coefficient_diff, 
     mk_threshold,
@@ -76,6 +77,7 @@ export
     simulate_block_covariance, 
     hc_partition_groups, 
     id_partition_groups,
+    choose_group_reps,
     normalize_col, 
     normalize_col!,
     group_block_objective
