@@ -44,7 +44,6 @@ struct GaussianRepGroupKnockoff{T<:AbstractFloat, S<:Symmetric} <: Knockoff
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
     obj::T # final objective value of group knockoff
-    nrep::Int # number of representatives per group
 end
 
 struct IPADKnockoff{T<:AbstractFloat} <: Knockoff

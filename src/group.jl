@@ -129,11 +129,11 @@ end
     modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [nrep], [m], [covariance_approximator], [kwargs...])
     modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
 
-Constructs group knockoffs by choosing `nrep` representatives from each group and
+Constructs group knockoffs by choosing representatives from each group and
 solving a smaller optimization problem based on the representatives only. Remaining
 knockoffs are generated based on a conditional independence assumption similar to
-a graphical model (details to be given later). The representatives must be specified,
-they can be computed via `hc_partition_groups` or `id_partition_groups`
+a graphical model (details to be given later). The representatives are computed
+by [`choose_group_reps`](@ref)
 
 # Inputs
 + `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
@@ -141,53 +141,54 @@ they can be computed via `hc_partition_groups` or `id_partition_groups`
     `modelX_gaussian_group_knockoffs`
 + `groups`: Vector of `Int` denoting group membership. `groups[i]` is the group 
     of `X[:, i]`
-+ `group_reps`: Vector of `Int` denoting the columns of `X` that will be used to 
-    construct group knockoffs. That is, only `X[:, group_reps]` are used to solve
-    the S matrix
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
 + `μ`: A length `p` vector storing the true column means of `X`
 + `Σ`: A `p × p` covariance matrix for columns of `X`
-+ `nrep`: Max number of representatives per group, defaults to 5
++ `rep_threshold`: Value between 0 and 1 that controls the number of 
+    representatives per group. Larger means more representatives (default 0.5)
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra keyword arguments for `solve_s_group`
 """
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
-    groups::AbstractVector{Int},
-    group_reps::AbstractVector{Int};
+    groups::AbstractVector{Int};
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    nrep::Int = 5,
     m::Int = 1,
-    kwargs... # extra arguments for solve_s or solve_s_group
+    rep_threshold::T = 0.5,
+    kwargs... # extra arguments for solve_s_group
     ) where T
     Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
     μ = vec(mean(X, dims=1)) # empirical column means
     return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, 
-        groups, group_reps; nrep=nrep, m=m, kwargs...)
+        groups; nrep=nrep, m=m, rep_threshold=rep_threshold, kwargs...)
 end
 
 """
 Let X_R = (X_1,...,X_r); X_C = (X_{r+1},...,X_p)
+
+# todo
+Efficient sampling of knockoffs when `m>1` using conditional independence
 """
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, # n × p
     method::Symbol,
     μ::AbstractVector, # p × 1
     Σ::AbstractMatrix, # p × p
-    groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
-    group_reps::AbstractVector{Int}; # Vector{Int} with values in 1,...,p (columns of X that are representatives)
+    groups::AbstractVector{Int}; # p × 1 Vector{Int} of group membership
     m::Int = 1,
-    nrep::Int = 5,
-    verbose::Bool = true,
-    kwargs... # extra arguments for solve_s or solve_s_group
+    rep_threshold::T = 0.5,
+    verbose::Bool = false,
+    kwargs... # extra arguments for solve_s_group
     ) where T
     n, p = size(X)
-    r = length(group_reps)
-    all(x -> 1 ≤ x ≤ p, group_reps) || error("group_reps should be column indices of X")
+
+    # compute group representatives
+    group_reps = choose_group_reps(Symmetric(Σ), groups, rep_threshold)
     group_size = countmap(groups[group_reps]) |> values |> collect
+    r = length(group_reps)
     verbose && println("$r representatives for $p variables, $(sum(abs2, group_size)) optimization variables"); flush(stdout)
 
     # Compute S matrix on the representatives
@@ -216,7 +217,7 @@ function modelX_gaussian_rep_group_knockoffs(
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
 
     return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
-        Symmetric(D), m, Symmetric(Σ), method, obj, nrep)
+        Symmetric(D), m, Symmetric(Σ), method, obj)
 end
 
 """
@@ -1588,8 +1589,8 @@ function rank2_cholesky_update!(
 end
 
 """
-    id_partition_groups(X::AbstractMatrix; [nrep], [rss_target], [rep_threshold], [force_contiguous])
-    id_partition_groups(Σ::Symmetric; [nrep], [rss_target], [rep_threshold], [force_contiguous])
+    id_partition_groups(X::AbstractMatrix; [rss_target], [force_contiguous])
+    id_partition_groups(Σ::Symmetric; [rss_target], [force_contiguous])
 
 Compute group members based on interpolative decompositions. An initial pass 
 first selects the most representative features such that regressing each 
@@ -1829,7 +1830,7 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}, threshold=0.5)
             end
         end
     end
-    return group_reps
+    return sort!(group_reps)
 end
 
 function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}, threshold=0.5,
