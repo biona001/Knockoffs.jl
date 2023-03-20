@@ -311,7 +311,7 @@ function solve_s_group(
         permuted = true
     end
     if length(unique(groups)) == length(groups)
-        # solve ungroup knockoff problem
+        # solve ungroup knockoff problem (todo: delete kwargs unique to solve_s_group)
         s = solve_s(Symmetric(Σcor), 
             method == :sdp_subopt ? :sdp : method;
             m=m, kwargs...
@@ -1675,6 +1675,18 @@ variables most representative of each group will also be computed.
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
++ `linkage`: *cluster linkage* function to use (when `force_contiguous=true`, 
+    `linkage` must be `:single`). `linkage` defines how the 
+    distances between the data points are aggregated into the distances between 
+    the clusters. Naturally, it affects what clusters are merged on each 
+    iteration. The valid choices are:
+    + `:single` (default): use the minimum distance between any of the cluster members
+    + `:average`: use the mean distance between any of the cluster members
+    + `:complete`: use the maximum distance between any of the members
+    + `:ward`: the distance is the increase of the average squared distance of a
+        point to its cluster centroid after merging the two clusters
+    + `:ward_presquared`: same as `:ward`, but assumes that the distances in d 
+        are already squared.
 + `rep_method`: Method for selecting representatives for each group. Options are
     `:id` (tends to select roughly independent variables) or `:rss` (tends to
     select more correlated variables)
@@ -1692,11 +1704,15 @@ keyword is ignored.
 """
 function hc_partition_groups(
     Σ::Symmetric;
-    cutoff = 0.7,
+    cutoff = 0.5,
     min_clusters = 1,
+    linkage=:complete,
     force_contiguous = false
     )
-    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    all(x -> x ≈ 1, diag(Σ)) || 
+        error("Σ must be scaled to a correlation matrix first.")
+    force_contiguous && linkage != :single &&
+        error("When force_contiguous = true, linkage must be :single")
     # convert correlation matrix to a distance matrix
     distmat = copy(Matrix(Σ))
     @inbounds @simd for i in eachindex(distmat)
@@ -1706,16 +1722,17 @@ function hc_partition_groups(
     if force_contiguous
         groups = adj_constrained_hclust(distmat, h=1-cutoff)
     else
-        cluster_result = hclust(distmat; linkage=:single)
+        cluster_result = hclust(distmat; linkage=linkage)
         groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
     end
     return groups
 end
 
 function hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, 
-    force_contiguous=false)
+    linkage=:complete, force_contiguous=false)
     return hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, 
-        min_clusters=min_clusters, force_contiguous=force_contiguous)
+        linkage=linkage,min_clusters=min_clusters, 
+        force_contiguous=force_contiguous)
 end
 
 """
