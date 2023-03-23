@@ -821,8 +821,8 @@ function solve_group_max_entropy_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
     outer_iter::Int = 100,
-    inner_pca_iter::Int = 10,
-    inner_ccd_iter::Int = 5,
+    inner_pca_iter::Int = 1,
+    inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
@@ -872,8 +872,8 @@ function solve_group_sdp_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
     outer_iter::Int = 100,
-    inner_pca_iter::Int = 10,
-    inner_ccd_iter::Int = 5,
+    inner_pca_iter::Int = 1,
+    inner_ccd_iter::Int = 1,
     tol=0.000005, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
@@ -942,8 +942,8 @@ function solve_group_mvr_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
     outer_iter::Int = 100,
-    inner_pca_iter::Int = 10,
-    inner_ccd_iter::Int = 5,
+    inner_pca_iter::Int = 1,
+    inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable

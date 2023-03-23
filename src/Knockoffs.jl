@@ -80,7 +80,8 @@ export
     choose_group_reps,
     normalize_col, 
     normalize_col!,
-    group_block_objective
+    group_block_objective,
+    cond_indep_corr
 
 include("struct.jl")
 include("fixed.jl")
