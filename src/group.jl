@@ -181,33 +181,68 @@ function modelX_gaussian_rep_group_knockoffs(
     m::Int = 1,
     rep_threshold::T = 0.5,
     verbose::Bool = false,
+    enforce_cond_indep::Bool = false,
     kwargs... # extra arguments for solve_s_group
     ) where T
     # compute group representatives
     group_reps = choose_group_reps(Symmetric(Σ), groups, threshold=rep_threshold)
 
-    # compute (block-diagonal) S on representatives and form larger (dense) D
-    S, D, obj = solve_s_graphical_group(method, Symmetric(Σ), groups, 
-        group_reps, m=m, verbose=verbose, kwargs...)
+    # decide which sigma to use
+    sigma = enforce_cond_indep ? cond_indep_corr(Σ, groups, group_reps) : Σ
 
-    # this samples 1 knockoff
-    # Xr = @views X[:, group_reps]
-    # Xc = @views X[:, non_reps]
-    # X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
-    # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
+    # compute (block-diagonal) S on representatives and form larger (dense) D
+    S, D, obj = solve_s_graphical_group(Symmetric(sigma), groups, group_reps, 
+        method, m=m, verbose=verbose, kwargs...)
 
     # sample multiple knockoffs (todo: sample each independently)
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
 
     return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
-        Symmetric(D), m, Symmetric(Σ), method, obj)
+        Symmetric(D), m, Symmetric(Σ), method, obj, enforce_cond_indep)
+end
+
+"""
+Returns `Σnew` as a covariance matrix that strictly satisfies the conditional
+independence assumption. 
+"""
+function cond_indep_corr(
+    Σ::AbstractMatrix{T}, 
+    groups::AbstractVector{Int}, # group membership for each variable in Σ
+    group_reps::AbstractVector{Int} # index of group representatives
+    ) where T
+    p = size(Σ, 1)
+    Σnew = zeros(T, p, p)
+    non_reps = setdiff(1:p, group_reps) # variables that are not representatives
+    groups_of_reps = groups[group_reps] # groups membership of representatives
+    # form group-block-diagonal matrices needed later
+    Σblock1, Σblock2 = zeros(T, p, p), zeros(T, p, p)
+    for g in unique(groups)
+        g_rep_idx = group_reps[findall(x -> x == g, groups_of_reps)] # reps that belong to group g
+        g_nonrep_idx = setdiff(findall(x -> x == g, groups), g_rep_idx) # non-reps that belong to group g
+        Σg_RR_inv = inv(Σ[g_rep_idx,g_rep_idx])
+        Σg_RRc = Σ[g_rep_idx, g_nonrep_idx]
+        Σblock1[g_rep_idx, g_nonrep_idx] .= Σg_RR_inv * Σg_RRc
+        Σblock2[g_nonrep_idx, g_nonrep_idx] .= @views Σ[g_nonrep_idx, g_nonrep_idx]
+        Σblock2[g_nonrep_idx, g_nonrep_idx] .-= Σg_RRc' * Σg_RR_inv * Σg_RRc
+    end
+    # Σnew_11
+    Σ11 = Σ[group_reps, group_reps]
+    Σnew[group_reps, group_reps] .= Σ11
+    # Σnew_12 and Σnew_21
+    Σ12_diag = Σblock1[group_reps, non_reps]
+    Σnew[group_reps, non_reps] .= Σ11 * Σ12_diag
+    Σnew[non_reps, group_reps] .= @views Transpose(Σnew[group_reps, non_reps])
+    # Σnew_22
+    Σnew[non_reps, non_reps] .= @views Σblock2[non_reps, non_reps]
+    Σnew[non_reps, non_reps] .+= Σ12_diag' * Σ11 * Σ12_diag
+    return Σnew
 end
 
 function solve_s_graphical_group(
-    method::Symbol,
-    Σ::AbstractMatrix{T}, # p × p
+    Σ::Symmetric{T}, # p × p
     groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
-    group_reps::AbstractVector{Int}; # Vector{Int} of representatives
+    group_reps::AbstractVector{Int}, # Vector{Int} of representatives
+    method::Symbol;
     m::Int = 1,
     verbose::Bool = false,
     kwargs... # extra arguments for solve_s_group
@@ -226,7 +261,7 @@ function solve_s_graphical_group(
     S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; 
         m=m, verbose=verbose, kwargs...)
 
-    # sample multiple knockoffs (todo: sample each independently)
+    # sample multiple knockoffs
     Σ11inv = inv(Σ11)
     Σ11inv_Σ12 = Σ11inv * Σ12
     S_Σ11inv_Σ12 = S * Σ11inv_Σ12 # r × (p-r)
