@@ -1854,7 +1854,9 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5)
     unique_groups = unique(groups)
     group_reps = Int[]
     Σinv = inv(Σ)
-    for g in unique_groups
+    storage1 = zeros(size(Σ, 1), size(Σ, 2))
+    storage2 = zeros(size(Σ, 2))
+    @inbounds for g in unique_groups
         group_idx = findall(x -> x == g, groups) # all variables in this group
         O = findall(x -> x != g, groups) # all variables outside the group
         group_size = length(group_idx)
@@ -1874,25 +1876,26 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5)
             Rc = setdiff(indexΣ, R) # variables not yet selected
             ROc = setdiff(1:size(Σ, 1), RO)
             Σ_RR_inv = inv(Σ[R, R])
-            # Σ_RORO_inv = inv(Σ[RO, RO])
-            Σ_RORO_inv = @view(Σinv[RO, RO]) - 
-                Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
+            # compute Σ_RORO_inv = inv(Σ[RO, RO]) = 
+            # Σinv[RO, RO] - Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
+            # using the fact that the quadratic form is low rank
+            L = cholesky(Σinv[ROc, ROc])
+            X = inv(L.L) * Σinv[ROc, RO] # X'X = Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
+            Σ_RORO_inv = @view(storage1[1:length(RO), 1:length(RO)])
+            Σ_RORO_inv .= @view(Σinv[RO, RO])
+            BLAS.syrk!('U', 'T', -one(T), X, one(T), Σ_RORO_inv) # upper triangular only
+            # LinearAlgebra.copytri!(Σ_RORO_inv, 'U')
             # compute ratio of variation explained by j
             ratio = zero(T)
             for j in Rc
-                Σ_Rj = @view(Σ[R, j])
-                Σ_ROj = @view(Σ[RO, j])
-                R2_R = dot(Σ_Rj, Σ_RR_inv, Σ_Rj)
-                R2_RO = dot(Σ_ROj, Σ_RORO_inv, Σ_ROj)
+                Σ_Rj = Σ[R, j]
+                Σ_ROj = Σ[RO, j]
+                R2_R = _dot(Σ_Rj, Σ_RR_inv, Σ_Rj, storage2) # R2_R = Σ_Rj*Σ_RR_inv*Σ_Rj
+                R2_RO = _dot(Σ_ROj, Symmetric(Σ_RORO_inv), Σ_ROj, storage2)
                 R2_R / R2_RO
                 ratio += R2_R / R2_RO
             end
             ratio /= length(Rc)
-            # Σ_Rj = @view(Σ[R, Rc])
-            # Σ_ROj = @view(Σ[RO, Rc])
-            # R2_R = Σ_Rj' * Σ_RR_inv * Σ_Rj
-            # R2_RO = Σ_ROj' * Σ_RORO_inv * Σ_ROj
-            # ratio = mean(diag(R2_R ./ R2_RO))
             if ratio > threshold
                 break
             else
@@ -1903,6 +1906,14 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5)
         end
     end
     return sort!(group_reps)
+end
+
+# computes x'*A*y without allocation
+function _dot(x, A, y, storage=zeros(size(A, 1)))
+    p = size(A, 1)
+    store = @views storage[1:p]
+    mul!(store, A, y)
+    return dot(x, store)
 end
 
 function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5,
