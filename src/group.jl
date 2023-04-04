@@ -192,7 +192,7 @@ function modelX_gaussian_rep_group_knockoffs(
 
     # compute (block-diagonal) S on representatives and form larger (dense) D
     S, D, obj = solve_s_graphical_group(Symmetric(sigma), groups, group_reps, 
-        method, m=m, verbose=verbose, kwargs...)
+        method, m=m, verbose=verbose, kwargs...)    
 
     # sample multiple knockoffs (todo: sample each independently)
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
@@ -261,7 +261,7 @@ function solve_s_graphical_group(
     S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; 
         m=m, verbose=verbose, kwargs...)
 
-    # sample multiple knockoffs
+    # form full S matrix (call it D) using conditional independence assumption
     Σ11inv = inv(Σ11)
     Σ11inv_Σ12 = Σ11inv * Σ12
     S_Σ11inv_Σ12 = S * Σ11inv_Σ12 # r × (p-r)
@@ -271,6 +271,9 @@ function solve_s_graphical_group(
     D[non_reps, group_reps] .= S_Σ11inv_Σ12'
     D[non_reps, non_reps] .= Σ22 - 
         (Σ12' * Σ11inv * Σ12) + (Σ11inv_Σ12' * S * Σ11inv_Σ12)
+
+    # threshold small values to 0
+    D[findall(x -> abs(x) < 1e-10, D)] .= 0
 
     return S, D, obj
 end
