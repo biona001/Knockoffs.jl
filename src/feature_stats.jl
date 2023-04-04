@@ -98,8 +98,8 @@ function select_features(
     T̃ = zeros(T, m)   # preallocated vector storing feature importance score for knockoff
     ordered = zeros(T, m + 1) # preallocated vector storing ordered statistics of the m+1 variables
     original_variable_groups = groups[original]
-    for i in unique_groups
-        group_idx = findall(x -> x == i, groups)
+    for (i, grp) in enumerate(unique_groups)
+        group_idx = findall(x -> x == grp, groups)
         group_size = length(group_idx) / (m+1) # i and its m knockoffs
         # compute importance score of group i's original features
         original_effect = zero(T)
@@ -109,7 +109,7 @@ function select_features(
         original_effect /= group_size
         # compute importance score of group i's m knockoffs
         fill!(T̃, 0)
-        group_members = findall(x -> x == i, original_variable_groups) # group_members are original variables that belong to current group
+        group_members = findall(x -> x == grp, original_variable_groups) # group_members are original variables that belong to current group
         for j in group_members
             for (idx, jj) in enumerate(knockoff[j]) # knockoff[j] stores indices of the jth variable's m knockoff
                 T̃[idx] += abs(β[jj])
