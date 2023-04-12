@@ -34,24 +34,37 @@ function ghost_knockoffs(Zscores::AbstractVector{T}, D::AbstractMatrix{T},
     p = size(D, 1)
     length(Zscores) == size(Σinv, 1) == size(Σinv, 2) == p || 
         error("Dimension mismatch")
-    # calculate variance with Jiaqi's trick
     DΣinv = D * Σinv
     C = 2D - DΣinv * D
+    v = sample_mvn_efficient(C, D, m) # Jiaqi's trick
+    P = repeat(I - DΣinv, m)
+    return P*Zscores + v
+end
+
+"""
+    sample_mvn_efficient(C::AbstractMatrix{T}, D::AbstractMatrix{T}, m::Int)
+
+Efficiently samples from a multivariate normal N(0, A) distribution where
+    [ C   C-D  ...  C-D ]
+A = [C-D   C    ..  C-D ]
+    [ ⋮        ⋱    ⋮   ]
+    [C-D  C-D        C  ]
+"""
+function sample_mvn_efficient(C::AbstractMatrix{T}, D::AbstractMatrix{T}, m::Int) where T
+    p = size(C, 1)
     L = cholesky(Symmetric(C - (m-1)/m * D))
     e1 = randn(p)
-    e2 = Vector{Float64}[]
+    e2 = Vector{T}[]
     d = MvNormal(Symmetric(D))
     for i in 1:m
         push!(e2, rand(d))
     end
     e2_avg = 1/m * sum(e2)
-    Zko = Vector{Float64}[]
+    Zko = T[]
     for i in 1:m
-        push!(Zko, L.L*e1 + e2[i] - e2_avg)
+        append!(Zko, L.L*e1 + e2[i] - e2_avg)
     end
-    # calculate mean
-    P = repeat(I - DΣinv, m)
-    return P*Zscores + vcat(Zko...)
+    return Zko
 end
 
 function ghost_knockoffs(
