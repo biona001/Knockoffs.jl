@@ -11,7 +11,7 @@ constitutes the threshold for selection.
 + `original`: p × 1 vector of indices storing which columns of β contains the original features
 + `knockoff`: p × 1 vector of where knockoff[i] is a length m vector storing which 
     columns of β contains the `i`th knockoffs
-+ `groups`: mp × 1 vector of indices storing group membership for each column of XX̃
++ `groups`: mp × 1 vector storing group membership for each column of XX̃
 + `fdr`: Target FDR level, a number between 0 and 1
 + `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default)
 + `mk_filter`: Choices are `Statistics.median` (default) or `maximum`. The original paper by Gimenez 
@@ -73,7 +73,7 @@ function select_features(
     β::AbstractVector{T}, # length (m+1)×p  (first m+1 entries are feature 1 and its m knockoffs...etc)
     original::AbstractVector{Int}, # length p
     knockoff::Vector{Vector{Int}}, # length p where each knockoff[i] is length m
-    groups::AbstractVector{Int}, # length (m+1)×p
+    groups::AbstractVector, # length (m+1)×p
     fdr::Number;
     filter_method::Symbol=:knockoff_plus,
     mk_filter = Statistics.median
@@ -153,7 +153,7 @@ function coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, kno
 end
 
 """
-    coefficient_diff(β::AbstractVector, groups::Vector{Int}, original::Vector{Int}, knockoff::Vector{Int})
+    coefficient_diff(β::AbstractVector, groups::Vector, original::Vector{Int}, knockoff::Vector{Int})
 
 Returns the coefficient difference statistic for grouped variables. If
 `compute_avg=true`, we compute the average beta for each group, otherwise
@@ -167,7 +167,7 @@ we compute the sum.
 + `compute_avg`: If true, feature importance for each group will average over
     absolute values of the betas. If false, we compute the sum instead.
 """
-function coefficient_diff(β::AbstractVector, groups::AbstractVector{Int},
+function coefficient_diff(β::AbstractVector, groups::AbstractVector,
     original::AbstractVector{Int}, knockoff::AbstractVector{Int}; compute_avg::Bool=true)
     length(β) == length(groups) || 
         error("coefficient_diff: length(β) = $(length(β)) does not equal length(groups) = $(length(groups))")
@@ -219,7 +219,7 @@ function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number,
     return β, W, τ
 end
 
-function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector{Int},
+function extract_beta(β̂_knockoff::AbstractVector{T}, fdr::Number, groups::Vector,
     original::AbstractVector{Int}, knockoff::Vector{Vector{Int}}, filter_method=:knockoff_plus
     ) where T <: AbstractFloat
     # first handle errors

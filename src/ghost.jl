@@ -46,7 +46,7 @@ end
 
 Efficiently samples from a multivariate normal N(0, A) distribution where
     [ C   C-D  ...  C-D ]
-A = [C-D   C    ..  C-D ]
+A = [C-D   C    ..  C-D ]   (total m blocks per row/col)
     [ ⋮        ⋱    ⋮   ]
     [C-D  C-D        C  ]
 """
