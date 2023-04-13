@@ -136,6 +136,28 @@ function select_features(
     return W, selected, τ̂
 end
 
+function MK_statistics(T0::Vector{T}, Tk::Vector{Vector{T}}) where T
+    p, m = length(T0), length(Tk)
+    all(p .== length.(Tk)) || error("Length of T0 should equal all vectors in Tk")
+    κ = zeros(Int, p) # index of largest importance score
+    τ = zeros(p)      # difference between largest importance score and median of remaining
+    W = zeros(p)      # importance score of each feature
+    storage = zeros(m + 1)
+    for i in 1:p
+        storage[1] = abs(T0[i])
+        for k in 1:m
+            if abs(Tk[k][i]) > abs(T0[i])
+                κ[i] = k
+            end
+            storage[k+1] = abs(Tk[k][i])
+        end
+        W[i] = (storage[1] - median(@view(storage[2:end]))) * (κ[i] == 0)
+        sort!(storage, rev=true)
+        τ[i] = storage[1] - median(@view(storage[2:end]))
+    end
+    return κ, τ, W
+end
+
 """
     coefficient_diff(β::AbstractVector, original::AbstractVector{Int}, knockoff::AbstractVector{Int})
 
@@ -196,7 +218,7 @@ end
 
 """
     extract_beta(β̂_knockoff::Vector, fdr::Number, original::Vector{Int}, knockoff::Vector{Vector{Int}}, method=:knockoff)
-    extract_beta(β̂_knockoff::Vector, fdr::Number, groups::Vector{Int}, original::Vector{Int}, knockoff::Vector{Vector{Int}}, method=:knockoff)
+    extract_beta(β̂_knockoff::Vector, fdr::Number, groups::Vector, original::Vector{Int}, knockoff::Vector{Vector{Int}}, method=:knockoff)
 
 Given estimated β of original variables and their knockoffs in `β̂_knockoff`, 
 zeros out the effect of non-selected features. 
