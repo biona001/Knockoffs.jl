@@ -14,30 +14,28 @@ Pages = ["api.md"]
 ```@docs
   fixed_knockoffs
   modelX_gaussian_knockoffs
-  approx_modelX_gaussian_knockoffs
   modelX_gaussian_group_knockoffs
+  modelX_gaussian_rep_group_knockoffs
+  approx_modelX_gaussian_knockoffs
   hmm_knockoff
   full_knockoffscreen
   ghost_knockoffs
   solve_s
   solve_s_group
+  solve_s_graphical_group
 ```
 
 ## Regular functions
 
 ```@docs
-  coefficient_diff
   threshold
-  extract_beta
-  compare_correlation
-  compare_pairwise_correlation
-  merge_knockoffs_with_original
+  MK_statistics
+  fit_lasso
+  fit_marginal
   simulate_AR1
   shift_until_PSD!
   normalize_col!
-  decorrelate_knockoffs
   sample_DMC
-  fit_lasso
   predict
 ```
 

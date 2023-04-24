@@ -27,45 +27,28 @@ using Random
 using StatsBase
 using Statistics
 using ToeplitzMatrices
-
-# some helper functions to compute power and empirical FDR
-function TP(correct_groups, signif_groups)
-    return length(signif_groups ∩ correct_groups) / length(correct_groups)
-end
-function TP(correct_groups, β̂, groups)
-    signif_groups = get_signif_groups(β̂, groups)
-    return TP(correct_groups, signif_groups)
-end
-function FDR(correct_groups, signif_groups)
-    FP = length(signif_groups) - length(signif_groups ∩ correct_groups) # number of false positives
-    FDR = FP / max(1, length(signif_groups))
-    return FDR
-end
-function FDR(correct_groups, β̂, groups)
-    signif_groups = get_signif_groups(β̂, groups)
-    return FDR(correct_groups, signif_groups)
-end
-function get_signif_groups(β, groups)
-    correct_groups = Int[]
-    for i in findall(!iszero, β)
-        g = groups[i]
-        g ∈ correct_groups || push!(correct_groups, g)
-    end
-    return correct_groups
-end
+using Distributions
+using Clustering
+using ProgressMeter
+using LowRankApprox
+using Plots
+gr(fmt=:png);
 ```
 
+    [36m[1m[ [22m[39m[36m[1mInfo: [22m[39mPrecompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
 
 
+# Data simulation
 
-    get_signif_groups (generic function with 1 method)
+## Gaussian model-X knockoffs with known mean and covariance
 
-
-
-# Constructing group knockoffs
-
-First, let's simulate data and generate equi-correlated knockoffs. Our true covariance matrix looks like
-
+To illustrate, lets simulate data $\mathbf{X}$ with covariance $\Sigma$ and mean $\mu$. Our model is
+```math
+\begin{aligned}
+    X_{p \times 1} \sim N(\mathbf{0}_p, \Sigma)
+\end{aligned}
+```
+where
 ```math
 \begin{aligned}
 \Sigma = 
@@ -74,68 +57,154 @@ First, let's simulate data and generate equi-correlated knockoffs. Our true cova
     \rho & 1 & & ... & \rho^{p-1}\\
     \vdots & & & 1 & \vdots \\
     \rho^p & \cdots & & & 1
-\end{pmatrix}, \quad \rho = 0.9
+\end{pmatrix}
+\end{aligned}
+```
+Given $n$ iid samples from the above distribution, we will generate knockoffs according to 
+```math
+\begin{aligned}
+(X, \tilde{X}) \sim N
+\left(0, \ 
+\begin{pmatrix}
+    \Sigma & \Sigma - diag(s)\\
+    \Sigma - diag(s) & \Sigma
+\end{pmatrix}
+\right)
 \end{aligned}
 ```
 
-Because variables are highly correlated with its neighbors ($\rho = 0.9$), it becomes difficult to distinguish which variables among a group are truly causal. Thus, group knockoffs which test whether a *group* of variables have any signal should have better power than standard (single-variable) knockoffs. 
+Because variables are highly correlated with its neighbors ($\rho = 0.9$), it becomes difficult to distinguish which among a bunch of highly correlated variables are truly causal. Thus, group knockoffs test whether a *group* of variables have any signal should have better power than standard (single-variable) knockoffs. 
 
-For simplicity, let simulate data where every 5 variables form a group:
+First, lets simulate some data
 
 
 ```julia
 # simulate data
 Random.seed!(2022)
-n = 1000 # sample size
-p = 200  # number of covariates
-k = 10   # number of true predictors
-Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1)))) # true covariance matrix
-groupsizes = [5 for i in 1:div(p, 5)] # each group has 5 variables
-groups = vcat([i*ones(g) for (i, g) in enumerate(groupsizes)]...) |> Vector{Int}
-true_mu = zeros(p)
+m = 1
+p = 500
+k = 10
+n = 250 # sample size
+Σ = Matrix(SymmetricToeplitz(0.9.^(0:(p-1)))) # true covariance matrix
+μ = zeros(p)
+# Σ = simulate_AR1(p, a=3, b=1) # true covariance matrix
+# Σ = simulate_block_covariance(groups, 0.75, 0.25)
 L = cholesky(Σ).L
 X = randn(n, p) * L
 zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
 ```
 
-Generate group knockoffs with the exported function `modelX_gaussian_group_knockoffs`. Similar to non-group knockoffs, group knockoff accepts keyword arguments `m`, `tol`, `niter`, and `verbose` which controls the algorithm's behavior. 
+# Define group memberships
+
+To generate group knockoffs, we need to vector specifying group membership. One can define this vector manually, or use the built-in functions [hc_partition_groups](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hc_partition_groups) or [id_partition_groups](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.id_partition_groups). 
 
 
 ```julia
-Gme = modelX_gaussian_group_knockoffs(
-    X, :maxent, groups, true_mu, Σ, 
+groups = hc_partition_groups(X, cutoff = 0.5)
+```
+
+
+
+
+    500-element Vector{Int64}:
+      1
+      1
+      1
+      2
+      2
+      2
+      2
+      3
+      3
+      3
+      3
+      3
+      3
+      ⋮
+     92
+     92
+     92
+     93
+     93
+     93
+     93
+     93
+     93
+     94
+     94
+     94
+
+
+
+## Generating group knockoffs
+
+Generate group knockoffs with the exported function [modelX_gaussian_group_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_group_knockoffs). Similar to non-group knockoffs, group knockoff accepts keyword arguments `m`, `tol`, `method`, and `verbose` which controls the algorithm's behavior. 
+
+
+```julia
+@time Gme = modelX_gaussian_group_knockoffs(
+    X, :maxent, groups, μ, Σ, 
     m = 1,          # number of knockoffs per variable to generate
     tol = 0.0001,   # convergence tolerance
-    niter = 100,    # max number of coordinate descent iterations
     verbose=true);  # whether to print informative intermediate results
 ```
 
-    Iter 1: δ = 0.35041635762964374, t1 = 0.07, t2 = 0.01, t3 = 0.0
-    Iter 2: δ = 0.06174971923894666, t1 = 0.07, t2 = 0.02, t3 = 0.0
-    Iter 3: δ = 0.020679713293120027, t1 = 0.08, t2 = 0.04, t3 = 0.0
-    Iter 4: δ = 0.010800522507824841, t1 = 0.09, t2 = 0.05, t3 = 0.0
-    Iter 5: δ = 0.006051906091741958, t1 = 0.09, t2 = 0.06, t3 = 0.0
-    Iter 6: δ = 0.003458575128440409, t1 = 0.1, t2 = 0.07, t3 = 0.0
-    Iter 7: δ = 0.0016285523099343307, t1 = 0.1, t2 = 0.09, t3 = 0.0
-    Iter 8: δ = 0.0007940739052498399, t1 = 0.11, t2 = 0.1, t3 = 0.0
-    Iter 9: δ = 0.0003768922472274655, t1 = 0.11, t2 = 0.11, t3 = 0.0
-    Iter 10: δ = 0.00015544193550259136, t1 = 0.12, t2 = 0.12, t3 = 0.0
-    Iter 11: δ = 0.00014451264472101048, t1 = 0.12, t2 = 0.14, t3 = 0.0
-    Iter 12: δ = 3.6816774372557906e-5, t1 = 0.12, t2 = 0.15, t3 = 0.0
+    Maxent initial obj = -2365.1271671584636
+    Iter 1 (PCA): obj = -1943.045776513885, δ = 0.25150956170113037, t1 = 0.17, t2 = 0.07
+    Iter 2 (CCD): obj = -1884.7660301701906, δ = 0.031022028535121957, t1 = 0.21, t2 = 0.21, t3 = 0.0
+    Iter 3 (PCA): obj = -1867.744620087067, δ = 0.10436380706161898, t1 = 0.39, t2 = 0.28
+    Iter 4 (CCD): obj = -1858.078541301307, δ = 0.018488655084151602, t1 = 0.43, t2 = 0.41, t3 = 0.0
+    Iter 5 (PCA): obj = -1851.18883889653, δ = 0.05718304726075169, t1 = 0.59, t2 = 0.49
+    Iter 6 (CCD): obj = -1846.5094892606514, δ = 0.014731502428335617, t1 = 0.63, t2 = 0.62, t3 = 0.0
+    Iter 7 (PCA): obj = -1842.6854122257062, δ = 0.04959871535431794, t1 = 0.75, t2 = 0.69
+    Iter 8 (CCD): obj = -1839.6089892211846, δ = 0.012335539087343748, t1 = 0.8, t2 = 0.82, t3 = 0.0
+    Iter 9 (PCA): obj = -1837.360146695403, δ = 0.044938228762372016, t1 = 0.92, t2 = 0.89
+    Iter 10 (CCD): obj = -1835.1734755639154, δ = 0.010399754320591098, t1 = 0.97, t2 = 1.03, t3 = 0.0
+    Iter 11 (PCA): obj = -1833.7231336451528, δ = 0.03748376275692853, t1 = 1.1, t2 = 1.1
+    Iter 12 (CCD): obj = -1832.101288654608, δ = 0.008801047805283797, t1 = 1.14, t2 = 1.23, t3 = 0.0
+    Iter 13 (PCA): obj = -1831.102476063046, δ = 0.0315920226350087, t1 = 1.31, t2 = 1.3
+    Iter 14 (CCD): obj = -1829.8558917563043, δ = 0.007405521544014147, t1 = 1.35, t2 = 1.43, t3 = 0.0
+    Iter 15 (PCA): obj = -1829.1331764776448, δ = 0.027251705414512956, t1 = 1.54, t2 = 1.51
+    Iter 16 (CCD): obj = -1828.1467028977806, δ = 0.0062269999296655784, t1 = 1.59, t2 = 1.64, t3 = 0.0
+    Iter 17 (PCA): obj = -1827.601614884978, δ = 0.024021658879939404, t1 = 1.74, t2 = 1.72
+    Iter 18 (CCD): obj = -1826.8031717697318, δ = 0.005134406703349799, t1 = 1.78, t2 = 1.85, t3 = 0.01
+    Iter 19 (PCA): obj = -1826.3790649213395, δ = 0.021686121988716597, t1 = 2.1, t2 = 1.92
+    Iter 20 (CCD): obj = -1825.719663964593, δ = 0.004306407736902811, t1 = 2.14, t2 = 2.06, t3 = 0.01
+    Iter 21 (PCA): obj = -1825.3813405870092, δ = 0.020027352081161146, t1 = 2.33, t2 = 2.14
+    Iter 22 (CCD): obj = -1824.8287941270414, δ = 0.0036981896648250467, t1 = 2.37, t2 = 2.27, t3 = 0.01
+    Iter 23 (PCA): obj = -1824.5539111768705, δ = 0.018679609598580154, t1 = 2.51, t2 = 2.34
+    Iter 24 (CCD): obj = -1824.0855704567543, δ = 0.0033805757479844394, t1 = 2.55, t2 = 2.47, t3 = 0.01
+    Iter 25 (PCA): obj = -1823.8582217968954, δ = 0.017704569642057685, t1 = 2.72, t2 = 2.54
+    Iter 26 (CCD): obj = -1823.4570724075688, δ = 0.003093041667690277, t1 = 2.76, t2 = 2.67, t3 = 0.01
+    Iter 27 (PCA): obj = -1823.2668508565507, δ = 0.016636566975055, t1 = 2.89, t2 = 2.74
+    Iter 28 (CCD): obj = -1822.920750671551, δ = 0.002841438825057293, t1 = 2.93, t2 = 2.88, t3 = 0.01
+    Iter 29 (PCA): obj = -1822.7597639156436, δ = 0.015703113567105947, t1 = 3.1, t2 = 2.95
+    Iter 30 (CCD): obj = -1822.4586667077572, δ = 0.0026784317614699567, t1 = 3.14, t2 = 3.09, t3 = 0.01
+    Iter 31 (PCA): obj = -1822.3212257910723, δ = 0.014901519698466406, t1 = 3.29, t2 = 3.15
+    Iter 32 (CCD): obj = -1822.0577163477485, δ = 0.002525631519600995, t1 = 3.33, t2 = 3.29, t3 = 0.01
+    Iter 33 (PCA): obj = -1821.9392188180846, δ = 0.014156625934948678, t1 = 3.46, t2 = 3.35
+    Iter 34 (CCD): obj = -1821.7074829823384, δ = 0.002381575459035566, t1 = 3.5, t2 = 3.48, t3 = 0.01
+    Iter 35 (PCA): obj = -1821.6044312026802, δ = 0.01355257394079164, t1 = 3.7, t2 = 3.56
+    Iter 36 (CCD): obj = -1821.3998063817892, δ = 0.00227850010564236, t1 = 3.74, t2 = 3.69, t3 = 0.01
+    Iter 37 (PCA): obj = -1821.3096287409437, δ = 0.012940450253892096, t1 = 3.9, t2 = 3.76
+    Iter 38 (CCD): obj = -1821.128115245744, δ = 0.0022145104741294287, t1 = 3.94, t2 = 3.89, t3 = 0.01
+      8.428074 seconds (1.26 M allocations: 124.370 MiB, 4.36% compilation time)
 
 
-Note $t1, t2, t3$ are timers which corresponds to (1) updating cholesky factors, (2) solving forward-backward equations, and (3) solving off-diagonal 1D optimization problems using Brent's method. As we can see, the computational bottleneck in (2), which we dispatch to efficient LAPACK libraries. 
+Note $t_1, t_2, t_3$ are timers which corresponds to (1) updating cholesky factors, (2) solving forward-backward equations, and (3) solving off-diagonal 1D optimization problems using Brent's method. As we can see, the computational bottleneck in (2), which we dispatch to efficient LAPACK libraries. 
 
 The output is a struct with the following fields
 ```julia
 struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric} <: Knockoff
     X::Matrix{T} # n × p design matrix
-    X̃::Matrix{T} # n × p knockoff of X
+    X̃::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
-    S::BD # p × p block-diagonal matrix of the same size as Σ. S and 2Σ - S are both psd
-    γs::Vector{T} # scalars chosen so that 2Σ - S is positive definite where S_i = γ_i * Σ_i
+    S::BD # p × p block-diagonal matrix of the same size as Σ. S and (m+1)/m*Σ - S are both psd
+    γs::Vector{T} # for suboptimal group construction only. These are scalars chosen so that S_i = γ_i * Σ_i
+    m::Int # number of knockoffs per feature generated
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
+    obj::T # final objective value of group knockoff
 end
 ```
 Given this result, lets do a sanity check: is $2\Sigma - S$ positive semi-definite?
@@ -149,7 +218,7 @@ eigmin(2Gme.Σ - Gme.S)
 
 
 
-    0.417481414774321
+    0.04410255003113407
 
 
 
@@ -166,11 +235,15 @@ This will estimate the covariance matrix via a shrinkage estimator, see document
 
 ## Lasso Example
 
-Lets see the empirical power and FDR group knockoffs over 10 simulations when the targer FDR is 10%. Here power and FDR is defined at the group level. 
+Lets see the empirical power and FDR group knockoffs over 10 simulations when
++ the targer FDR is 10%
++ we generate $m=5$ knockoffs per feature
++ $\beta_j \sim \pm 0.25$ for $10$ causal $j$s
+
+Note power and FDR is defined at the group level
 
 
 ```julia
-target_fdr = 0.1
 group_powers, group_fdrs, group_times, group_s = Float64[], Float64[], Float64[], Float64[]
 
 Random.seed!(2022)
@@ -181,25 +254,27 @@ for sim in 1:10
     p = 200  # number of covariates
     k = 10   # number of true predictors
     Σ = Matrix(SymmetricToeplitz(0.9.^(0:(p-1)))) # true covariance matrix
-    groupsizes = [5 for i in 1:div(p, 5)] # each group has 5 variables
-    groups = vcat([i*ones(g) for (i, g) in enumerate(groupsizes)]...) |> Vector{Int}
-    true_mu = zeros(p)
+    μ = zeros(p)
     L = cholesky(Σ).L
     X = randn(n, p) * L
     zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
 
+    # define groups
+    groups = hc_partition_groups(X, cutoff=0.5)
+    
     # simulate y
     βtrue = zeros(p)
-    βtrue[1:k] .= rand(-1:2:1, k) .* 0.1
+    βtrue[1:k] .= rand(-1:2:1, k) .* 0.25
     shuffle!(βtrue)
-    correct_groups = get_signif_groups(βtrue, groups)
+    correct_groups = groups[findall(!iszero, βtrue)] |> unique
     ϵ = randn(n)
     y = X * βtrue + ϵ;
 
-    # group MVR knockoffs
-    t = @elapsed ko_filter = fit_lasso(y, X, method=:maxent, groups=groups)
-    power = round(TP(correct_groups, ko_filter.βs[idx], groups), digits=3)
-    fdr = round(FDR(correct_groups, ko_filter.βs[idx], groups), digits=3)
+    # group ME knockoffs
+    t = @elapsed ko_filter = fit_lasso(y, X, method=:maxent, groups=groups, m=5)
+    selected = ko_filter.selected[3]
+    power = length(intersect(correct_groups, selected)) / length(correct_groups)
+    fdr = length(setdiff(selected, correct_groups)) / max(1, length(selected))
     println("Sim $sim group-knockoff power = $power, FDR = $fdr, time=$t")
     push!(group_powers, power); push!(group_fdrs, fdr); push!(group_times, t)
     GC.gc();GC.gc();GC.gc();
@@ -210,25 +285,83 @@ println("ME group knockoffs have average group FDR $(mean(group_fdrs))")
 println("ME group knockoffs took average $(mean(group_times)) seconds");
 ```
 
-    Sim 1 group-knockoff power = 0.0, FDR = 0.0, time=5.356796708
-    Sim 2 group-knockoff power = 0.1, FDR = 0.0, time=3.846174709
-    Sim 3 group-knockoff power = 0.222, FDR = 0.0, time=2.418540375
-    Sim 4 group-knockoff power = 0.4, FDR = 0.2, time=3.774003875
-    Sim 5 group-knockoff power = 0.4, FDR = 0.0, time=2.337522042
-    Sim 6 group-knockoff power = 0.0, FDR = 0.0, time=3.913260458
-    Sim 7 group-knockoff power = 0.222, FDR = 0.333, time=2.531130667
-    Sim 8 group-knockoff power = 0.0, FDR = 0.0, time=3.927257125
-    Sim 9 group-knockoff power = 0.0, FDR = 0.0, time=3.9803245
-    Sim 10 group-knockoff power = 0.1, FDR = 0.0, time=2.300255291
+    Sim 1 group-knockoff power = 1.0, FDR = 0.1, time=6.71429675
+    Sim 2 group-knockoff power = 0.7777777777777778, FDR = 0.0, time=7.203738083
+    Sim 3 group-knockoff power = 0.8888888888888888, FDR = 0.1111111111111111, time=5.199876167
+    Sim 4 group-knockoff power = 0.8, FDR = 0.0, time=7.725970875
+    Sim 5 group-knockoff power = 0.7, FDR = 0.0, time=8.715202042
+    Sim 6 group-knockoff power = 0.5, FDR = 0.0, time=8.797519166
+    Sim 7 group-knockoff power = 1.0, FDR = 0.0, time=6.052631459
+    Sim 8 group-knockoff power = 0.4444444444444444, FDR = 0.0, time=8.221799459
+    Sim 9 group-knockoff power = 0.7, FDR = 0.0, time=9.489696541
+    Sim 10 group-knockoff power = 0.5555555555555556, FDR = 0.0, time=6.281113166
     
-    ME group knockoffs have average group power 0.1444
-    ME group knockoffs have average group FDR 0.0533
-    ME group knockoffs took average 3.438526575 seconds
+    ME group knockoffs have average group power 0.7366666666666667
+    ME group knockoffs have average group FDR 0.021111111111111112
+    ME group knockoffs took average 7.4401843708 seconds
+
+
+For comparison, lets try the same simulation but we generate regular (non-grouped) knockoffs
+
+
+```julia
+regular_powers, regular_fdrs, regular_times = Float64[], Float64[], Float64[]
+
+Random.seed!(2022)
+for sim in 1:10
+    # simulate X
+    Random.seed!(sim)
+    n = 1000 # sample size
+    p = 200  # number of covariates
+    k = 10   # number of true predictors
+    Σ = Matrix(SymmetricToeplitz(0.9.^(0:(p-1)))) # true covariance matrix
+    μ = zeros(p)
+    L = cholesky(Σ).L
+    X = randn(n, p) * L
+    zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
+    
+    # simulate y
+    βtrue = zeros(p)
+    βtrue[1:k] .= rand(-1:2:1, k) .* 0.25
+    shuffle!(βtrue)
+    correct_snps = findall(!iszero, βtrue)
+    ϵ = randn(n)
+    y = X * βtrue + ϵ;
+
+    # group ME knockoffs
+    t = @elapsed ko_filter = fit_lasso(y, X, method=:maxent, m=5)
+    selected = ko_filter.selected[3]
+    power = length(intersect(correct_snps, selected)) / length(correct_snps)
+    fdr = length(setdiff(selected, correct_snps)) / max(1, length(selected))
+    println("Sim $sim nongroup-knockoff power = $power, FDR = $fdr, time=$t")
+    push!(regular_powers, power); push!(regular_fdrs, fdr); push!(regular_times, t)
+    GC.gc();GC.gc();GC.gc();
+end
+
+println("\nME (standard) knockoffs have average group power $(mean(regular_powers))")
+println("ME (standard) knockoffs have average group FDR $(mean(regular_fdrs))")
+println("ME (standard) knockoffs took average $(mean(regular_times)) seconds");
+```
+
+    Sim 1 nongroup-knockoff power = 0.7, FDR = 0.2222222222222222, time=5.165706875
+    Sim 2 nongroup-knockoff power = 0.7, FDR = 0.0, time=5.707978708
+    Sim 3 nongroup-knockoff power = 0.2, FDR = 0.0, time=4.334730542
+    Sim 4 nongroup-knockoff power = 0.0, FDR = 0.0, time=6.279638458
+    Sim 5 nongroup-knockoff power = 0.2, FDR = 0.0, time=7.839875459
+    Sim 6 nongroup-knockoff power = 0.0, FDR = 0.0, time=7.261292667
+    Sim 7 nongroup-knockoff power = 0.0, FDR = 0.0, time=4.292064292
+    Sim 8 nongroup-knockoff power = 0.0, FDR = 0.0, time=7.985766
+    Sim 9 nongroup-knockoff power = 0.4, FDR = 0.0, time=8.667096167
+    Sim 10 nongroup-knockoff power = 0.5, FDR = 0.0, time=5.635861
+    
+    ME (standard) knockoffs have average group power 0.26999999999999996
+    ME (standard) knockoffs have average group FDR 0.02222222222222222
+    ME (standard) knockoffs took average 6.3170010168 seconds
 
 
 ## Conclusion
 
-+ When variables are highly correlated so that one cannot find exact discoveries, group knockoffs may be useful as it identifies whether a group of variables are non-null without having to pinpoint the exact discovery.
++ When variables are highly correlated so that one cannot find exact discoveries, group knockoffs may be useful for improving power as it identifies whether a group of variables are non-null without having to pinpoint the exact discovery.
 + Group knockoffs control the group FDR to be below the target FDR level. 
 + Groups do not have to be contiguous
 
