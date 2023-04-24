@@ -77,32 +77,64 @@ function fit_lasso(
     X = ko.X
     X̃ = ko.X̃
     m = ko.m
-    # merge X with its knockoffs X̃ and shuffle around the indices
-    merged_ko = merge_knockoffs_with_original(X, X̃)
+    p = size(X, 2)
     # cross validate for λ, then refit Lasso with best λ
-    knockoff_cv = glmnetcv(merged_ko.XX̃, ytmp, d; kwargs...)
+    XX̃ = hcat(X, X̃)
+    knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
     λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
-    best_fit = glmnet(merged_ko.XX̃, y, lambda=[λbest])
+    best_fit = glmnet(XX̃, y, lambda=[λbest])
     βestim = vec(best_fit.betas) |> Vector{T}
     a0 = best_fit.a0[1]
-    # check if groups exist (todo: do I really need groups_full defined)
-    groups = nothing
+    # feature importance statistics
+    T0 = βestim[1:p]
+    Tk = m > 1 ? [βestim[k*p+1:(k+1)*p] for k in 1:m] : βestim[p+1:end]
     if hasproperty(ko, :groups)
-        groups = ko.groups # group membership of original variables
-        groups_full = repeat(groups, inner=m+1) # since X and X̃ is interleaved, each group length is repeated m times
+        groups = ko.groups
+        unique_groups = unique(groups)
+        T0_group = T[]
+        Tk_group = m > 1 ? [T[] for k in 1:m] : T[]
+        for g in unique_groups
+            idx = findall(x -> x == g, groups)
+            push!(T0_group, sum(abs, @view(T0[idx])))# / length(idx))
+            if m > 1
+                for k in 1:m
+                    push!(Tk_group[k], sum(abs, @view(Tk[k][idx])))# / length(idx))
+                end
+            else
+                push!(Tk_group, sum(abs, @view(Tk[idx])))# / length(idx))
+            end
+        end
+        if m > 1
+            κ, τ, W = MK_statistics(T0_group, Tk_group)
+        else
+            W = MK_statistics(T0_group, Tk_group)
+        end
+    else # no groups, compute regular knockoff statistics
+        if m > 1
+            κ, τ, W = MK_statistics(T0, Tk)
+        else
+            W = MK_statistics(T0, Tk)
+        end
     end
-    # compute feature importance statistics and allocate necessary knockoff-filter variables
-    βs, a0s, selected, W, τs = Vector{T}[], T[], Vector{Int}[], T[], T[]
+    # knockoff filter for each target fdr level
+    βs, a0s, selected, τs = Vector{T}[], T[], Vector{Int}[], T[], T[]
     for fdr in fdrs
-        # apply knockoff-filter based on target fdr
-        β_filtered, W, τ = isnothing(groups) ? 
-            extract_beta(βestim, fdr, merged_ko.original, 
-            merged_ko.knockoff, filter_method) : 
-            extract_beta(βestim, fdr, groups_full, 
-            merged_ko.original, merged_ko.knockoff, filter_method)
+        tau_hat = m > 1 ? mk_threshold(τ, κ, m, fdr) : threshold(W, fdr, filter_method)
+        sel_idx = findall(x -> x ≥ tau_hat, W)
+        # threshold non selected beta values
+        β_filtered = zeros(T, p)
+        if hasproperty(ko, :groups)
+            non0_idx = Int[]
+            for g in sel_idx
+                append!(non0_idx, findall(isequal(g), groups))
+            end
+            β_filtered[non0_idx] .= T0[non0_idx]
+        else
+            β_filtered[sel_idx] .= T0[sel_idx]
+        end
         # debias the estimates if requested
         if !isnothing(debias) && count(!iszero, β_filtered) > 0
-            a0 = isnothing(groups) ? 
+            a0 = hasproperty(ko, :groups) ? 
                 debias!(β_filtered, X, y; method=debias, d=d, kwargs...) : 
                 debias!(β_filtered, X, y, groups; method=debias, d=d, 
                 stringent=stringent, kwargs...)
@@ -110,12 +142,11 @@ function fit_lasso(
         # save beta and intercept
         push!(βs, β_filtered)
         push!(a0s, a0)
-        sel_idx = findall(!iszero, β_filtered)
-        push!(selected, isnothing(groups) ? sel_idx : unique(groups[sel_idx]))
-        push!(τs, τ)
+        push!(selected, sel_idx)
+        push!(τs, tau_hat)
     end
     return LassoKnockoffFilter(
-        y, X, ko, merged_ko, m, βs, a0s, selected, W, τs, fdrs, d, debias)
+        y, X, ko, m, βs, a0s, selected, W, τs, fdrs, d, debias)
 end
 
 function fit_marginal(
@@ -161,25 +192,44 @@ function fit_marginal(
         # X̃_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
         β̃[j] = coeftable(result).cols[1][2]
     end
-    # check if groups exist (todo: do I really need groups_full defined)
-    groups = nothing
+    # feature importance statistics
+    T0 = β
+    Tk = m > 1 ? [β̃[(k-1)*p+1:k*p] for k in 1:m] : β̃
     if hasproperty(ko, :groups)
-        groups = ko.groups # group membership of original variables
-        groups_full = repeat(groups, m+1)
-    end
+        groups = ko.groups
+        unique_groups = unique(groups)
+        T0_group = T[]
+        Tk_group = m > 1 ? [T[] for k in 1:m] : T[]
+        for g in unique_groups
+            idx = findall(x -> x == g, groups)
+            push!(T0_group, sum(abs, @view(T0[idx])))# / length(idx))
+            if m > 1
+                for k in 1:m
+                    push!(Tk_group[k], sum(abs, @view(Tk[k][idx])))# / length(idx))
+                end
+            else
+                push!(Tk_group, sum(abs, @view(Tk[idx])))# / length(idx))
+            end
+        end
+        if m > 1
+            κ, τ, W = MK_statistics(T0_group, Tk_group)
+        else
+            W = MK_statistics(T0_group, Tk_group)
+        end
+    else # no groups, compute regular knockoff statistics
+        if m > 1
+            κ, τ, W = MK_statistics(T0, Tk)
+        else
+            W = MK_statistics(T0, Tk)
+        end
+    end    
     # knockoff filter
-    original = collect(1:p)
-    knockoff = [[mm*p + k for mm in 1:m] for k in 1:p] # knockoff[i] are indices of X̃_pvals that contain knockoffs for var i
-    selected = Vector{Int}[]
-    W, τs = T[], T[]
+    τs, selected = T[], Vector{Int}[]
     for fdr in fdrs
-        W, sel, τ = isnothing(groups) ? 
-            select_features([β; β̃], original, knockoff, fdr; 
-            filter_method=filter_method) :
-            select_features([β; β̃], original, knockoff, groups_full,
-            fdr; filter_method=filter_method)
-        push!(selected, sel)
-        push!(τs, τ)
+        tau_hat = m > 1 ? mk_threshold(τ, κ, m, fdr) : threshold(W, fdr, filter_method)
+        sel_idx = findall(x -> x ≥ tau_hat, W)
+        push!(selected, sel_idx)
+        push!(τs, tau_hat)
     end
     return MarginalKnockoffFilter(y, X, ko, W, τs, m, β, β̃, 
         selected, fdrs, d)

@@ -119,7 +119,7 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
-    merged_ko :: Knockoff # A MergedKnockoff struct
+    # merged_ko :: Knockoff # A MergedKnockoff struct
     m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
