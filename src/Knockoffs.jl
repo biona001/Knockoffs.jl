@@ -45,11 +45,11 @@ export
     # solvers
     solve_s, 
     solve_s_group,
+    solve_s_graphical_group,
     # utilities for running knockoff filter
-    coefficient_diff, 
     mk_threshold,
     threshold, 
-    extract_beta,
+    MK_statistics,
     # functions related to fitting
     fit_lasso, 
     fit_marginal, 
@@ -76,15 +76,16 @@ export
     simulate_block_covariance, 
     hc_partition_groups, 
     id_partition_groups,
+    choose_group_reps,
     normalize_col, 
     normalize_col!,
-    group_block_objective
+    group_block_objective,
+    cond_indep_corr
 
 include("struct.jl")
 include("fixed.jl")
 include("modelX.jl")
 include("dmc.jl")
-include("feature_stats.jl")
 include("threshold.jl")
 include("hmm_wrapper.jl")
 include("hmm.jl")

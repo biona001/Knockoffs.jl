@@ -126,14 +126,14 @@ function modelX_gaussian_group_knockoffs(
 end
 
 """
-    modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [nrep], [m], [covariance_approximator], [kwargs...])
-    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [m], [kwargs...])
 
-Constructs group knockoffs by choosing `nrep` representatives from each group and
+Constructs group knockoffs by choosing representatives from each group and
 solving a smaller optimization problem based on the representatives only. Remaining
 knockoffs are generated based on a conditional independence assumption similar to
-a graphical model (details to be given later). The representatives must be specified,
-they can be computed via `hc_partition_groups` or `id_partition_groups`
+a graphical model (details to be given later). The representatives are computed
+by [`choose_group_reps`](@ref)
 
 # Inputs
 + `X`: A `n × p` design matrix. Each row is a sample, each column is a feature.
@@ -141,69 +141,124 @@ they can be computed via `hc_partition_groups` or `id_partition_groups`
     `modelX_gaussian_group_knockoffs`
 + `groups`: Vector of `Int` denoting group membership. `groups[i]` is the group 
     of `X[:, i]`
-+ `group_reps`: Vector of `Int` denoting the columns of `X` that will be used to 
-    construct group knockoffs. That is, only `X[:, group_reps]` are used to solve
-    the S matrix
 + `covariance_approximator`: A covariance estimator, defaults to 
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See CovarianceEstimation.jl 
     for more options.
 + `μ`: A length `p` vector storing the true column means of `X`
 + `Σ`: A `p × p` covariance matrix for columns of `X`
-+ `nrep`: Max number of representatives per group, defaults to 5
++ `rep_threshold`: Value between 0 and 1 that controls the number of 
+    representatives per group. Larger means more representatives (default 0.5)
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra keyword arguments for `solve_s_group`
 """
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
     method::Symbol,
-    groups::AbstractVector{Int},
-    group_reps::AbstractVector{Int};
+    groups::AbstractVector{Int};
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    nrep::Int = 5,
     m::Int = 1,
-    kwargs... # extra arguments for solve_s or solve_s_group
+    rep_threshold::T = 0.5,
+    kwargs... # extra arguments for solve_s_group
     ) where T
     Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
     μ = vec(mean(X, dims=1)) # empirical column means
     return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, 
-        groups, group_reps; nrep=nrep, m=m, kwargs...)
+        groups; m=m, rep_threshold=rep_threshold, kwargs...)
 end
 
-"""
-Let X_R = (X_1,...,X_r); X_C = (X_{r+1},...,X_p)
-"""
+# todo: Efficient sampling of knockoffs when `m>1` using conditional independence
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, # n × p
     method::Symbol,
     μ::AbstractVector, # p × 1
     Σ::AbstractMatrix, # p × p
-    groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
-    group_reps::AbstractVector{Int}; # Vector{Int} with values in 1,...,p (columns of X that are representatives)
+    groups::AbstractVector{Int}; # p × 1 Vector{Int} of group membership
     m::Int = 1,
-    nrep::Int = 5,
-    verbose::Bool = true,
-    kwargs... # extra arguments for solve_s or solve_s_group
+    rep_threshold::T = 0.5,
+    verbose::Bool = false,
+    enforce_cond_indep::Bool = false,
+    kwargs... # extra arguments for solve_s_group
     ) where T
-    n, p = size(X)
-    r = length(group_reps)
-    all(x -> 1 ≤ x ≤ p, group_reps) || error("group_reps should be column indices of X")
+    size(X, 2) == length(groups)  || error("Dimensions of X and groups doesn't match")
+
+    # compute group representatives
+    group_reps = choose_group_reps(Symmetric(Σ), groups, threshold=rep_threshold)
+
+    # decide which sigma to use
+    sigma = enforce_cond_indep ? cond_indep_corr(Σ, groups, group_reps) : Σ
+
+    # compute (block-diagonal) S on representatives and form larger (dense) D
+    S, D, obj = solve_s_graphical_group(Symmetric(sigma), groups, group_reps, 
+        method, m=m, verbose=verbose, kwargs...)    
+
+    # sample multiple knockoffs (todo: sample each independently)
+    X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
+
+    return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
+        Symmetric(D), m, Symmetric(Σ), method, obj, enforce_cond_indep)
+end
+
+"""
+Returns `Σnew` as a covariance matrix that strictly satisfies the conditional
+independence assumption. 
+"""
+function cond_indep_corr(
+    Σ::AbstractMatrix{T}, 
+    groups::AbstractVector{Int}, # group membership for each variable in Σ
+    group_reps::AbstractVector{Int} # index of group representatives
+    ) where T
+    p = size(Σ, 1)
+    Σnew = zeros(T, p, p)
+    non_reps = setdiff(1:p, group_reps) # variables that are not representatives
+    groups_of_reps = groups[group_reps] # groups membership of representatives
+    # form group-block-diagonal matrices needed later
+    Σblock1, Σblock2 = zeros(T, p, p), zeros(T, p, p)
+    for g in unique(groups)
+        g_rep_idx = group_reps[findall(x -> x == g, groups_of_reps)] # reps that belong to group g
+        g_nonrep_idx = setdiff(findall(x -> x == g, groups), g_rep_idx) # non-reps that belong to group g
+        Σg_RR_inv = inv(Σ[g_rep_idx,g_rep_idx])
+        Σg_RRc = Σ[g_rep_idx, g_nonrep_idx]
+        Σblock1[g_rep_idx, g_nonrep_idx] .= Σg_RR_inv * Σg_RRc
+        Σblock2[g_nonrep_idx, g_nonrep_idx] .= @views Σ[g_nonrep_idx, g_nonrep_idx]
+        Σblock2[g_nonrep_idx, g_nonrep_idx] .-= Σg_RRc' * Σg_RR_inv * Σg_RRc
+    end
+    # Σnew_11
+    Σ11 = Σ[group_reps, group_reps]
+    Σnew[group_reps, group_reps] .= Σ11
+    # Σnew_12 and Σnew_21
+    Σ12_diag = Σblock1[group_reps, non_reps]
+    Σnew[group_reps, non_reps] .= Σ11 * Σ12_diag
+    Σnew[non_reps, group_reps] .= @views Transpose(Σnew[group_reps, non_reps])
+    # Σnew_22
+    Σnew[non_reps, non_reps] .= @views Σblock2[non_reps, non_reps]
+    Σnew[non_reps, non_reps] .+= Σ12_diag' * Σ11 * Σ12_diag
+    return Σnew
+end
+
+function solve_s_graphical_group(
+    Σ::Symmetric{T}, # p × p
+    groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
+    group_reps::AbstractVector{Int}, # Vector{Int} of representatives
+    method::Symbol;
+    m::Int = 1,
+    verbose::Bool = false,
+    kwargs... # extra arguments for solve_s_group
+    ) where T
+    p = size(Σ, 1)
     group_size = countmap(groups[group_reps]) |> values |> collect
-    verbose && println("$r representatives for $p variables, $(sum(abs2, group_size)) optimization variables"); flush(stdout)
+    r = length(group_reps)
+    verbose && println("$r representatives for $p variables, " * 
+        "$(sum(abs2, group_size)) optimization variables"); flush(stdout)
 
     # Compute S matrix on the representatives
     non_reps = setdiff(1:p, group_reps)
     Σ11 = Σ[group_reps, group_reps] # no view because Σ11 needs to be inverted later
     Σ12 = @views Σ[group_reps, non_reps]
     Σ22 = @views Σ[non_reps, non_reps]
-    S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; m=m, kwargs...)
+    S, _, obj = solve_s_group(Symmetric(Σ11), groups[group_reps], method; 
+        m=m, verbose=verbose, kwargs...)
 
-    # this samples 1 knockoff
-    # Xr = @views X[:, group_reps]
-    # Xc = @views X[:, non_reps]
-    # X̃r_correct = Xr * (I - inv(Σ11) * S) + rand(MvNormal(Symmetric(2S - S * inv(Σ11) * S)), n)'
-    # X̃c_correct = X̃r_correct * inv(Σ11) * Σ12 + rand(MvNormal(Symmetric(Σ22 - Σ21 * inv(Σ11) * Σ12)), n)'
-
-    # sample multiple knockoffs (todo: sample each independently)
+    # form full S matrix (call it D) using conditional independence assumption
     Σ11inv = inv(Σ11)
     Σ11inv_Σ12 = Σ11inv * Σ12
     S_Σ11inv_Σ12 = S * Σ11inv_Σ12 # r × (p-r)
@@ -211,12 +266,13 @@ function modelX_gaussian_rep_group_knockoffs(
     D[group_reps, group_reps] .= S
     D[group_reps, non_reps] .= S_Σ11inv_Σ12
     D[non_reps, group_reps] .= S_Σ11inv_Σ12'
-    D[non_reps, non_reps] .= Σ22 - (Σ12' * Σ11inv * Σ12) + (Σ11inv_Σ12' * S * Σ11inv_Σ12)
-    # @show eigmin(Symmetric(D))
-    X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
+    D[non_reps, non_reps] .= Σ22 - 
+        (Σ12' * Σ11inv * Σ12) + (Σ11inv_Σ12' * S * Σ11inv_Σ12)
 
-    return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
-        Symmetric(D), m, Symmetric(Σ), method, obj, nrep)
+    # threshold small values to 0
+    D[findall(x -> abs(x) < 1e-10, D)] .= 0
+
+    return S, D, obj
 end
 
 """
@@ -290,14 +346,14 @@ function solve_s_group(
         permuted = true
     end
     if length(unique(groups)) == length(groups)
-        # solve ungroup knockoff problem
+        # solve ungroup knockoff problem (todo: delete kwargs unique to solve_s_group)
         s = solve_s(Symmetric(Σcor), 
             method == :sdp_subopt ? :sdp : method;
             m=m, kwargs...
         )
         S = Diagonal(s) |> Matrix
         γs = T[]
-        obj = group_block_objective(Σ, S, groups, m, method)
+        obj = zero(T)
     else
         # solve group knockoff optimization problem
         if method == :equi
@@ -625,6 +681,7 @@ function solve_group_block_update(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int},
     method::Symbol;
+    ϵ::T = 1e-8, # small constant added to the matrix inverse in the constraint to enforce full rank
     m::Int = 1,
     tol=0.01, # converges when changes in s are all smaller than tol
     niter = 100, # max number of cyclic block updates
@@ -667,7 +724,7 @@ function solve_group_block_update(
             D12 = @view(D[1:g, g + 1:end])
             D21 = @view(D[g + 1:end, 1:g])
             D22 = @view(D[g + 1:end, g + 1:end])
-            D22inv = inv(D22 + 0.00001I)
+            D22inv = inv(D22 + ϵ*I)
             ub = Symmetric(A11 - D12 * D22inv * D21)
             # solve SDP/MVR/ME problem for current block
             if method == :sdp_block
@@ -764,9 +821,9 @@ function solve_group_max_entropy_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
     outer_iter::Int = 100,
-    inner_pca_iter::Int = 10,
-    inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    inner_pca_iter::Int = 1,
+    inner_ccd_iter::Int = 1,
+    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -814,10 +871,10 @@ end
 function solve_group_sdp_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
-    outer_iter::Int = 10,
-    inner_pca_iter::Int = 10,
-    inner_ccd_iter::Int = 5,
-    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    outer_iter::Int = 100,
+    inner_pca_iter::Int = 1,
+    inner_ccd_iter::Int = 1,
+    tol=0.000005, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -842,6 +899,9 @@ function solve_group_sdp_hybrid(
     end
     obj = sum(group_objectives)
     verbose && println("SDP initial obj = $obj")
+    if obj < ϵ
+        return S, T[], obj, L, C # quick return
+    end
     # for each v, find which group v updates
     v_groups = Int[]
     for v in eachcol(V)
@@ -881,10 +941,10 @@ end
 function solve_group_mvr_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
-    outer_iter::Int = 10,
-    inner_pca_iter::Int = 10,
-    inner_ccd_iter::Int = 5,
-    tol=0.01, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    outer_iter::Int = 100,
+    inner_pca_iter::Int = 1,
+    inner_ccd_iter::Int = 1,
+    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
@@ -959,7 +1019,7 @@ function _sdp_ccd_iter!(
                 # compute new δ, making sure it is in feasible region
                 δj = clamp(Σ[j, j] - S[j, j], lb, ub)
                 change_obj = abs(Σ[j, j]-S[j, j]-δj) - abs(Σ[j, j]-S[j, j])
-                if abs(δj) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                if abs(δj) < 1e-15 || isnan(δj) || isinf(δj) || change_obj > 0.01
                     continue
                 end
                 # update S
@@ -1002,7 +1062,7 @@ function _sdp_ccd_iter!(
                 # find δ ∈ [lb, ub] that maximizes objective
                 δ = clamp(Σ[i, j] - S[i, j], lb, ub)
                 change_obj = 2*abs(Σ[i, j]-S[i, j]-δ) - 2*abs(Σ[i, j]-S[i, j])
-                if abs(δ) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+                if abs(δ) < 1e-15 || isnan(δ) || isinf(δ) || change_obj > 0.01
                     continue
                 end
                 # update S
@@ -1028,7 +1088,7 @@ function _sdp_ccd_iter!(
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1155,7 +1215,7 @@ function _mvr_ccd_iter!(
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1269,7 +1329,7 @@ function _maxent_ccd_iter!(
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1310,7 +1370,7 @@ function _maxent_pca_ccd_iter!(
             # update S_new = S + δ*v*v'
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
             obj_new += change_obj
-            # update cholesky factors (must use robust updates since v is dense)
+            # update cholesky factors
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
@@ -1333,7 +1393,7 @@ function _maxent_pca_ccd_iter!(
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break 
         end
@@ -1379,7 +1439,7 @@ function _mvr_pca_ccd_iter!(
             end
             obj_new += change_obj
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
-            # update cholesky factors (must use robust updates since v is dense)
+            # update cholesky factors
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
@@ -1402,7 +1462,7 @@ function _mvr_pca_ccd_iter!(
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break
         end
@@ -1444,16 +1504,18 @@ function _sdp_pca_ccd_iter!(
                 lb, ub, Brent(), show_trace=false, abs_tol=0.0001
             )
             δ = clamp(opt.minimizer, lb, ub)
-            # find difference in objective
+            # find difference in objective (requiring objective to strictly
+            # improve causes algorithm to not move much, not really sure why,
+            # so I allow an update as long as objective doesn't get much worse)
             change_obj = opt.minimum - group_objectives[v_group]
-            if abs(δ) < 1e-15 # || change_obj > 0 || isnan(δj) || isinf(δj)
+            if abs(δ) < 1e-15 || isnan(δ) || isinf(δ) || change_obj > 0.01
                 continue
             end
             # update S_new = S + δ*v*v'
             t1 += @elapsed BLAS.ger!(δ, v, v, S)
             obj_new += change_obj
             group_objectives[v_group] = opt.minimum
-            # update cholesky factors (must use robust updates since v is dense)
+            # update cholesky factors
             u .= sqrt(abs(δ)) .* v
             w .= sqrt(abs(δ)) .* v
             t1 += @elapsed begin
@@ -1479,7 +1541,7 @@ function _sdp_pca_ccd_iter!(
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
-        if change_obj < tol
+        if change_obj < tol || max_delta < 1e-4
             converged = true
             break
         end
@@ -1582,8 +1644,8 @@ function rank2_cholesky_update!(
 end
 
 """
-    id_partition_groups(X::AbstractMatrix; [nrep], [rep_method], [nrep], [rss_target], [force_contiguous])
-    id_partition_groups(Σ::Symmetric; [nrep], [rep_method], [nrep], [rss_target], [force_contiguous])
+    id_partition_groups(X::AbstractMatrix; [rss_target], [force_contiguous])
+    id_partition_groups(Σ::Symmetric; [rss_target], [force_contiguous])
 
 Compute group members based on interpolative decompositions. An initial pass 
 first selects the most representative features such that regressing each 
@@ -1595,11 +1657,6 @@ features are assigned to groups
 + `G`: Either individual level data `X` or a correlation matrix `Σ`. If one
     inputs `Σ`, it must be wrapped in the `Symmetric` argument, otherwise
     we will treat it as individual level data
-+ `nrep`: Number of representative per group. Initial group representatives are
-    guaranteed to be selected
-+ `rep_method`: Method for selecting representatives for each group. Options are
-    `:id` (tends to select roughly independent variables) or `:rss` (tends to
-    select more correlated variables)
 + `rss_target`: Target residual level (greater than 0) for the first pass, smaller
     means more groups
 + `force_contiguous`: Whether groups are forced to be contiguous. If true,
@@ -1608,17 +1665,12 @@ features are assigned to groups
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `rep_variables`: Columns of X selected as representatives. Each group have at 
-    most `nrep` representatives. These are typically used to construct smaller
-    group knockoff for extremely large groups
 
 Note: interpolative decomposition is a stochastic algorithm. Set a seed to
 guarantee reproducible results. 
 """
 function id_partition_groups(
     G::AbstractMatrix;
-    nrep = 1,
-    rep_method = :id,
     rss_target = 0.25,
     force_contiguous = false
     )
@@ -1638,15 +1690,12 @@ function id_partition_groups(
     non_rep = setdiff(1:p, centers)
     force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
                        assign_members_cor!(groups, Σ, non_rep, centers)
-    # step 3: pick reprensetatives for each group. Centers are always selected
-    group_reps = centers
-    nrep > 1 && choose_group_reps!(group_reps, G, groups; method = rep_method, nrep = nrep)
-    return groups, group_reps
+    return groups
 end
 
 """
-    hc_partition_groups(X::AbstractMatrix; [rep_method], [cutoff], [min_clusters], [nrep], [force_contiguous])
-    hc_partition_groups(Σ::Symmetric; [rep_method], [cutoff], [min_clusters], [nrep], [force_contiguous])
+    hc_partition_groups(X::AbstractMatrix; [cutoff], [min_clusters], [force_contiguous])
+    hc_partition_groups(Σ::Symmetric; [cutoff], [min_clusters], [force_contiguous])
 
 Computes a group partition based on individual level data `X` or correlation 
 matrix `Σ` using single-linkage hierarchical clustering. By default, a list of
@@ -1661,35 +1710,44 @@ variables most representative of each group will also be computed.
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
-+ `nrep`: Number of representative per group. Defaults 1. If `nrep=1`, the 
-    representative will be selected by computing which element has the smallest
-    distance to all other elements in the cluster, i.e. the mediod. Otherise, 
-    we will run interpolative decomposition to select representatives
++ `linkage`: *cluster linkage* function to use (when `force_contiguous=true`, 
+    `linkage` must be `:single`). `linkage` defines how the 
+    distances between the data points are aggregated into the distances between 
+    the clusters. Naturally, it affects what clusters are merged on each 
+    iteration. The valid choices are:
+    + `:single` (default): use the minimum distance between any of the cluster members
+    + `:average`: use the mean distance between any of the cluster members
+    + `:complete`: use the maximum distance between any of the members
+    + `:ward`: the distance is the increase of the average squared distance of a
+        point to its cluster centroid after merging the two clusters
+    + `:ward_presquared`: same as `:ward`, but assumes that the distances in d 
+        are already squared.
 + `rep_method`: Method for selecting representatives for each group. Options are
     `:id` (tends to select roughly independent variables) or `:rss` (tends to
     select more correlated variables)
 
-If both `min_clusters` and `cutoff` are specified, it's guaranteed that the
-number of clusters is not less than `min_clusters` and their height is not 
-above `cutoff`.
+If `force_contiguous = false` and both `min_clusters` and `cutoff` are specified, 
+it is guaranteed that the number of clusters is not less than `min_clusters` and
+their height is not above `cutoff`. If `force_contiguous = true`, `min_clusters`
+keyword is ignored. 
 
 # Outputs
 + `groups`: Length `p` vector of group membership for each variable
-+ `rep_variables`: Columns of X selected as representatives. Each group have at 
++ `group_reps`: Columns of X selected as representatives. Each group have at 
     most `nrep` representatives. These are typically used to construct smaller
     group knockoff for extremely large groups
-+ `force_contiguous`: Whether groups are forced to be contiguous. If true,
-    we will run adjacency constrained hierarchical clustering. 
 """
 function hc_partition_groups(
     Σ::Symmetric;
-    cutoff = 0.7,
+    cutoff = 0.5,
     min_clusters = 1,
-    nrep = 1,   
-    rep_method = :id,
+    linkage=:complete,
     force_contiguous = false
     )
-    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    all(x -> x ≈ 1, diag(Σ)) || 
+        error("Σ must be scaled to a correlation matrix first.")
+    force_contiguous && linkage != :single &&
+        error("When force_contiguous = true, linkage must be :single")
     # convert correlation matrix to a distance matrix
     distmat = copy(Matrix(Σ))
     @inbounds @simd for i in eachindex(distmat)
@@ -1699,24 +1757,31 @@ function hc_partition_groups(
     if force_contiguous
         groups = adj_constrained_hclust(distmat, h=1-cutoff)
     else
-        cluster_result = hclust(distmat; linkage=:single)
+        cluster_result = hclust(distmat; linkage=linkage)
         groups = cutree(cluster_result, h=1-cutoff, k=min_clusters)
     end
-    # pick reprensetatives for each group
-    group_reps = choose_group_reps(Σ, groups; method = rep_method, nrep = nrep)
-    return groups, group_reps
+    return groups
 end
-hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, nrep = 1, rep_method=:id, force_contiguous=false) = 
-    hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, min_clusters=min_clusters, nrep=nrep, rep_method=rep_method, force_contiguous=force_contiguous)
+
+function hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, 
+    linkage=:complete, force_contiguous=false)
+    return hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, 
+        linkage=linkage,min_clusters=min_clusters, 
+        force_contiguous=force_contiguous)
+end
 
 """
     adj_constrained_hclust(distmat::AbstractMatrix, h::Number)
 
 Performs (single-linkage) hierarchical clustering, forcing groups to be contiguous.
-We implement a bottom-up approach naively because `Clustering.jl` does not 
-support adjacency constraints (see https://github.com/JuliaStats/Clustering.jl/issues/230)
+After clustering, variables in different group is guaranteed to have distance 
+less than `h`. 
+
+Note: this is a custom (bottom-up) implementation because `Clustering.jl` does not 
+support adjacency constraints, see https://github.com/JuliaStats/Clustering.jl/issues/230
 """
-function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where T
+function adj_constrained_hclust(distmat::AbstractMatrix{T}; 
+    h::Number=0.3) where T
     0 ≤ h ≤ 1 || error("adj_constrained_hclust: expected 0 ≤ h ≤ 1 but got $h")
     p = size(distmat, 2)
     clusters = [[i] for i in 1:p] # initially all variables is its own cluster
@@ -1724,21 +1789,22 @@ function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where
         remaining_clusters = length(clusters)
         min_d, max_d = typemax(T), typemin(T)
         merge_left, merge_right = 0, 0 # clusters to be merged
-        # find min between-cluster distance among adjacent clusters
-        for left in 1:remaining_clusters-1
-            right = left + 1
-            d = single_linkage_distance(distmat, clusters[left], clusters[right])
+        # find min between-cluster distance
+        for left in 1:remaining_clusters, right in left+1:remaining_clusters
+            d = Knockoffs.single_linkage_distance(distmat, clusters[left], clusters[right])
             if d < min_d
                 merge_left, merge_right = left, right
                 min_d = d
             end
             d > max_d && (max_d = d)
         end
-        # merge 2 clusters with min distance
-        for i in clusters[merge_right]
-            push!(clusters[merge_left], i)
+        # merge 2 clusters (and all those in between) with min distance
+        for c in merge_left+1:merge_right
+            for i in clusters[c]
+                push!(clusters[merge_left], i)
+            end
         end
-        deleteat!(clusters, merge_right)
+        deleteat!(clusters, merge_left+1:merge_right)
         # check for convergence
         min_d ≥ h && break
     end
@@ -1747,6 +1813,7 @@ function adj_constrained_hclust(distmat::AbstractMatrix{T}; h::Number=0.3) where
     for (i, cluster) in enumerate(clusters), g in cluster
         groups[g] = i
     end
+    issorted(groups) || error("adj_constrained_hclust did not produce contiguous groups")
     return groups
 end
 
@@ -1766,117 +1833,96 @@ function single_linkage_distance(distmat::AbstractMatrix{T}, left::Vector{Int}, 
 end
 
 """
-    choose_group_reps(G::AbstractMatrix, groups::AbstractVector; nrep = 1)
-    choose_group_reps!(group_reps::Vector{Int}, C::AbstractMatrix, groups::AbstractVector; nrep = 1)
+    choose_group_reps(Σ::Symmetric, groups::AbstractVector; threshold=0.5)
+    choose_group_reps(X::AbstractMatrix, groups::AbstractVector; threshold=0.5)
+
+Chooses group representatives. If R is the set of selected variables within a
+group and O is the set of variables outside the group, then we keep adding
+variables to R until the proportion of variance explained by R divided by the
+proportion of variance explained by R and O exceeds `threshold`. 
 
 # Inputs
-+ `G`: Either individual level data `X` or the correlation matrix `Σ`. If one
-    inputs `Σ`, it must be wrapped in the `Symmetric` argument
++ First argument: Either individual level data `X` or the correlation matrix `Σ`.
+    If one inputs `Σ`, it must be wrapped in the `Symmetric` argument.
++ `groups`: Vector of group membership. 
++ `threshold`: Value between 0 and 1 that controls the number of 
+    representatives per group. Larger means more representatives (default 0.5)
 """
-function choose_group_reps!(
-    group_reps::Vector{Int}, 
-    G::AbstractMatrix, 
-    groups::AbstractVector;
-    method = "id", # id or rss
-    nrep = 1
-    )
+function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5) where T
+    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
+    0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
     unique_groups = unique(groups)
-    offset = length(group_reps) > 0 ? 1 : 0
-    if length(group_reps) > 0
-        # if reprensetatives are already present, they are considered "group centers"
-        # so check that there's only 1 rep per group
-        length(unique(groups[group_reps])) == length(unique_groups) || 
-            error("choose_group_reps!: if group_reps are supplied, " * 
-                "each group should have only 1 representative")
-    end
-    if method == :id
-        for g in unique_groups
-            group_idx = findall(x -> x == g, groups) # all variables in this group
-            group_members = setdiff!(group_idx, group_reps) # remove the representative
-            length(group_members) == 0 && continue
-            # Run ID on X[:, group_members] or cholesky of Σ[group_members, group_members]
-            A = typeof(G) <: Symmetric ? 
-                cholesky(PositiveFactorizations.Positive, Symmetric(G[group_members, group_members])).U :
-                @view(G[:, group_members])
-            rep_variables = interpolative_decomposition(A, nrep - offset)
-            for rep in rep_variables
-                push!(group_reps, group_members[rep])
+    group_reps = Int[]
+    Σinv = inv(Σ)
+    storage1 = zeros(size(Σ, 1), size(Σ, 2))
+    storage2 = zeros(size(Σ, 2))
+    @inbounds for g in unique_groups
+        group_idx = findall(x -> x == g, groups) # all variables in this group
+        O = findall(x -> x != g, groups) # all variables outside the group
+        group_size = length(group_idx)
+        if length(group_idx) == 1
+            push!(group_reps, group_idx[1])
+            continue
+        end
+        # for each variable in current group, compute an ordering of importance
+        Σg = @view(Σ[group_idx, group_idx])
+        index = select_best_rss_subset(Σg, group_size) # indices in current groups
+        indexΣ = group_idx[index] # indices in Σ
+        # keep adding reps in current group until stopping criteria
+        R = [indexΣ[1]]
+        push!(group_reps, indexΣ[1])
+        for i in 2:group_size
+            RO = union(R, O) # variables in R and O
+            Rc = setdiff(indexΣ, R) # variables not yet selected
+            ROc = setdiff(1:size(Σ, 1), RO)
+            Σ_RR_inv = inv(Σ[R, R])
+            # compute Σ_RORO_inv = inv(Σ[RO, RO]) = 
+            # Σinv[RO, RO] - Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
+            # using the fact that the quadratic form is low rank
+            L = cholesky(Σinv[ROc, ROc])
+            X = inv(L.L) * Σinv[ROc, RO] # X'X = Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
+            Σ_RORO_inv = @view(storage1[1:length(RO), 1:length(RO)])
+            Σ_RORO_inv .= @view(Σinv[RO, RO])
+            BLAS.syrk!('U', 'T', -one(T), X, one(T), Σ_RORO_inv) # upper triangular only
+            # LinearAlgebra.copytri!(Σ_RORO_inv, 'U')
+            # compute ratio of variation explained by j
+            ratio = zero(T)
+            for j in Rc
+                Σ_Rj = Σ[R, j]
+                Σ_ROj = Σ[RO, j]
+                R2_R = _dot(Σ_Rj, Σ_RR_inv, Σ_Rj, storage2) # R2_R = Σ_Rj*Σ_RR_inv*Σ_Rj
+                R2_RO = _dot(Σ_ROj, Symmetric(Σ_RORO_inv), Σ_ROj, storage2)
+                R2_R / R2_RO
+                ratio += R2_R / R2_RO
+            end
+            ratio /= length(Rc)
+            if ratio > threshold
+                break
+            else
+                # select ith variable
+                push!(R, indexΣ[i])
+                push!(group_reps, indexΣ[i])
             end
         end
-    elseif method == :rss
-        Σ = typeof(G) <: Symmetric ? G : cor(G)
-        for g in unique_groups
-            group_idx = findall(x -> x == g, groups) # all variables in this group
-            group_members = setdiff!(group_idx, group_reps) # remove the representative
-            length(group_members) == 0 && continue
-            # compute top representatives by minimizing RSS of un-selected variants
-            Σg = @view(Σ[group_members, group_members])
-            rep_variables = select_best_rss_subset(Σg, nrep - offset)
-            for rep in rep_variables
-                push!(group_reps, group_members[rep])
-            end
-        end
-    else 
-        error("choose_group_reps!: expected method to be :id or :rss")
     end
     return sort!(group_reps)
 end
-choose_group_reps(G::AbstractMatrix, groups::AbstractVector; method=:id, nrep = 1) = 
-    choose_group_reps!(Int[], G, groups, nrep=nrep, method=method)
 
-function choose_group_reps_adapt!(
-    group_reps::Vector{Int}, 
-    G::AbstractMatrix, 
-    groups::AbstractVector;
-    method = "id", # id or rss
-    nrep = 1
-    )
-    unique_groups = unique(groups)
-    offset = length(group_reps) > 0 ? 1 : 0
-    if length(group_reps) > 0
-        # if reprensetatives are already present, they are considered "group centers"
-        # so check that there's only 1 rep per group
-        length(unique(groups[group_reps])) == length(unique_groups) || 
-            error("choose_group_reps_adapt!: if group_reps are supplied, " * 
-                "each group should have only 1 representative")
-    end
-    if method == :id
-        for g in unique_groups
-            group_idx = findall(x -> x == g, groups) # all variables in this group
-            group_members = setdiff!(group_idx, group_reps) # remove the representative
-            length(group_members) == 0 && continue
-            # Run ID on X[:, group_members] or cholesky of Σ[group_members, group_members]
-            A = typeof(G) <: Symmetric ? 
-                cholesky(PositiveFactorizations.Positive, Symmetric(G[group_members, group_members])).U :
-                @view(G[:, group_members])
-            rep_variables = interpolative_decomposition(A, nrep - offset)
-            for rep in rep_variables
-                push!(group_reps, group_members[rep])
-            end
-        end
-    elseif method == :rss
-        Σ = typeof(G) <: Symmetric ? G : cor(G)
-        for g in unique_groups
-            group_idx = findall(x -> x == g, groups) # all variables in this group
-            group_members = setdiff!(group_idx, group_reps) # remove the representative
-            length(group_members) == 0 && continue
-            # compute upper bound of variation that can be explained by other variants
-
-            # compute top representatives by minimizing RSS of un-selected variants
-            Σg = @view(Σ[group_members, group_members])
-            rep_variables = select_best_rss_subset(Σg, nrep - offset)
-            for rep in rep_variables
-                push!(group_reps, group_members[rep])
-            end
-        end
-    else 
-        error("choose_group_reps_adapt!: expected method to be :id or :rss")
-    end
-    return sort!(group_reps)
+# computes x'*A*y without allocation
+function _dot(x, A, y, storage=zeros(size(A, 1)))
+    p = size(A, 1)
+    store = @views storage[1:p]
+    mul!(store, A, y)
+    return dot(x, store)
 end
-choose_group_reps_adapt(G::AbstractMatrix, groups::AbstractVector; method=:id) = 
-    choose_group_reps_adapt!(Int[], G, groups, method=method)
 
+function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
+    )
+    Σapprox = cov(covariance_approximator, X)
+    cov2cor!(Σapprox.data, sqrt.(diag(Σapprox)))
+    return choose_group_reps(Σapprox, groups, threshold=threshold)
+end
 
 # faithful re-implementation of Trevor's R code. Probably not the most Julian/efficient Julia code
 # select_one and select_best_rss_subset will help us choose k representatives from each group
@@ -1895,7 +1941,7 @@ function select_one(C::AbstractMatrix, vlist, RSS0, tol=1e-12)
 end
 function select_best_rss_subset(C::AbstractMatrix, k::Int)
     p = size(C, 2)
-    p ≤ k && return collect(1:p) # quick return
+    # p ≤ k && return collect(1:p) # quick return
     indices = zeros(Int, k)
     RSS0 = p
     R2 = zeros(k)
@@ -1929,26 +1975,25 @@ end
 
 function assign_members_cor_adj!(groups, Σ, non_rep, rep_columns)
     issorted(rep_columns) || error("Expected rep_columns to be sorted")
-    for j in non_rep
-        group_on_right = searchsortedfirst(rep_columns, j)
-        if group_on_right > length(rep_columns) # no group on the right
-            nearest_rep = rep_columns[end]
+    rep_columns_tmp = copy(rep_columns)
+    for j in shuffle(non_rep)
+        group_on_right = searchsortedfirst(rep_columns_tmp, j)
+        if group_on_right > length(rep_columns_tmp) # no group on the right
+            nearest_rep = rep_columns_tmp[end]
+            push!(rep_columns_tmp, j)
         elseif group_on_right == 1 # j comes before the first group
-            nearest_rep = rep_columns[1]
+            nearest_rep = rep_columns_tmp[1]
+            insert!(rep_columns_tmp, 1, j)
         else # test which of the nearest representative is more correlated with j
-            left, right = rep_columns[group_on_right - 1], rep_columns[group_on_right]
+            left  = rep_columns_tmp[group_on_right - 1]
+            right = rep_columns_tmp[group_on_right]
             nearest_rep = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
         end
         # assign j to the group of its representative
         groups[j] = groups[nearest_rep]
+        insert!(rep_columns_tmp, group_on_right, j)
     end
-    # adhoc: second pass to ensure all groups are sorted, since routine above doesn't guarantee sorted
-    # e.g. [111 22 3 4 55555 6666 5 666] (need to convert 66665666 at the far right to a 66666666)
-    prev_group = 1
-    for i in eachindex(groups)
-        (groups[i] < prev_group) && (groups[i] = prev_group)
-        (groups[i] > prev_group) && (prev_group = groups[i])
-    end
+    issorted(groups) || error("assign_members_cor_adj!: groups not contiguous")
     return groups
 end
 
@@ -2056,92 +2101,3 @@ function get_PCA_vectors(Σ::AbstractMatrix{T}, groups::AbstractVector{Int}) whe
     end
     return unique([evecs V2], dims=2)
 end
-
-# every `windowsize` SNPs form a group
-# function partition_group(snp_idx; windowsize=10)
-#     p = length(snp_idx)
-#     windows = floor(Int, p / windowsize)
-#     remainder = p - windows * windowsize
-#     groups = zeros(Int, p)
-#     for window in 1:windows
-#         groups[(window - 1)*windowsize + 1:window * windowsize] .= window
-#     end
-#     groups[p-remainder+1:p] .= windows + 1
-#     return groups
-# end
-
-"""
-    modelX_gaussian_group_knockoffs(xdata::SnpData, method)
-
-Generates (model-X Gaussian second-order) group knockoffs for
-a single chromosome stored in PLINK formatted data. 
-
-# todo 
-+ Handle PLINK files with multiple chromosomes and multiple plink files each storing a chromosome
-+ Make this accept multiple knockoffs
-+ Output to PGEN which stores dosages
-+ Better window definition via hierarchical clustering
-"""
-# function modelX_gaussian_group_knockoffs(
-#     x::SnpArray, # assumes only have 1 chromosome, allows missing data
-#     method::Symbol;
-#     T::DataType = Float32,
-#     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-#     outfile::Union{String, UndefInitializer} = undef,
-#     windowsize::Int = 10000
-#     )
-#     # estimate rough memory requirement (need Σ which is windowsize*windowsize and X which is n*windowsize)
-#     n, p = size(x)
-#     windows = ceil(Int, p / windowsize)
-#     @info "This routine requires at least $((T.size * windowsize^2 + T.size * n*windowsize) / 10^9) GB of RAM"
-#     # preallocated arrays
-#     xstore = Matrix{T}(undef, n, windowsize)
-#     X̃snparray = SnpArray(outfile, n, p)
-#     group_ranges = Vector{Int}[]
-#     Sblocks = Matrix{T}[]
-#     # loop over each window
-#     for window in 1:windows
-#         # import genotypes into numeric array
-#         cur_range = window == windows ? 
-#             ((windows - 1)*windowsize + 1:p) : 
-#             ((window - 1)*windowsize + 1:window * windowsize)
-#         @time copyto!(xstore, @view(x[:, cur_range]), impute=true)
-#         X = @view(xstore[:, 1:length(cur_range)])
-#         any(x -> iszero(x), std(X, dims=1)) &&
-#             error("Detected monomorphic SNPs. Please make sure QC is done properly.")
-#         # approximate covariance matrix and scale it to correlation matrix
-#         @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
-#         σs = sqrt.(diag(Σapprox))
-#         Σcor = cov2cor!(Σapprox.data, σs)
-#         # define group-blocks
-#         groups = partition_group(1:length(cur_range); windowsize=10)
-#         empty!(group_ranges); empty!(Sblocks)
-#         for g in unique(groups)
-#             idx = findall(x -> x == g, groups)
-#             push!(Sblocks, @view(Σcor[idx, idx]))
-#             push!(group_ranges, idx)
-#         end
-#         Sblock_diag = BlockDiagonal(Sblocks)
-#         # compute block diagonal S matrix using the specified knockoff method
-#         @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
-#         # rescale S back to the result for a covariance matrix
-#         for (i, idx) in enumerate(group_ranges)
-#             cor2cov!(S.blocks[i], @view(σs[idx]))
-#         end
-#         # generate knockoffs
-#         μ = vec(mean(X, dims=1))
-#         @time X̃ = Knockoffs.condition(X, μ, Σapprox, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
-#         # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
-#         X̃ .= round.(X̃)
-#         clamp!(X̃, 0, 2)
-#         # count(vec(X̃) .!= vec(X)) # 160294 / 100000000 for a window
-#         # copy result into SnpArray
-#         for (j, jj) in enumerate(cur_range), i in 1:n
-#             X̃snparray[i, jj] = iszero(X̃[i, j]) ? 0x00 : 
-#                 isone(X̃[i, j]) ? 0x02 : 0x03
-#         end
-#         # xtest = convert(Matrix{Float64}, @view(X̃snparray[:, cur_range]))
-#         # @assert all(xtest .== X̃)
-#     end
-#     return X̃snparray
-# end

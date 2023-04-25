@@ -44,7 +44,7 @@ struct GaussianRepGroupKnockoff{T<:AbstractFloat, S<:Symmetric} <: Knockoff
     Σ::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
     obj::T # final objective value of group knockoff
-    nrep::Int # number of representatives per group
+    enforce_cond_indep::Bool
 end
 
 struct IPADKnockoff{T<:AbstractFloat} <: Knockoff
@@ -119,7 +119,7 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
-    merged_ko :: Knockoff # A MergedKnockoff struct
+    # merged_ko :: Knockoff # A MergedKnockoff struct
     m :: Int # number of knockoffs per feature generated
     βs :: Vector{Vector{T}} # βs[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
     a0 :: Vector{T}   # intercepts for each model in βs
@@ -138,8 +138,8 @@ struct MarginalKnockoffFilter{T} <: KnockoffFilter
     W :: Vector{T} # length p vector of feature importance
     τs :: Vector{T} # threshold for significance. For fdr fdr_target[i], τ[i] is threshold, and all W ≥ τ[i] is selected
     m :: Int # number of knockoffs per feature generated
-    Xpvals :: Vector{T} # -log10 p-values for the original variables
-    X̃pvals :: Vector{T} # -log10 p-values for the knockoff variables
+    β :: Vector{T} # marginal effect sizes for the original variables
+    β̃ :: Vector{T} # marginal effect sizes for the knockoff variables
     selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
     fdr_target :: Vector{T} # target FDR level for each τs and βs
     d :: UnivariateDistribution # distribution of y

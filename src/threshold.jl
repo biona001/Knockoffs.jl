@@ -66,3 +66,70 @@ function mk_threshold(τ::Vector{T}, κ::Vector{Int}, m::Int, q::Number, method=
     end
     return τ̂
 end
+
+
+"""
+    MK_statistics(T0::Vector, Tk::Vector)
+
+Compute regular knockoff statistics tau and W. 
+
+# Inputs
++ `T0`: p-vector of importance score for original variables
++ `Tk`: p-vector of importance score for knockoff variables
+
+# output
++ `W`: coefficient difference statistic `W[i] = abs(T0[i]) - abs(Tk[i])`
+
+    MK_statistics(T0::Vector, Tk::Vector{Vector}; filter_method)
+
+Computes the multiple knockoff statistics kappa, tau, and W. 
+
+# Inputs
++ `T0`: p-vector of importance score for original variables
++ `Tk`: Vector storing T1, ..., Tm, where Ti is importance scores for 
+    the `i`th knockoff copy
++ `filter_method`: Either `Statistics.median` (default) or max (original 
+    function used in 2019 Gimenez and Zou)
+
+# output
++ `κ`: Index of the most significant feature (`κ[i] = 0` if original feature most 
+    important, otherwise `κ[i] = k` if the `k`th knockoff is most important)
++ `τ`: `τ[i]` stores the most significant statistic among original and knockoff
+    variables minus `filter_method()` applied to the remaining statistics. 
++ `W`: coefficient difference statistic `W[i] = abs(T0[i]) - abs(Tk[i])`     
+"""
+function MK_statistics(
+    T0::Vector{T}, 
+    Tk::Vector{Vector{T}};
+    filter_method::Function = Statistics.median
+    ) where T
+    p, m = length(T0), length(Tk)
+    all(p .== length.(Tk)) || error("Length of T0 should equal all vectors in Tk")
+    κ = zeros(Int, p) # index of largest importance score
+    τ = zeros(p)      # difference between largest importance score and median of remaining
+    W = zeros(p)      # importance score of each feature
+    storage = zeros(m + 1)
+    for i in 1:p
+        storage[1] = abs(T0[i])
+        for k in 1:m
+            if abs(Tk[k][i]) > abs(T0[i])
+                κ[i] = k
+            end
+            storage[k+1] = abs(Tk[k][i])
+        end
+        W[i] = (storage[1] - filter_method(@view(storage[2:end]))) * (κ[i] == 0)
+        sort!(storage, rev=true)
+        τ[i] = storage[1] - filter_method(@view(storage[2:end]))
+    end
+    return κ, τ, W
+end
+
+function MK_statistics(T0::Vector{T}, Tk::Vector{T}) where T
+    p = length(T0)
+    p == length(Tk) || error("Length of T0 should equal length of Tk")
+    W = T[] # importance score of each feature
+    for (t0, tk) in zip(T0, Tk)
+        push!(W, abs(t0) - abs(tk))
+    end
+    return W
+end
