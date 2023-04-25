@@ -30,6 +30,9 @@ Pages = ["api.md"]
 ```@docs
   threshold
   MK_statistics
+  hc_partition_groups
+  id_partition_groups
+  choose_group_reps
   fit_lasso
   fit_marginal
   simulate_AR1

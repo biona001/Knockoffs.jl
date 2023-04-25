@@ -134,10 +134,12 @@ function fit_lasso(
         end
         # debias the estimates if requested
         if !isnothing(debias) && count(!iszero, β_filtered) > 0
-            a0 = hasproperty(ko, :groups) ? 
-                debias!(β_filtered, X, y; method=debias, d=d, kwargs...) : 
-                debias!(β_filtered, X, y, groups; method=debias, d=d, 
+            if hasproperty(ko, :groups)
+                a0 = debias!(β_filtered, X, y, groups; method=debias, d=d, 
                 stringent=stringent, kwargs...)
+            else
+                a0 = debias!(β_filtered, X, y; method=debias, d=d, kwargs...)
+            end
         end
         # save beta and intercept
         push!(βs, β_filtered)

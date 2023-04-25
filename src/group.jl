@@ -126,8 +126,8 @@ function modelX_gaussian_group_knockoffs(
 end
 
 """
-    modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [nrep], [m], [covariance_approximator], [kwargs...])
-    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [nrep], [m], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [m], [kwargs...])
 
 Constructs group knockoffs by choosing representatives from each group and
 solving a smaller optimization problem based on the representatives only. Remaining
@@ -163,15 +163,10 @@ function modelX_gaussian_rep_group_knockoffs(
     Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
     μ = vec(mean(X, dims=1)) # empirical column means
     return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, 
-        groups; nrep=nrep, m=m, rep_threshold=rep_threshold, kwargs...)
+        groups; m=m, rep_threshold=rep_threshold, kwargs...)
 end
 
-"""
-Let X_R = (X_1,...,X_r); X_C = (X_{r+1},...,X_p)
-
-# todo
-Efficient sampling of knockoffs when `m>1` using conditional independence
-"""
+# todo: Efficient sampling of knockoffs when `m>1` using conditional independence
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, # n × p
     method::Symbol,
@@ -184,6 +179,8 @@ function modelX_gaussian_rep_group_knockoffs(
     enforce_cond_indep::Bool = false,
     kwargs... # extra arguments for solve_s_group
     ) where T
+    size(X, 2) == length(groups)  || error("Dimensions of X and groups doesn't match")
+
     # compute group representatives
     group_reps = choose_group_reps(Symmetric(Σ), groups, threshold=rep_threshold)
 
@@ -1923,6 +1920,7 @@ function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
     )
     Σapprox = cov(covariance_approximator, X)
+    cov2cor!(Σapprox.data, sqrt.(diag(Σapprox)))
     return choose_group_reps(Σapprox, groups, threshold=threshold)
 end
 
@@ -2103,92 +2101,3 @@ function get_PCA_vectors(Σ::AbstractMatrix{T}, groups::AbstractVector{Int}) whe
     end
     return unique([evecs V2], dims=2)
 end
-
-# every `windowsize` SNPs form a group
-# function partition_group(snp_idx; windowsize=10)
-#     p = length(snp_idx)
-#     windows = floor(Int, p / windowsize)
-#     remainder = p - windows * windowsize
-#     groups = zeros(Int, p)
-#     for window in 1:windows
-#         groups[(window - 1)*windowsize + 1:window * windowsize] .= window
-#     end
-#     groups[p-remainder+1:p] .= windows + 1
-#     return groups
-# end
-
-"""
-    modelX_gaussian_group_knockoffs(xdata::SnpData, method)
-
-Generates (model-X Gaussian second-order) group knockoffs for
-a single chromosome stored in PLINK formatted data. 
-
-# todo 
-+ Handle PLINK files with multiple chromosomes and multiple plink files each storing a chromosome
-+ Make this accept multiple knockoffs
-+ Output to PGEN which stores dosages
-+ Better window definition via hierarchical clustering
-"""
-# function modelX_gaussian_group_knockoffs(
-#     x::SnpArray, # assumes only have 1 chromosome, allows missing data
-#     method::Symbol;
-#     T::DataType = Float32,
-#     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-#     outfile::Union{String, UndefInitializer} = undef,
-#     windowsize::Int = 10000
-#     )
-#     # estimate rough memory requirement (need Σ which is windowsize*windowsize and X which is n*windowsize)
-#     n, p = size(x)
-#     windows = ceil(Int, p / windowsize)
-#     @info "This routine requires at least $((T.size * windowsize^2 + T.size * n*windowsize) / 10^9) GB of RAM"
-#     # preallocated arrays
-#     xstore = Matrix{T}(undef, n, windowsize)
-#     X̃snparray = SnpArray(outfile, n, p)
-#     group_ranges = Vector{Int}[]
-#     Sblocks = Matrix{T}[]
-#     # loop over each window
-#     for window in 1:windows
-#         # import genotypes into numeric array
-#         cur_range = window == windows ? 
-#             ((windows - 1)*windowsize + 1:p) : 
-#             ((window - 1)*windowsize + 1:window * windowsize)
-#         @time copyto!(xstore, @view(x[:, cur_range]), impute=true)
-#         X = @view(xstore[:, 1:length(cur_range)])
-#         any(x -> iszero(x), std(X, dims=1)) &&
-#             error("Detected monomorphic SNPs. Please make sure QC is done properly.")
-#         # approximate covariance matrix and scale it to correlation matrix
-#         @time Σapprox = cov(covariance_approximator, X) # ~25 sec for 10k SNPs
-#         σs = sqrt.(diag(Σapprox))
-#         Σcor = cov2cor!(Σapprox.data, σs)
-#         # define group-blocks
-#         groups = partition_group(1:length(cur_range); windowsize=10)
-#         empty!(group_ranges); empty!(Sblocks)
-#         for g in unique(groups)
-#             idx = findall(x -> x == g, groups)
-#             push!(Sblocks, @view(Σcor[idx, idx]))
-#             push!(group_ranges, idx)
-#         end
-#         Sblock_diag = BlockDiagonal(Sblocks)
-#         # compute block diagonal S matrix using the specified knockoff method
-#         @time S, γs = solve_s_group(Σcor, Sblock_diag, groups, method) # 44.731886 seconds (13.44 M allocations: 4.467 GiB) (this step requires more memory allocation, need to analyze)
-#         # rescale S back to the result for a covariance matrix
-#         for (i, idx) in enumerate(group_ranges)
-#             cor2cov!(S.blocks[i], @view(σs[idx]))
-#         end
-#         # generate knockoffs
-#         μ = vec(mean(X, dims=1))
-#         @time X̃ = Knockoffs.condition(X, μ, Σapprox, S) # ~369 seconds (note: cholesky of 10k matrix takes ~16 seconds so why is this so slow?)
-#         # Force X̃_ij ∈ {0, 1, 2} (mainly done for large PLINK files where its impossible to store knockoffs in single/double precision)
-#         X̃ .= round.(X̃)
-#         clamp!(X̃, 0, 2)
-#         # count(vec(X̃) .!= vec(X)) # 160294 / 100000000 for a window
-#         # copy result into SnpArray
-#         for (j, jj) in enumerate(cur_range), i in 1:n
-#             X̃snparray[i, jj] = iszero(X̃[i, j]) ? 0x00 : 
-#                 isone(X̃[i, j]) ? 0x02 : 0x03
-#         end
-#         # xtest = convert(Matrix{Float64}, @view(X̃snparray[:, cur_range]))
-#         # @assert all(xtest .== X̃)
-#     end
-#     return X̃snparray
-# end
