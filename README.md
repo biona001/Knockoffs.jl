@@ -24,13 +24,12 @@ This package supports Julia `v1.6`+.
 
 ## Calling Knockoffs.jl from R and Python
 
+See documentation.
 
-## Development Roadmap
+## Package Features
 
-+ Use Mosek for SDP problems by default
-+ Docker
-+ [Ghost knockoffs](https://www.biorxiv.org/content/10.1101/2021.12.06.471440v1.full) (in progress)
-+ SDP/MVR/...etc constructions for [group knockoffs](https://proceedings.mlr.press/v48/daia16.html)
-+ fastPHASE HMM knockoffs (in progress) (note: this is a native Julia implementation)
-+ [KnockoffScreen](https://www.nature.com/articles/s41467-021-22889-4) knockoffs (in progress)
-+ SHAPEIT HMM knockoffs (wrap code from [knockoffgwas/snpknock2](https://github.com/msesia/knockoffgwas)) (in progress)
++ Fast coordinate algorithms for MVR, ME, and SDP knockoffs
++ Fast coordinate descent algorithms for grouped MVR/ME/SDP knockoffs, and a representative group knockoff approach which empirically has superior power. 
++ Built-in functions to define groups
++ Built-in functions to compute feature importance scores via Lasso/marginal regressions
++ Preliminary support for Ghost Knockoffs via the [EasyLD.jl](https://github.com/biona001/EasyLD.jl) package and HMM knockoffs via [fastPHASE.jl](https://github.com/biona001/fastPHASE.jl)
