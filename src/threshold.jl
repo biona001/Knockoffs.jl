@@ -69,17 +69,6 @@ end
 
 
 """
-    MK_statistics(T0::Vector, Tk::Vector)
-
-Compute regular knockoff statistics tau and W. 
-
-# Inputs
-+ `T0`: p-vector of importance score for original variables
-+ `Tk`: p-vector of importance score for knockoff variables
-
-# output
-+ `W`: coefficient difference statistic `W[i] = abs(T0[i]) - abs(Tk[i])`
-
     MK_statistics(T0::Vector, Tk::Vector{Vector}; filter_method)
 
 Computes the multiple knockoff statistics kappa, tau, and W. 
@@ -124,6 +113,18 @@ function MK_statistics(
     return κ, τ, W
 end
 
+"""
+    MK_statistics(T0::Vector, Tk::Vector)
+
+Compute regular knockoff statistics tau and W. 
+
+# Inputs
++ `T0`: p-vector of importance score for original variables
++ `Tk`: p-vector of importance score for knockoff variables
+
+# output
++ `W`: coefficient difference statistic `W[i] = abs(T0[i]) - abs(Tk[i])`
+"""
 function MK_statistics(T0::Vector{T}, Tk::Vector{T}) where T
     p = length(T0)
     p == length(Tk) || error("Length of T0 should equal length of Tk")

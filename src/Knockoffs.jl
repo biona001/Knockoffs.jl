@@ -97,8 +97,6 @@ include("ghost.jl")
 include("predict.jl")
 include("group.jl")
 include("ipad.jl")
-# include("ccd_old.jl")
-# include("R.jl")
 
 const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
 const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_ccd, :sdp_full, :mvr, :maxent, :maxent_subopt]

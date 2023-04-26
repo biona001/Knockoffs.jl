@@ -1,5 +1,5 @@
 """
-    ipad(X; [m])
+    ipad(X::Matrix; [r_method], [m])
 
 Generates knockoffs based on intertwined probabilitistic factors decoupling (IPAD).
 This assumes that `X` can be factored as `X = FΛ' + E` where `F` is a `n × r`
@@ -12,7 +12,8 @@ problem.
 
 # Inputs
 + `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
-+ `r_method`: Method used for estimating `r`, the number of latent factors.
++ `r_method`: Method used for estimating `r`, the number of latent factors. 
+    Choices include `:er` (default), `:gr`, or `:ve`
 + `m`: Number of (simultaneous) knockoffs per variable to generate, default `m=1`
 
 # References
