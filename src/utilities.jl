@@ -369,6 +369,46 @@ function simulate_AR1(p::Int; a=1, b=1, tol=1e-3, max_corr=1, rho=nothing)
 end
 
 """
+    simulate_ER(p::Int; [invert])
+
+Simulates a covariance matrix from a clustered Erdos-Renyi graph, which is
+a block diagonal matrix where each block is an Erdo-Renyi graph. The result is
+scaled back to a correlation matrix. 
+
+For details, see the 4th simulation routine in section 5.1 of Li and Maathius 
+https://academic.oup.com/jrsssb/article/83/3/534/7056103?login=false
+
+# Inputs
++ `p`: Dimension of covariance matrix
++ `ϕ`: Probability of forming an edge between any 2 nodes
++ `lb`: lower bound for the value of an edge (drawn from uniform distribution)
++ `ub`: upper bound for the value of an edge (drawn from uniform distribution)
++ `invert`: Whther to invert the covariance matrix (to obtain the precision)
++ `λmin`: minimum eigenvalue of the resulting covariance matrix
++ `blocksize`: Number of variables within each ER graph. 
+"""
+function simulate_ER(p::Int; ϕ=0.1, lb=0.3, ub=0.9, λmin=0.1, blocksize = 10, invert::Bool=false)
+    V = zeros(p, p)
+    b = Bernoulli(ϕ)
+    u = Uniform(lb, ub)
+    for j in 1:p, i in j:p
+        if i == j
+            V[i, j] = 1
+        elseif i - j > blocksize
+            continue
+        else
+            V[i, j] = rand(-1:2:1) * rand(b) * rand(u)
+        end
+    end
+    LinearAlgebra.copytri!(V, 'L')
+    λ = Symmetric(V) |> eigmin |> abs
+    Σ = V + (λmin + λ)*I
+    invert && (Σ = inv(Σ))
+    cov2cor!(Σ, sqrt.(diag(Σ)))
+    return Σ
+end
+
+"""
     shift_until_PSD!(Σ::AbstractMatrix)
 
 Keeps adding λI to Σ until the minimum eigenvalue > tol

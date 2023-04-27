@@ -20,6 +20,7 @@ Pages = ["api.md"]
   hmm_knockoff
   full_knockoffscreen
   ghost_knockoffs
+  ipad
   solve_s
   solve_s_group
   solve_s_graphical_group

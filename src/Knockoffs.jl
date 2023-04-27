@@ -15,7 +15,7 @@ using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
-using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap
+using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap, zscore!
 using GLMNet
 using BlockDiagonals
 using Roots: fzero
@@ -72,8 +72,9 @@ export
     # utilities
     merge_knockoffs_with_original,
     simulate_AR1,
-    download_1000genomes,
+    simulate_ER,
     simulate_block_covariance, 
+    download_1000genomes,
     hc_partition_groups, 
     id_partition_groups,
     choose_group_reps,

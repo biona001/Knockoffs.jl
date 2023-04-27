@@ -28,7 +28,7 @@ function threshold(w::AbstractVector{T}, q::Number, method=:knockoff_plus) where
 end
 
 """
-    mk_threshold(feature_scores::Vector{Vector{T}}, q::Number)
+    mk_threshold(τ::Vector{T}, κ::Vector{Int}, m::Int, q::Number)
 
 Chooses the multiple knockoff threshold `τ̂ > 0` by setting
 τ̂ = min{ t > 0 : (1/m + 1/m * {#j: κ[j] ≥ 1 and W[j] ≥ t}) / {#j: κ[j] == 0 and W[j] ≥ τ̂} ≤ q }.
