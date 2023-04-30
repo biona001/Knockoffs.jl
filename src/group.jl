@@ -189,7 +189,7 @@ function modelX_gaussian_rep_group_knockoffs(
 
     # compute (block-diagonal) S on representatives and form larger (dense) D
     S, D, obj = solve_s_graphical_group(Symmetric(sigma), groups, group_reps, 
-        method, m=m, verbose=verbose, kwargs...)    
+        method, m=m, verbose=verbose, kwargs...)
 
     # sample multiple knockoffs (todo: sample each independently)
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
@@ -824,7 +824,7 @@ function solve_group_max_entropy_hybrid(
     inner_pca_iter::Int = 1,
     inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
-    ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
+    ϵ=1e-6, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -874,8 +874,8 @@ function solve_group_sdp_hybrid(
     outer_iter::Int = 100,
     inner_pca_iter::Int = 1,
     inner_ccd_iter::Int = 1,
-    tol=0.000005, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
-    ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
+    tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
+    ϵ=1e-6, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -945,7 +945,7 @@ function solve_group_mvr_hybrid(
     inner_pca_iter::Int = 1,
     inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
-    ϵ=1e-8, # tolerance added to the lower and upper bound, prevents numerical issues
+    ϵ=1e-6, # tolerance added to the lower and upper bound, prevents numerical issues
     m::Int = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
