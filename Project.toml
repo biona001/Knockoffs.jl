@@ -52,6 +52,7 @@ ProgressMeter = "1"
 Reexport = "1"
 Roots = "2"
 SnpArrays = "0.3"
+StatsBase = "0.34"
 julia = "1"
 
 [extras]
