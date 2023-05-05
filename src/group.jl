@@ -376,14 +376,6 @@ function solve_s_group(
             S, γs, obj, _, _ = solve_group_mvr_hybrid(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :maxent
             S, γs, obj, _, _ = solve_group_max_entropy_hybrid(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :maxent_old
-        #     S, γs, obj = solve_group_max_entropy_ccd_old(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :mvr_old
-        #     S, γs, obj = solve_group_MVR_ccd_old(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :sdp_old
-        #     S, γs, obj = solve_group_SDP_ccd_old(Σcor, group_permuted; m=m, kwargs...)
-        # elseif method == :maxent_pca_zihuai
-        #     S, γs, obj = solve_group_max_entropy_pca_zihuai(Σcor, m, group_permuted)
         else
             error("Method must be one of $GROUP_KNOCKOFFS but was $method")
         end

@@ -13,18 +13,13 @@ For more information, please see the [main webpage](https://web.stanford.edu/gro
 Download and install [Julia](https://julialang.org/downloads/). Within Julia, copy and paste the following: 
 ```julia
 using Pkg
-pkg"add https://github.com/biona001/fastPHASE.jl"
 pkg"add https://github.com/biona001/Knockoffs.jl"
 ```
 This package supports Julia `v1.6`+. 
 
-**Note**
-+ [fastPHASE](https://stephenslab.uchicago.edu/software.html#fastphase) and hence [fastPHASE.jl](https://github.com/biona001/fastPHASE.jl) supports only Mac and linux systems. Thus, fastPHASE HMM knockoffs does not work on Windows machines. 
-+  For users running with Apple's M1 CPUs, the current recommendation is to run Julia with Rosetta. 
-
 ## Calling Knockoffs.jl from R and Python
 
-See documentation.
+See documentation for usage from R. If many users request of it, I will write a similar tutorial for calling Knockoffs.jl from your favorite language. 
 
 ## Package Features
 
@@ -32,4 +27,4 @@ See documentation.
 + Fast coordinate descent algorithms for grouped MVR/ME/SDP knockoffs, and a representative group knockoff approach which empirically has superior power. 
 + Built-in functions to define groups
 + Built-in functions to compute feature importance scores via Lasso/marginal regressions
-+ Preliminary support for Ghost Knockoffs via the [EasyLD.jl](https://github.com/biona001/EasyLD.jl) package and HMM knockoffs via [fastPHASE.jl](https://github.com/biona001/fastPHASE.jl)
++ Preliminary support for many other kinds of knockoffs, see documentation. 

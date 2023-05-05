@@ -26,7 +26,7 @@ Pages = ["api.md"]
   solve_s_graphical_group
 ```
 
-## Regular functions
+## Other functions
 
 ```@docs
   threshold
@@ -37,16 +37,8 @@ Pages = ["api.md"]
   fit_lasso
   fit_marginal
   simulate_AR1
-  shift_until_PSD!
+  simulate_ER
+  simulate_block_covariance
   normalize_col!
-  sample_DMC
-  predict
-```
-
-## Wrapper functions for SHAPEIT HMM knockoffs
-
-There functions will eventually be replaced by Julia wrappers that no longer require user inputs. 
-
-```@docs
   rapid
 ```
