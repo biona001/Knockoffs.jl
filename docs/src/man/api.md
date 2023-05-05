@@ -20,12 +20,13 @@ Pages = ["api.md"]
   hmm_knockoff
   full_knockoffscreen
   ghost_knockoffs
+  ipad
   solve_s
   solve_s_group
   solve_s_graphical_group
 ```
 
-## Regular functions
+## Other functions
 
 ```@docs
   threshold
@@ -36,16 +37,8 @@ Pages = ["api.md"]
   fit_lasso
   fit_marginal
   simulate_AR1
-  shift_until_PSD!
+  simulate_ER
+  simulate_block_covariance
   normalize_col!
-  sample_DMC
-  predict
-```
-
-## Wrapper functions for SHAPEIT HMM knockoffs
-
-There functions will eventually be replaced by Julia wrappers that no longer require user inputs. 
-
-```@docs
   rapid
 ```

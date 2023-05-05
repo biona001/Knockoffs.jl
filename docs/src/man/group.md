@@ -96,7 +96,7 @@ zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
 
 # Define group memberships
 
-To generate group knockoffs, we need to vector specifying group membership. One can define this vector manually, or use the built-in functions [hc_partition_groups](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hc_partition_groups) or [id_partition_groups](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.id_partition_groups). 
+To generate group knockoffs, we need to vector specifying group membership. One can define this vector manually, or use the built-in functions [`hc_partition_groups`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hc_partition_groups) or [`id_partition_groups`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.id_partition_groups). 
 
 
 ```julia
@@ -138,7 +138,7 @@ groups = hc_partition_groups(X, cutoff = 0.5)
 
 ## Generating group knockoffs
 
-Generate group knockoffs with the exported function [modelX_gaussian_group_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_group_knockoffs). Similar to non-group knockoffs, group knockoff accepts keyword arguments `m`, `tol`, `method`, and `verbose` which controls the algorithm's behavior. 
+Generate group knockoffs with the exported function [`modelX_gaussian_group_knockoffs`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_group_knockoffs). Similar to non-group knockoffs, group knockoff accepts keyword arguments `m`, `tol`, `method`, and `verbose` which controls the algorithm's behavior. 
 
 
 ```julia
@@ -238,7 +238,7 @@ This will estimate the covariance matrix via a shrinkage estimator, see document
 Lets see the empirical power and FDR group knockoffs over 10 simulations when
 + the targer FDR is 10%
 + we generate $m=5$ knockoffs per feature
-+ $\beta_j \sim \pm 0.25$ for $10$ causal $j$s
++ ``\beta_j \sim \pm 0.25`` for 10 causal ``j``s
 
 Note power and FDR is defined at the group level
 
