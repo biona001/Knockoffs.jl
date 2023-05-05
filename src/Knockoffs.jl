@@ -10,7 +10,6 @@ using ProgressMeter
 using Distributions
 using CSV
 using DataFrames
-using fastPHASE
 using ElasticArrays
 using Random
 using PositiveFactorizations
@@ -24,7 +23,6 @@ using GLM
 using Reexport
 using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
 using Ipopt
-using SCS
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
 using LowRankApprox: id
@@ -56,7 +54,7 @@ export
     debias!, 
     # functions for prediction routine after lasso fit
     predict, R2, auc, 
-    # functions for hmm
+    # functions for hmm (experimental)
     get_haplotype_transition_matrix, get_genotype_transition_matrix, 
     get_initial_probabilities, genotype_knockoffs,
     GenotypeState, MarkovChainTable, pair_to_index, index_to_pair,
@@ -70,7 +68,6 @@ export
     # diagnostics
     compare_correlation, compare_pairwise_correlation,
     # utilities
-    merge_knockoffs_with_original,
     simulate_AR1,
     simulate_ER,
     simulate_block_covariance, 
@@ -86,10 +83,7 @@ export
 include("struct.jl")
 include("fixed.jl")
 include("modelX.jl")
-include("dmc.jl")
 include("threshold.jl")
-include("hmm_wrapper.jl")
-include("hmm.jl")
 include("utilities.jl")
 include("knockoffscreen.jl")
 include("fit_lasso.jl")
@@ -98,9 +92,12 @@ include("ghost.jl")
 include("predict.jl")
 include("group.jl")
 include("ipad.jl")
+include("experimental/hmm_wrapper.jl")
+include("experimental/hmm.jl")
+include("experimental/dmc.jl")
 
 const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
-const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_ccd, :sdp_full, :mvr, :maxent, :maxent_subopt]
+const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_block, :sdp_full, :mvr, :mvr_block, :maxent, :maxent_block]
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)
