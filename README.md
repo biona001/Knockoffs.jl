@@ -15,7 +15,7 @@ Download and install [Julia](https://julialang.org/downloads/). Within Julia, co
 using Pkg
 Pkg.add("Knockoffs")
 ```
-This package supports Julia `v1.6`+. 
+This package supports Julia `v1.8`+. 
 
 ## Calling Knockoffs.jl from R and Python
 

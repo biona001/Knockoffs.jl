@@ -744,14 +744,14 @@ end
 
     # representative knockoffs based on conditional independence assumption
     rme = modelX_gaussian_rep_group_knockoffs(
-        X, :maxent, true_mu, Σ, groups1
+        X, :maxent, groups1, true_mu, Σ
     )
     @test size(rme.S11, 1) ≤ size(rme.S, 1) == p
     @test length(rme.group_reps) ≤ p
 
     # enforcing conditional independent assumption
     rme = modelX_gaussian_rep_group_knockoffs(
-        X, :maxent, true_mu, Σ, groups1, enforce_cond_indep=true
+        X, :maxent, groups1, true_mu, Σ, enforce_cond_indep=true
     )
     @test typeof(rme.S) <: AbstractMatrix
     Sblocks = Knockoffs.block_diagonalize(rme.S, groups1)
