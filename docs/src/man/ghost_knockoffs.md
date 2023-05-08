@@ -1,8 +1,9 @@
+
 # Ghost Knockoffs
 
 This tutorial is for generating Ghost (summary statistics) Knockoffs for analyzing genome-wide association studies (GWAS). The methodology is described in 
 
-> He, Z., Liu, L., Belloy, M. E., Le Guen, Y., Sossin, A., Liu, X., ... & Ionita-Laza, I. (2021). Summary statistics knockoff inference empowers identification of putative causal variants in genome-wide association studies. bioRxiv.
+> He Z, Liu L, Belloy ME, Le Guen Y, Sossin A, Liu X, Qi X, Ma S, Gyawali PK, Wyss-Coray T, Tang H. GhostKnockoff inference empowers identification of putative causal variants in genome-wide association studies. Nature Communications. 2022 Nov 23;13(1):7209.
 
 It is assumed we do not have access to individual level genotype data $\mathbf{G}$. Rather, for each SNP, we have the z-scores $Z_j$ with respect to a phenotype $\mathbf{Y}$ from a GWAS. Then we sample the knockoff z-scores as 
 ```math

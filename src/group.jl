@@ -126,8 +126,8 @@ function modelX_gaussian_group_knockoffs(
 end
 
 """
-    modelX_gaussian_rep_group_knockoffs(X, method, groups, group_reps; [m], [covariance_approximator], [kwargs...])
-    modelX_gaussian_rep_group_knockoffs(X, method, μ, Σ, groups, group_reps; [m], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, groups; [m], [covariance_approximator], [kwargs...])
+    modelX_gaussian_rep_group_knockoffs(X, method, groups, μ, Σ; [m], [kwargs...])
 
 Constructs group knockoffs by choosing representatives from each group and
 solving a smaller optimization problem based on the representatives only. Remaining
@@ -162,17 +162,17 @@ function modelX_gaussian_rep_group_knockoffs(
     ) where T
     Σapprox = cov(covariance_approximator, X) # approximate covariance matrix
     μ = vec(mean(X, dims=1)) # empirical column means
-    return modelX_gaussian_rep_group_knockoffs(X, method, μ, Σapprox, 
-        groups; m=m, rep_threshold=rep_threshold, kwargs...)
+    return modelX_gaussian_rep_group_knockoffs(X, method, groups, μ, Σapprox;
+        m=m, rep_threshold=rep_threshold, kwargs...)
 end
 
 # todo: Efficient sampling of knockoffs when `m>1` using conditional independence
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, # n × p
     method::Symbol,
+    groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
     μ::AbstractVector, # p × 1
-    Σ::AbstractMatrix, # p × p
-    groups::AbstractVector{Int}; # p × 1 Vector{Int} of group membership
+    Σ::AbstractMatrix; # p × p
     m::Int = 1,
     rep_threshold::T = 0.5,
     verbose::Bool = false,
@@ -189,7 +189,7 @@ function modelX_gaussian_rep_group_knockoffs(
 
     # compute (block-diagonal) S on representatives and form larger (dense) D
     S, D, obj = solve_s_graphical_group(Symmetric(sigma), groups, group_reps, 
-        method, m=m, verbose=verbose, kwargs...)
+        method, m=m, verbose=verbose; kwargs...)
 
     # sample multiple knockoffs (todo: sample each independently)
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
@@ -235,6 +235,32 @@ function cond_indep_corr(
     return Σnew
 end
 
+"""
+    solve_s_graphical_group(Σ::Symmetric, groups::Vector{Int}, group_reps::Vector{Int},
+    method; [m], [verbose])
+
+Solves the group knockoff problem but the convex optimization problem only runs
+on the representatives. The non-representative variables are assumed to be 
+independent by groups when conditioning on the reprensetatives. 
+
+# Inputs
++ `Σ`: Symmetric `p × p` covariance matrix
++ `groups`: `p` dimensional vector of group membership
++ `group_reps`: Indices for the representatives. 
++ `method`: Method for solving group knockoff problem
++ `m`: Number of knockoffs to generate per feature
++ `verbose`: Whether to print informative intermediate results
++ `kwargs...`: extra arguments for [`solve_s_group`](@ref)
+
+# Outputs
++ `S`: Matrix obtained from solving the optimization problem on the representatives.
++ `D`: A `p × p` (dense) matrix corresponding to the S matrix for both the
+    representative and non-representative variables. Knockoff sampling should 
+    use this matrix. If the graphical conditional independent assumption is 
+    satisfied exactly, this matrix should be sparse, but it is always never sparse
+    unless we use `cond_indep_corr` to force the covariance matrix to satisify it. 
++ `obj`: Objective value for solving the optimization problem on the representatives. 
+"""
 function solve_s_graphical_group(
     Σ::Symmetric{T}, # p × p
     groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
@@ -1690,8 +1716,7 @@ end
     hc_partition_groups(Σ::Symmetric; [cutoff], [min_clusters], [force_contiguous])
 
 Computes a group partition based on individual level data `X` or correlation 
-matrix `Σ` using single-linkage hierarchical clustering. By default, a list of
-variables most representative of each group will also be computed.
+matrix `Σ` using hierarchical clustering with specified linkage. 
 
 # Inputs
 + `X`: `n × p` data matrix. Each row is a sample

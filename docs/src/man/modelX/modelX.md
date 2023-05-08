@@ -8,20 +8,16 @@ This tutorial is for generating model-X knockoffs, which handles cases where cov
 
 ```julia
 # load packages needed for this tutorial
-using Revise
 using Knockoffs
-using Plots
 using Random
 using GLMNet
 using Distributions
 using LinearAlgebra
 using ToeplitzMatrices
-using StatsBase
+using StatsKit
+using Plots
 gr(fmt=:png);
 ```
-
-    [36m[1m[ [22m[39m[36m[1mInfo: [22m[39mPrecompiling Knockoffs [878bf26d-0c49-448a-9df5-b057c815d613]
-
 
 ## Gaussian model-X knockoffs with known mean and covariance
 
@@ -55,13 +51,13 @@ Given $n$ iid samples from the above distribution, we will generate knockoffs ac
 \right)
 \end{aligned}
 ```
-where $s$ is solved so that $0 \le s_j$ for all $j$ and $2Σ - diag(s)$ is PSD. 
+where $s$ is solved so that $0 \le s_j \le \Sigma_{jj}$ for all $j$ and $2Σ - diag(s)$ is PSD. 
 
 
 ```julia
 Random.seed!(2022)
-n = 100 # sample size
-p = 500 # number of covariates
+n = 500 # sample size
+p = 1000 # number of covariates
 ρ = 0.4
 Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
 μ = zeros(p) # true mean parameters
@@ -72,48 +68,53 @@ X = randn(n, p) * L # var(X) = L var(N(0, 1)) L' = var(Σ)
 
 
 
-    100×500 Matrix{Float64}:
-     -0.877527   -1.30346    -0.682964   …  -0.350442   -2.05031    -1.19774
-      1.94981     0.625748   -0.157094       0.328944   -0.50083    -1.77715
-     -0.372347   -0.0577255  -0.545009       2.04892     0.447051   -0.172137
-      0.281239   -1.2314     -2.25883       -0.863995   -1.29658    -1.69292
-     -1.94197    -0.514252   -0.126406       1.58385    -0.508209   -0.576327
-      0.32584     1.29406    -0.944499   …   0.336041    0.834595    1.01313
-      0.312506   -0.892288   -1.28543        0.656042   -0.727716   -0.062318
-     -0.130798    0.080975   -1.00406        0.140716   -0.0171299   0.0520695
-     -1.37595    -1.7559     -0.965395       0.475523    0.476843    0.0988572
-      1.17982     1.1271      1.29655       -1.16738    -1.72623    -0.848002
-      0.328697    0.674708    1.08453    …   0.886085   -0.405945   -0.190064
-     -0.155799    0.740727    0.0747548      0.694317    0.483984    0.791628
-     -2.03164    -0.90797    -1.57553        2.3821      1.89785     0.318261
-      ⋮                                  ⋱                          
-     -0.950099   -1.38457     0.158824      -0.187195    1.70564     1.20939
-      0.236699   -0.22054    -0.852487       0.44721    -1.06464     1.19481
-     -0.409184    0.393978    0.894276   …  -0.603513   -0.0926733  -0.979548
-     -0.20095    -0.200403   -1.76704       -0.151618    0.0987953   1.35385
-     -0.366858    0.719476    0.234908      -0.245508   -0.321876   -0.420004
-     -0.232295    0.305845   -0.494038       0.910901    1.67494    -0.114834
-      0.712566    0.86745     1.08866       -0.161063   -1.05527    -0.604559
-     -0.413006    0.322623    0.152769   …  -0.438893    0.731315   -0.398558
-      0.0977592  -0.301898    0.0328142      1.17656     0.45638     0.232298
-      0.988324   -0.698384   -0.436609      -0.466774   -0.0569571  -0.499042
-      0.132829    0.26532     1.60743        0.955361   -0.626877   -0.242588
-     -0.525434   -0.854175    0.170717       0.0667342  -2.16955    -0.63145
+    500×1000 Matrix{Float64}:
+     -0.255643    0.12145      1.90832   …  -0.425334  -0.0875185  -1.26044
+      1.21857    -1.04975     -1.93608       0.986266   0.495375    0.526645
+     -0.489054   -0.325137    -0.389752     -0.54062   -0.765207   -0.925541
+      1.13077     0.715132     0.115053     -0.866809   0.835603    1.41018
+     -2.06667    -0.799976     0.104784     -1.10473   -1.53618    -1.48403
+     -0.692878   -1.04012     -0.711309  …   0.117786   0.419314    1.05
+      0.605767   -0.220341    -0.62107       1.36572   -0.454627   -0.226038
+     -0.156307    0.0225261   -0.117329      1.06143    1.35028     1.0699
+      0.443743    2.41354      0.635028      0.744278   0.229644   -0.640157
+      0.710929    0.0527427    1.35858       1.06147   -0.142669   -1.67164
+      0.785485    1.72134     -1.02638   …  -0.222289  -0.903092   -0.237564
+     -0.0330742   1.02192      0.367135     -0.412167   0.127533   -0.0828143
+     -2.01006    -0.858529    -0.817414      1.52695    1.67114     2.15544
+      ⋮                                  ⋱                         
+     -0.324703    0.476295     0.106425     -1.06599   -1.88418    -1.02433
+     -0.811388    0.00190805  -1.16822       0.780591   1.11014    -0.208461
+     -0.184579    0.344966    -0.648001  …   1.21303   -0.403468   -2.11791
+      1.27172     2.03987      1.4584       -0.819745   0.0938613   0.114038
+     -0.688407    0.0815265   -0.503051      0.283407  -1.10525     0.131074
+     -0.892244   -0.184611    -0.746692     -0.87555   -2.00235    -0.291364
+      1.57011     0.315036     1.35995       0.582807  -0.68021    -1.27912
+     -0.503994   -1.70271     -0.186807  …  -0.67245   -1.07302    -0.755238
+     -0.437047    0.27435     -0.821421     -1.33403   -0.368807   -0.0284317
+     -2.81068    -0.361046     1.19981      -1.29837   -0.151723    1.00562
+     -1.54038     0.403661     0.545421      0.728631  -1.2155      0.577002
+      0.194411    0.885717     0.54569      -0.753762  -1.55452    -0.416219
 
 
 
-To generate knockoffs, the 4 argument function [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. The 2nd argument specifies the method to generate knockoffs. We generally recommend `:mvr` or `:maxent` because they are [more efficient to compute and tend to be more powerful than the SDP construction](https://projecteuclid.org/journals/annals-of-statistics/volume-50/issue-1/Powerful-knockoffs-via-minimizing-reconstructability/10.1214/21-AOS2104.short). The 3rd and 4th argument supplies the true mean and covariance of features.
+To generate model-X knockoffs,
++ The 4 argument function [`modelX_gaussian_knockoffs`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will generate exact model-X knockoffs. 
++ First argument is the design matrix `X`. 
++ The second argument specifies the optimization method to generate knockoffs. We recommend `:mvr` or `:maxent` because they are [more efficient to compute and tend to be more powerful than the SDP construction](https://projecteuclid.org/journals/annals-of-statistics/volume-50/issue-1/Powerful-knockoffs-via-minimizing-reconstructability/10.1214/21-AOS2104.short). 
++ The 3rd and 4th argument supplies the true mean and covariance of features.
 
 
 ```julia
+# for larger problems, consider including `verbose=true` argument to monitor convergence
 @time equi = modelX_gaussian_knockoffs(X, :equi, μ, Σ)
 @time mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
 @time me = modelX_gaussian_knockoffs(X, :maxent, μ, Σ);
 ```
 
-     10.723081 seconds (33.00 M allocations: 1.706 GiB, 3.99% gc time, 99.28% compilation time)
-      0.464159 seconds (65 allocations: 21.832 MiB)
-      0.331323 seconds (63 allocations: 21.824 MiB)
+      0.098400 seconds (46 allocations: 69.561 MiB)
+      3.328117 seconds (59 allocations: 100.117 MiB)
+      1.929832 seconds (57 allocations: 100.102 MiB)
 
 
 The return type is a `GaussianKnockoff` struct, which contains the following fields
@@ -138,77 +139,80 @@ s = mvr.s
 
 
 
-    500-element Vector{Float64}:
-     0.7055844314114994
-     0.5506002730046211
-     0.5579639879044027
-     0.5578996996307124
-     0.5578836897138227
-     0.5578849317983953
-     0.5578848930158828
-     0.5578848921854153
-     0.5578848923414682
-     0.5578848923277624
-     0.5578848923226604
-     0.5578848923174595
-     0.5578848923122489
+    1000-element Vector{Float64}:
+     0.7055844308562433
+     0.550600272751968
+     0.5579639876207405
+     0.5578996993527637
+     0.557883689440236
+     0.5578849315291078
+     0.5578848927508967
+     0.5578848919247213
+     0.5578848920850612
+     0.557884892075635
+     0.557884892074806
+     0.5578848920738697
+     0.5578848920729174
      ⋮
-     0.5578848730689963
-     0.5578848733890167
-     0.55788487670645
-     0.5578848743329733
-     0.55788487452911
-     0.5578848757524423
-     0.5578849142012767
-     0.5578836722536343
-     0.5578996821189733
-     0.5579639703133561
-     0.5506002575404044
-     0.7055843980219585
+     0.5578848730690327
+     0.5578848733890451
+     0.5578848767064315
+     0.5578848743329564
+     0.5578848745291356
+     0.557884875752427
+     0.5578849142012816
+     0.5578836722536301
+     0.5578996821189737
+     0.557963970313357
+     0.5506002575404055
+     0.7055843980219556
 
 
 
 
 ```julia
+# compare s values for different methods
 [me.s mvr.s equi.s]
 ```
 
 
 
 
-    500×3 Matrix{Float64}:
-     0.760607  0.705584  0.85715
-     0.599795  0.5506    0.85715
-     0.611403  0.557964  0.85715
-     0.610539  0.5579    0.85715
-     0.610604  0.557884  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
+    1000×3 Matrix{Float64}:
+     0.760607  0.705584  0.857145
+     0.599795  0.5506    0.857145
+     0.611403  0.557964  0.857145
+     0.610539  0.5579    0.857145
+     0.610604  0.557884  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
      ⋮                   
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610599  0.557885  0.85715
-     0.610603  0.557884  0.85715
-     0.610539  0.5579    0.85715
-     0.611403  0.557964  0.85715
-     0.599795  0.5506    0.85715
-     0.760607  0.705584  0.85715
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610599  0.557885  0.857145
+     0.610603  0.557884  0.857145
+     0.610539  0.5579    0.857145
+     0.611403  0.557964  0.857145
+     0.599795  0.5506    0.857145
+     0.760607  0.705584  0.857145
 
 
 
 ## Second order knockoffs
 
-The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will estimate the mean and covariance of `X` and use them to generate model-X knockoffs
+In practice, one usually do not have access to true mean `\mu` and covariance `\Sigma`. Thus, we provide routines to estimate them from data. In our software, the covariance is approximated by a shrinkage method (default = ledoit wolf) rather than using the sample covariance, see API for detail. 
+
+The 2 argument [`modelX_gaussian_knockoffs`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_knockoffs) will estimate the mean and covariance of `X` and use them to generate model-X knockoffs
 
 
 ```julia
@@ -216,7 +220,7 @@ The 2 argument [modelX\_gaussian\_knockoffs](https://biona001.github.io/Knockoff
 @time mvr_2nd_order = modelX_gaussian_knockoffs(X, :mvr);
 ```
 
-      0.310257 seconds (107 allocations: 32.535 MiB)
+      2.213427 seconds (101 allocations: 149.749 MiB)
 
 
 ## Approximate construction for speed
@@ -230,7 +234,7 @@ Sometimes one expects that covariates are only correlated with its nearby neighb
 @time mvr_approx = approx_modelX_gaussian_knockoffs(X, :mvr, windowsize=100);
 ```
 
-      0.209562 seconds (516 allocations: 37.306 MiB)
+      0.277876 seconds (844 allocations: 159.290 MiB)
 
 
 ## Multiple knockoffs
@@ -245,7 +249,7 @@ m = 5
 @time mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Σ, m=m);
 ```
 
-      0.994629 seconds (86 allocations: 180.907 MiB, 1.66% gc time)
+      7.061029 seconds (81 allocations: 775.323 MiB)
 
 
 As a sanity check, lets make sure the modified SDP constraint is satisfied
@@ -258,7 +262,7 @@ eigmin((m+1)/m * Σ - Diagonal(mvr_multiple.s))
 
 
 
-    0.035874264303699936
+    0.03587121944112127
 
 
 
@@ -272,33 +276,33 @@ Finally, we can compare the `s` vector estimated from all 4 methods.
 
 
 
-    500×4 Matrix{Float64}:
-     0.705584  0.765939  0.663288  0.642692
-     0.5506    0.809085  0.697905  0.470063
-     0.557964  1.04366   0.921063  0.476947
-     0.5579    0.861391  0.761528  0.478338
-     0.557884  0.911251  0.79024   0.478416
-     0.557885  0.978195  0.86153   0.478416
-     0.557885  0.919028  0.801034  0.478416
-     0.557885  0.738538  0.667032  0.478416
-     0.557885  0.867095  0.766879  0.478416
-     0.557885  0.85405   0.741399  0.478416
-     0.557885  0.71978   0.643369  0.478416
-     0.557885  1.17217   1.0488    0.478416
-     0.557885  0.827193  0.71336   0.478416
+    1000×4 Matrix{Float64}:
+     0.705584  0.972711  0.793091  0.642692
+     0.5506    0.816841  0.593333  0.470063
+     0.557964  1.02908   0.728067  0.476947
+     0.5579    0.938325  0.668238  0.478338
+     0.557884  0.864288  0.641469  0.478416
+     0.557885  0.877511  0.659483  0.478416
+     0.557885  0.932393  0.659975  0.478416
+     0.557885  0.840902  0.582381  0.478416
+     0.557885  0.918877  0.650903  0.478416
+     0.557885  0.902371  0.66738   0.478416
+     0.557885  0.936858  0.645576  0.478416
+     0.557885  0.958308  0.663667  0.478416
+     0.557885  0.896261  0.63126   0.478416
      ⋮                             
-     0.557885  0.817116  0.69275   0.478416
-     0.557885  0.991196  0.855442  0.478416
-     0.557885  0.604032  0.534393  0.478416
-     0.557885  0.67311   0.593851  0.478415
-     0.557885  0.867173  0.765961  0.478416
-     0.557885  0.877054  0.784296  0.478415
-     0.557885  0.962095  0.843415  0.478416
-     0.557884  1.09807   0.955455  0.478416
-     0.5579    0.929815  0.821244  0.478338
-     0.557964  0.961874  0.833572  0.476947
-     0.5506    0.868215  0.779084  0.470063
-     0.705584  0.685257  0.598158  0.642692
+     0.557885  0.898691  0.657305  0.478416
+     0.557885  0.90841   0.661406  0.478416
+     0.557885  0.962114  0.700905  0.478416
+     0.557885  0.843299  0.629281  0.478415
+     0.557885  1.00774   0.711127  0.478416
+     0.557885  0.993749  0.692757  0.478415
+     0.557885  0.921883  0.665087  0.478416
+     0.557884  0.979372  0.697701  0.478416
+     0.5579    0.843396  0.611748  0.478338
+     0.557964  0.949153  0.729612  0.476947
+     0.5506    0.844113  0.635076  0.470063
+     0.705584  0.724673  0.565626  0.642692
 
 
 
@@ -340,33 +344,33 @@ y = X * βtrue + randn(n)
 
 
 
-    100-element Vector{Float64}:
-      10.430304834810705
-       9.430844234150015
-       2.411065680091229
-      14.925207979666721
-      -8.743596474193755
-       5.775257576204116
-      -1.587996940979867
-      13.605140626431009
-     -18.781349632593464
-       7.855239413947385
-      -5.7381170081617405
-      -4.631197619265106
-     -11.89784179331142
+    500-element Vector{Float64}:
+     -16.138781364984787
+      -5.287542411651397
+      18.027692775987678
+      -4.140794496081527
+       4.223445068157524
+       8.237597611236556
+      -8.800473194308873
+      12.138035964379569
+      -5.291660763277003
+       0.1763453121292271
+      12.719488833739977
+      -8.398513822600917
+      -1.9198345300850481
        ⋮
-     -10.887325590058026
-      13.949139924153947
-      -2.54163219529571
-       3.1895938123917973
-       1.0637262185056753
-      -7.626490623432161
-       1.8563101020426065
-       1.066601624640122
-      -7.242249824299234
-      -3.2289570492580513
-       4.014480647244052
-       4.832304427120103
+      -3.771806541112785
+       0.5681365432035446
+      -0.5397047794787977
+      -0.700940301452057
+      -7.850480614685315
+      -6.200339809747463
+      -9.87399476750332
+       2.219038357726496
+       4.788196033460055
+       4.61565606038031
+      -5.4031821003145595
+      -7.35857531035862
 
 
 
@@ -391,7 +395,7 @@ FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!isze
 println("Lasso power = $power, FDR = $FDR")
 ```
 
-    Lasso power = 0.54, FDR = 0.7
+    Lasso power = 0.96, FDR = 0.6619718309859155
 
 
 More than half of all Lasso discoveries are false positives. 
@@ -410,14 +414,14 @@ $$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j �
     
     In step 1, $[\mathbf{X} \mathbf{\tilde{X}}]$ is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. We export a convenient function `merge_knockoffs_with_original` that performs this operation. 
 
-The `fit_lasso` function generates knockoffs, run Lasso on $[\mathbf{X} \mathbf{\tilde{X}}]$, and apply knockoff filter:
+The [`fit_lasso`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.fit_lasso) function generates knockoffs, run Lasso on $[\mathbf{X} \mathbf{\tilde{X}}]$, and apply knockoff filter.
 
 
 ```julia
-@time knockoff_filter = fit_lasso(y, X, method=:mvr);
+@time knockoff_filter = fit_lasso(y, X, method=:maxent, m=1);
 ```
 
-      0.380060 seconds (914 allocations: 58.746 MiB)
+      3.157483 seconds (905 allocations: 284.025 MiB)
 
 
 The return type is now a `LassoKnockoffFilter`, which contains the following information
@@ -439,7 +443,7 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
 end
 ```
 
-Given these information, we can e.g. visualize power and FDR trade-off:
+Lets do 10 simulations and visualize power and FDR trade-off:
 
 
 ```julia
@@ -468,16 +472,16 @@ Plots.abline!(fdr_plot, 1, 0, line=:dash)
 plot(power_plot, fdr_plot)
 ```
 
-      0.408827 seconds (69.86 k allocations: 62.846 MiB, 0.59% gc time, 5.09% compilation time)
-      0.408139 seconds (921 allocations: 58.774 MiB)
-      0.372845 seconds (921 allocations: 59.096 MiB)
-      0.369733 seconds (921 allocations: 58.775 MiB)
-      0.387184 seconds (921 allocations: 58.774 MiB, 0.35% gc time)
-      0.386038 seconds (921 allocations: 58.613 MiB)
-      0.408438 seconds (921 allocations: 58.774 MiB, 0.27% gc time)
-      0.376022 seconds (921 allocations: 58.775 MiB)
-      0.394867 seconds (921 allocations: 58.774 MiB)
-      0.403742 seconds (921 allocations: 58.774 MiB, 0.27% gc time)
+      3.672676 seconds (907 allocations: 284.040 MiB)
+      3.659159 seconds (907 allocations: 284.040 MiB)
+      3.896005 seconds (907 allocations: 284.040 MiB)
+      3.615545 seconds (907 allocations: 284.040 MiB)
+      3.626139 seconds (907 allocations: 284.040 MiB)
+      3.725727 seconds (907 allocations: 284.040 MiB)
+      4.414638 seconds (907 allocations: 284.040 MiB, 14.81% gc time)
+      3.656120 seconds (907 allocations: 284.040 MiB)
+      3.677947 seconds (907 allocations: 284.040 MiB)
+      3.603165 seconds (907 allocations: 284.040 MiB)
 
 
 
@@ -487,58 +491,10 @@ plot(power_plot, fdr_plot)
 
 
 
-### Multiple Knockoffs+LASSO
-
-To improve selection stability, we can generate multiple simultaneous knockoffs. This is more computationally intensive but tends to boost power. 
-
-
-```julia
-# run 10 simulations and compute empirical power/FDR
-nsims = 10
-empirical_power = zeros(5)
-empirical_fdr = zeros(5)
-for i in 1:nsims
-    @time knockoff_filter = fit_lasso(y, X, method=:mvr, m=5);
-    FDR = knockoff_filter.fdr_target
-    for i in eachindex(FDR)
-        selected = knockoff_filter.selected[i]
-        power = length(selected ∩ correct_position) / k
-        fdp = length(setdiff(selected, correct_position)) / max(length(selected), 1)
-        empirical_power[i] += power
-        empirical_fdr[i] += fdp
-    end
-end
-empirical_power ./= nsims
-empirical_fdr ./= nsims
-
-# visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false, w=2)
-fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false, w=2)
-Plots.abline!(fdr_plot, 1, 0, line=:dash)
-plot(power_plot, fdr_plot)
-```
-
-      0.741831 seconds (1.97 k allocations: 268.344 MiB, 0.25% gc time)
-      0.742101 seconds (1.97 k allocations: 266.900 MiB, 0.30% gc time)
-      0.690350 seconds (1.97 k allocations: 266.900 MiB, 0.14% gc time)
-      0.678163 seconds (1.97 k allocations: 267.863 MiB, 0.27% gc time)
-      0.652373 seconds (1.97 k allocations: 267.381 MiB, 0.16% gc time)
-      0.823302 seconds (1.97 k allocations: 267.381 MiB, 0.23% gc time)
-      0.655046 seconds (1.97 k allocations: 267.381 MiB, 0.15% gc time)
-      0.647079 seconds (1.97 k allocations: 267.863 MiB, 0.29% gc time)
-      0.688816 seconds (1.97 k allocations: 266.900 MiB, 0.14% gc time)
-      0.666808 seconds (1.97 k allocations: 269.307 MiB, 0.28% gc time)
-
-
-
-
-
-![png](output_31_1.png)
-
-
-
 **Conclusion:** 
 
 + LASSO + knockoffs controls the false discovery rate at below the target (dashed line). Thus, one trade power for FDR control. 
 + The power of standard LASSO is better, but it comes with high empirical FDR that one cannot control via cross validation. 
++ If one does not have the true mean and covariance of the $p$ dimensional covariates, Knockoffs.jl will estimate them with sample mean and a shrunken (default = ledoit wolf) estimator. 
 + Multiple simultaneous knockoffs increases power at the expensive of larger regression problem. 
++ Approximate constructions can be leveraged for extremely large problems, e.g. $p > 10000$. 

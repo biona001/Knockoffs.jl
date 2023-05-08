@@ -16,3 +16,8 @@ fastphase
 fastphase_1k
 
 Manifest.toml
+
+# JuliaCall generated files
+.R*
+*.html
+*.Rmd

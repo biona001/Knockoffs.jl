@@ -13,7 +13,7 @@ For more information, please see the [main webpage](https://web.stanford.edu/gro
 Download and install [Julia](https://julialang.org/downloads/). Within Julia, copy and paste the following: 
 ```julia
 using Pkg
-pkg"add https://github.com/biona001/Knockoffs.jl"
+Pkg.add("Knockoffs")
 ```
 This package supports Julia `v1.6`+. 
 
@@ -23,8 +23,11 @@ See documentation for usage from R. If many users request of it, I will write a 
 
 ## Package Features
 
-+ Fast coordinate algorithms for MVR, ME, and SDP knockoffs
-+ Fast coordinate descent algorithms for grouped MVR/ME/SDP knockoffs, and a representative group knockoff approach which empirically has superior power. 
-+ Built-in functions to define groups
++ Fast coordinate descent algorithms for MVR, ME, and SDP model-X knockoffs
++ Grouped MVR/ME/SDP knockoffs for improved power when there are highly correlated features. We also provide a representative group knockoff approach, based on graphical models, which is much more computationally efficient and empirically has superior power. 
++ Preliminary support for many other kinds of knockoffs (ghost, HMM, IPAD...etc), see documentation. 
 + Built-in functions to compute feature importance scores via Lasso/marginal regressions
-+ Preliminary support for many other kinds of knockoffs, see documentation. 
+
+## Bug reports and feature requests
+
+Please open an issue if you find a bug or have feature requests. Pull requests are extremely welcomed!
