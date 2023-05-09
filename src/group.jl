@@ -1723,7 +1723,7 @@ matrix `Σ` using hierarchical clustering with specified linkage.
 + `Σ`: `p × p` correlation matrix. Must be wrapped in the `Symmetric` argument,
     otherwise we will treat it as individual level data
 + `cutoff`: Height value for which the clustering result is cut, between 0 and 1
-    (default 0.7). This ensures that no variables between 2 groups have correlation
+    (default 0.5). This ensures that no variables between 2 groups have correlation
     greater than `cutoff`. 1 recovers ungrouped structure, 0 corresponds to 
     everything in a single group. 
 + `min_clusters`: The desired number of clusters. 
