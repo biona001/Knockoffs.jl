@@ -30,4 +30,11 @@ See documentation for usage from R. If many users request of it, I will write a 
 
 ## Bug reports and feature requests
 
-Please open an issue if you find a bug or have feature requests. Pull requests are extremely welcomed!
+Please open an issue if you find a bug or have feature requests. Feature requests are welcomed!
+
+If you want to make contributions to this package, you should follow this workflow:
+
+1. Fork this repository
+2. Make a new branch on your fork, named after whatever changes you'll be making
+3. Apply your code changes to the branch on your fork
+4. When you're done, submit a PR to `Knockoffs.jl` to merge your fork into master branch.
