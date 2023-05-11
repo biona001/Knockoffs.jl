@@ -444,7 +444,7 @@ end
 """
 Computes A^{-1/2} via eigen-decomposition
 """
-function inverse_mat_sqrt(A::Symmetric; tol=1e-4)
+function inverse_mat_sqrt(A::Symmetric; tol=1e-6)
     λ, ϕ = eigen(A)
     for i in eachindex(λ)
         λ[i] < tol && (λ[i] = tol)
