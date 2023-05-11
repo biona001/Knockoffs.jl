@@ -14,7 +14,7 @@ using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
-using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap, zscore!
+using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap, zscore!, zscore
 using GLMNet
 using BlockDiagonals
 using Roots: fzero

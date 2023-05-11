@@ -205,10 +205,14 @@ function fit_marginal(
     X = ko.X
     X̃ = ko.X̃
     m = ko.m
-    n, p = size(X)
-    # feature importance statistics (marginal correlation)
-    T0 = X'*y
-    Tk = m > 1 ? [Transpose(@view(X̃[:, (k-1)*p+1:k*p]))*y for k in 1:m] : X̃'*y
+    p = size(X, 2)
+    # compute feature importance statistics (marginal correlation)
+    y_std = zscore(y, mean(y), std(y))
+    X_std = zscore(X, mean(X, dims=1), std(X, dims=1))
+    X̃_std = zscore(X̃, mean(X̃, dims=1), std(X̃, dims=1))
+    T0 = X_std' * y_std
+    Tk = m > 1 ? 
+        [Transpose(@view(X̃_std[:, (k-1)*p+1:k*p]))*y_std for k in 1:m] : X̃_std'*y_std
     if hasproperty(ko, :groups)
         groups = ko.groups
         unique_groups = unique(groups)
