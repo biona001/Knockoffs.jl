@@ -151,6 +151,33 @@ function fit_lasso(
         y, X, ko, m, βs, a0s, selected, W, τs, fdrs, d, debias)
 end
 
+"""
+    fit_marginal(y, X, method=:maxent, ...)
+    fit_marginal(y, X, μ, Σ, method=:maxent, ...)
+
+Generates model-X knockoffs with `method` and computes feature importance statistics
+based on marginal correlation x[:, i]^t*y. If `μ` and `Σ` are not provided, they
+will be estimated from data. 
+
+# Inputs
++ `y`: A `n × 1` response vector
++ `X`: A `n × p` numeric matrix, each row is a sample, and each column is covariate.
++ `method`: Method for knockoff generation (defaults to `:maxent`)
++ `μ`: A `p × 1` vector of column mean of `X`. If not provided, defaults to column mean.
++ `Σ`: A `p × p` covariance matrix of `X`. If not provided, it will be estimated 
+    based on a shrinked empirical covariance matrix, see [`modelX_gaussian_knockoffs`](@ref)
++ `d`: Distribution of response. Defaults `Normal()`, for binary response
+    (logistic regression) use `Binomial()`.
++ `m`: Number of simultaneous knockoffs to generate, defaults to `m=1`
++ `fdrs`: Target FDRs, defaults to `[0.01, 0.05, 0.1, 0.25, 0.5]`
++ `groups`: Vector of group membership. If not supplied, we generate regular knockoffs.
+    If supplied, we run group knockoffs.
++ `filter_method`: Choices are `:knockoff` or `:knockoff_plus` (default) 
++ `debias`: Defines how the selected coefficients are debiased. Specify `:ls` 
+    for least squares or `:lasso` for Lasso (only running on the 
+    support). To not debias, specify `debias=nothing` (default).
++ `kwargs`: Additional arguments to input into `glmnetcv` and `glmnet`
+"""
 function fit_marginal(
     y::AbstractVector{T},
     X::AbstractMatrix{T};
@@ -178,25 +205,14 @@ function fit_marginal(
     X = ko.X
     X̃ = ko.X̃
     m = ko.m
-    n, p = size(X)
-    # compute marginal effect size for each variable
-    β, β̃ = zeros(p), zeros(m*p)
-    data = ones(n, 2)
-    for j in 1:p
-        data[:, 2] .= @view(X[:, j])
-        result = glm(data, y, d, canonicallink(d))
-        # X_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
-        β[j] = coeftable(result).cols[1][2]
-    end
-    for j in 1:m*p
-        data[:, 2] .= @view(X̃[:, j])
-        result = glm(data, y, d, canonicallink(d))
-        # X̃_pvals[j] = min(-log10(coeftable(result).cols[4][2]), 1e300)
-        β̃[j] = coeftable(result).cols[1][2]
-    end
-    # feature importance statistics
-    T0 = β
-    Tk = m > 1 ? [β̃[(k-1)*p+1:k*p] for k in 1:m] : β̃
+    p = size(X, 2)
+    # compute feature importance statistics (marginal correlation)
+    y_std = zscore(y, mean(y), std(y))
+    X_std = zscore(X, mean(X, dims=1), std(X, dims=1))
+    X̃_std = zscore(X̃, mean(X̃, dims=1), std(X̃, dims=1))
+    T0 = X_std' * y_std
+    Tk = m > 1 ? 
+        [Transpose(@view(X̃_std[:, (k-1)*p+1:k*p]))*y_std for k in 1:m] : X̃_std'*y_std
     if hasproperty(ko, :groups)
         groups = ko.groups
         unique_groups = unique(groups)
@@ -224,7 +240,7 @@ function fit_marginal(
         else
             W = MK_statistics(T0, Tk)
         end
-    end    
+    end
     # knockoff filter
     τs, selected = T[], Vector{Int}[]
     for fdr in fdrs
@@ -233,8 +249,7 @@ function fit_marginal(
         push!(selected, sel_idx)
         push!(τs, tau_hat)
     end
-    return MarginalKnockoffFilter(y, X, ko, W, τs, m, β, β̃, 
-        selected, fdrs, d)
+    return MarginalKnockoffFilter(y, X, ko, W, τs, m, selected, fdrs, d)
 end
 
 function debias!(

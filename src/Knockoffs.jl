@@ -14,7 +14,7 @@ using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
-using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap, zscore!
+using StatsBase: sample, cov2cor, cor2cov, cov2cor!, cor2cov!, countmap, zscore!, zscore
 using GLMNet
 using BlockDiagonals
 using Roots: fzero
@@ -22,11 +22,9 @@ using Downloads
 using GLM
 using Reexport
 using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
-using Ipopt
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
 using LowRankApprox: id
-# using RCall
 
 @reexport using GLM
 

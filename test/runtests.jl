@@ -658,8 +658,8 @@ end
     # test if inverse_mat_sqrt is working
     x = rand(10, 10)
     A = Symmetric(x' * x)
-    Ainvsqrt = Knockoffs.inverse_mat_sqrt(A)
-    @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-6))
+    Ainvsqrt = Knockoffs.inverse_mat_sqrt(A, tol=0)
+    @test all(isapprox.(Ainvsqrt^2 * A - Matrix(I, 10, 10), 0, atol=1e-8))
 
     # test adjacency constrained hierachical clustering
     distmat = rand(4, 4)

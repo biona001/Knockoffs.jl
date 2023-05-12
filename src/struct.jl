@@ -138,8 +138,8 @@ struct MarginalKnockoffFilter{T} <: KnockoffFilter
     W :: Vector{T} # length p vector of feature importance
     τs :: Vector{T} # threshold for significance. For fdr fdr_target[i], τ[i] is threshold, and all W ≥ τ[i] is selected
     m :: Int # number of knockoffs per feature generated
-    β :: Vector{T} # marginal effect sizes for the original variables
-    β̃ :: Vector{T} # marginal effect sizes for the knockoff variables
+    # T0 :: Vector{T} # marginal correlations y'*X
+    # Tk :: Vector{Vector{T}} # marginal correlations [[y'*X̃1], [y'*X̃2], ..., [y'*X̃m]]
     selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
     fdr_target :: Vector{T} # target FDR level for each τs and βs
     d :: UnivariateDistribution # distribution of y
