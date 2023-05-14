@@ -13,14 +13,14 @@ This tutorial generates group (model-X) knockoffs, which is useful when predicto
 Currently available options for group knockoffs:
 + `:maxent`: Fully general maximum entropy (maxent) group knockoff, based on coordinate descent.
 + `:mvr`: Fully general minimum variance-based reconstructability (MVR) group knockoff, based on coordinate descent.
-+ `:sdp`: This generalizes the equi-correlated group knockoff idea by having $S_j = \gamma_j \Sigma_{(G_j, G_j)}$. Instead of optimizing over all variables in $S$, we optimize over a vector $\gamma_1,...,\gamma_G$. 
++ `:sdp`: Fully general SDP group knockoffs, based on coordinate descent. In general MVR/ME knockoffs tends to perform better than SDP in terms of power, and SDP generally converges slower. 
 + `:equi`: This implements the equi-correlated idea proposed in [Barber and Dai](https://proceedings.mlr.press/v48/daia16.html), which lets $S_j = \gamma \Sigma_{(G_j, G_j)}$ where $\Sigma_{(G_j, G_j)}$ is the block of $\Sigma$ containing variables in the $j$th group. Thus, instead of optimizing over all variables in $S$, we optimize a scalar $\gamma$. Conveniently, there a simple closed form solution for $\gamma$. For `mvr` and `maxent` group knockoffs, we initialize $S$ using this construction. 
++ `:sdp_subopt`: This generalizes the equi-correlated group knockoff idea by having $S_j = \gamma_j \Sigma_{(G_j, G_j)}$. Instead of optimizing over all variables in $S$, we optimize over a vector $\gamma_1,...,\gamma_G$. Note this functionality is mainly provided for testing purposes. 
 
 
 
 ```julia
 # load packages for this tutorial
-using Revise
 using Knockoffs
 using LinearAlgebra
 using Random

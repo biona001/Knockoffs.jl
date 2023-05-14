@@ -5,6 +5,8 @@ makedocs(
     sitename = "Knockoffs.jl",
     format = Documenter.HTML(),
     modules = [Knockoffs],
+    authors = "Benjamin Chu",
+    clean = true,
     pages = [
         "Home" => "index.md",
         "Fixed-X Knockoffs" => "man/fixed/fixed.md",
@@ -24,5 +26,7 @@ makedocs(
 # for more information.
 deploydocs(
     repo   = "github.com/biona001/Knockoffs.jl.git",
-    target = "build"
+    target = "build",
+    deps   = nothing,
+    make   = nothing,
 )

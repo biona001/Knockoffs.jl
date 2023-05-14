@@ -74,10 +74,10 @@ jobs:
       - uses: julia-actions/setup-julia@v1
         with:
           version: '1.8'
-      - run: | # add unregistered packages first
-          julia --project=docs -e '
-            using Pkg
-            pkg"add https://github.com/biona001/Knockoffs.jl"'
+      # - run: | # add unregistered packages first
+      #     julia --project=docs -e '
+      #       using Pkg
+      #       pkg"add https://github.com/biona001/Knockoffs.jl"'
       - run: |
           julia --project=docs -e '
             using Pkg
