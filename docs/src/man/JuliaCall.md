@@ -5,7 +5,7 @@ output:
     keep_md: true
 ---
 
-
+# Calling from R
 
 This notebook demonstrates how to call Julia code in `R`. We will use [Knockoffs.jl](https://github.com/biona001/Knockoffs.jl) to generate [MVR/ME knockoffs](https://projecteuclid.org/journals/annals-of-statistics/volume-50/issue-1/Powerful-knockoffs-via-minimizing-reconstructability/10.1214/21-AOS2104.full) (Minimum Variance-based Reconstructability and Maximum Entropy) in `R`. 
 
