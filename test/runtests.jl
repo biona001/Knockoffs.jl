@@ -758,42 +758,42 @@ end
     @test count(x -> abs(x) ≥ 1e-8, rme.S - Sblocks) == 0 # test if rme.S is truly block diagonal
 end
 
-# @testset "multiple knockoffs" begin
-#     Random.seed!(2022)
-#     n = 100 # sample size
-#     p = 500 # number of covariates
-#     ρ = 0.4
-#     Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
-#     μ = zeros(p) # true mean parameters
-#     X = rand(MvNormal(μ, Σ), n)' |> Matrix
+@testset "multiple knockoffs" begin
+    Random.seed!(2022)
+    n = 100 # sample size
+    p = 500 # number of covariates
+    ρ = 0.4
+    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    μ = zeros(p) # true mean parameters
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
 
-#     # routine for solving s and generating knockoffs satisfy PSD constraint
-#     mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Σ, m=3)
-#     @test eigmin(4/3 * Σ - Diagonal(mvr_multiple.s)) ≥ 0
-#     me_multiple = modelX_gaussian_knockoffs(X, :maxent, μ, Σ, m=5)
-#     @test eigmin(6/5 * Σ - Diagonal(me_multiple.s)) ≥ 0
-#     sdp_multiple = modelX_gaussian_knockoffs(X, :sdp, μ, Σ, m=5)
-#     λmin = eigmin(6/5 * Σ - Diagonal(sdp_multiple.s))
-#     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
-#     sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m=5)
-#     λmin = eigmin(6/5 * Σ - Diagonal(sdp_fast_multiple.s))
-#     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+    # routine for solving s and generating knockoffs satisfy PSD constraint
+    mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Σ, m=3)
+    @test eigmin(4/3 * Σ - Diagonal(mvr_multiple.s)) ≥ 0
+    me_multiple = modelX_gaussian_knockoffs(X, :maxent, μ, Σ, m=5)
+    @test eigmin(6/5 * Σ - Diagonal(me_multiple.s)) ≥ 0
+    sdp_multiple = modelX_gaussian_knockoffs(X, :sdp, μ, Σ, m=5)
+    λmin = eigmin(6/5 * Σ - Diagonal(sdp_multiple.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+    sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m=5)
+    λmin = eigmin(6/5 * Σ - Diagonal(sdp_fast_multiple.s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
-#     # Check lasso runs with multiple knockoffs
-#     k = 15
-#     βtrue = zeros(p)
-#     βtrue[1:k] .= randn(k)
-#     shuffle!(βtrue)
-#     correct_position = findall(!iszero, βtrue)
-#     y = X * βtrue + randn(n)
-#     @time mvr_filter = fit_lasso(y, X, method=:mvr, m=3, filter_method=:knockoff_plus)
-#     @time me_filter = fit_lasso(y, X, method=:maxent, m=5, filter_method=:knockoff_plus)
+    # Check lasso runs with multiple knockoffs
+    k = 15
+    βtrue = zeros(p)
+    βtrue[1:k] .= randn(k)
+    shuffle!(βtrue)
+    correct_position = findall(!iszero, βtrue)
+    y = X * βtrue + randn(n)
+    @time mvr_filter = fit_lasso(y, X, method=:mvr, m=3, filter_method=:knockoff_plus)
+    @time me_filter = fit_lasso(y, X, method=:maxent, m=5, filter_method=:knockoff_plus)
 
-#     @test size(mvr_filter.X) == (n, p)
-#     @test size(mvr_filter.ko.X̃) == (n, 3p)
-#     @test size(me_filter.X) == (n, p)
-#     @test size(me_filter.ko.X̃) == (n, 5p)
-# end
+    @test size(mvr_filter.X) == (n, p)
+    @test size(mvr_filter.ko.X̃) == (n, 3p)
+    @test size(me_filter.X) == (n, p)
+    @test size(me_filter.ko.X̃) == (n, 5p)
+end
 
 #todo: 
 # + test multiple group knockoffs (W uses averaged importance score in each group)
