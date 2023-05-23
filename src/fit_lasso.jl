@@ -156,8 +156,8 @@ end
     fit_marginal(y, X, μ, Σ, method=:maxent, ...)
 
 Generates model-X knockoffs with `method` and computes feature importance statistics
-based on marginal correlation x[:, i]^t*y. If `μ` and `Σ` are not provided, they
-will be estimated from data. 
+based on squared marginal Z score: abs2(x[:, i]^t*y) / n. If `μ` and `Σ` are not
+provided, they will be estimated from data. 
 
 # Inputs
 + `y`: A `n × 1` response vector
@@ -205,14 +205,17 @@ function fit_marginal(
     X = ko.X
     X̃ = ko.X̃
     m = ko.m
-    p = size(X, 2)
-    # compute feature importance statistics (marginal correlation)
+    n, p = size(X)
+    # compute feature importance statistics (squared marginal Z score abs2.(X'y)/n)
     y_std = zscore(y, mean(y), std(y))
     X_std = zscore(X, mean(X, dims=1), std(X, dims=1))
     X̃_std = zscore(X̃, mean(X̃, dims=1), std(X̃, dims=1))
-    T0 = X_std' * y_std
-    Tk = m > 1 ? 
-        [Transpose(@view(X̃_std[:, (k-1)*p+1:k*p]))*y_std for k in 1:m] : X̃_std'*y_std
+    T0 = abs2.(X_std' * y_std) ./ n
+    if m > 1
+        Tk = [abs2.(Transpose(@view(X̃_std[:, (k-1)*p+1:k*p]))*y_std) ./ n for k in 1:m]
+    else
+        Tk = abs2.(X̃_std'*y_std) ./ n
+    end
     if hasproperty(ko, :groups)
         groups = ko.groups
         unique_groups = unique(groups)
