@@ -425,18 +425,15 @@ final `S` matrix as well as the cholesky factorizations `L` and `C` where
 + L.L*L.U = cholesky((m+1)/m*Σ - S)
 + C.L*C.U = cholesky(S)
 """
-function initialize_S(Σ, groups::Vector{Int}, m::Int, method)
+function initialize_S(Σ, groups::Vector{Int}, m::Int, method, ϵ=1e-8)
     S, _, _ = solve_group_equi(Σ, groups, m=m)
-    ϵ = 1e-8
-    while !isposdef(S)
-        S = (1-ϵ)S + ϵ*I
-        ϵ *= 10
-        ϵ ≥ 1 && error("Error initialization. S cannot become PSD. Aborting")
-    end
-    if occursin("mvr", string(method))
-        S ./= 2 # for MVR, this empirically prevents bad boundary conditions
-    end
-    L = cholesky(Symmetric((m+1)/m * Σ - S + ϵ*I))
+    # make minimum eigenvalue ϵ
+    evals, evecs = eigen(S)
+    evals[findall(x -> x < ϵ, evals)] .= ϵ
+    S = evecs * Diagonal(evals) * evecs'
+    # do not start at boundary condition
+    S ./= 2
+    L = cholesky(Symmetric((m+1)/m * Σ - S))
     C = cholesky(Symmetric(S))
     return S, L, C
 end
