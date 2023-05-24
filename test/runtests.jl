@@ -575,9 +575,9 @@ end
             @time ko = modelX_gaussian_group_knockoffs(X, method, groups, 
                 true_mu, Σ, m=m, inner_pca_iter=pca, inner_ccd_iter=ccd, 
                 tol = tol, verbose=true)
-            # check constraints
+            # check constraints (compensating for numerical error)
             @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Σ - ko.S)))
-            @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Symmetric(ko.S)))
+            @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
             # check data integrity
             @test all(Σ .== Σcopy)
             @test all(groups_copy .== groups)
@@ -594,9 +594,9 @@ end
     for method in [:sdp_block, :mvr_block, :maxent_block]
         @time ko = modelX_gaussian_group_knockoffs(X, method, groups, 
             m=m, tol = tol, verbose=true)
-        # check constraints
+        # check constraints (compensating for numerical error)
         @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Σ - ko.S)))
-        @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Symmetric(ko.S)))
+        @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
         # check data integrity
         @test all(Σ .== Σcopy)
         @test all(groups_copy .== groups)
@@ -610,9 +610,9 @@ end
     # suboptimal
     for method in [:sdp_subopt, :sdp_subopt_correct]
         @time ko = modelX_gaussian_group_knockoffs(X, method, groups, true_mu, Σ, m=m)
-        # check constraints
+        # check constraints (compensating for numerical error)
         @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Σ - ko.S)))
-        @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Symmetric(ko.S)))
+        @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
         # check data integrity
         @test all(Σ .== Σcopy)
         @test all(groups_copy .== groups)
