@@ -4,6 +4,14 @@
 #    without unicodes, e.g. X̃ => Xko
 # 3. Inputs that requires Symmetric matrix now takes Matrix
 
+
+function modelX_gaussian_knockoffs(
+    X::AbstractMatrix, 
+    method::String;
+    m::Number = 1, 
+    kwargs...) # kwargs = extra arguments for solve_s
+    return modelX_gaussian_knockoffs(X, Symbol(method); m=Int(m), kwargs...)
+end
 function modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
     method::String, 
@@ -16,6 +24,16 @@ function modelX_gaussian_knockoffs(
     )
 end
 
+function modelX_gaussian_group_knockoffs(
+    X::AbstractMatrix, 
+    method::String, 
+    groups::AbstractVector;
+    m::Number = 1, 
+    kwargs...) # kwargs = extra arguments for solve_s_group
+    return modelX_gaussian_group_knockoffs(X, Symbol(method), Int.(groups); 
+        m=Int(m), kwargs...
+    )
+end
 function modelX_gaussian_group_knockoffs(
     X::AbstractMatrix, 
     method::String, 
