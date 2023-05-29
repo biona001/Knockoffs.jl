@@ -19,9 +19,9 @@ using ToeplitzMatrices
     # SDP knockoff
     @time knockoff = fixed_knockoffs(X, :sdp)
     X = knockoff.X
-    X̃ = knockoff.X̃
+    Xko = knockoff.Xko
     s = knockoff.s
-    Σ = knockoff.Σ
+    Sigma = knockoff.Sigma
 
     # compare with Matteo's result
     # @rput X
@@ -48,13 +48,13 @@ using ToeplitzMatrices
     # @rget X_ko s_matteo
     # [s matteo_s]
     # histogram(vec(X_ko))
-    # histogram(vec(X̃))
+    # histogram(vec(Xko))
 
-    @test all(X' * X .≈ Σ)
-    @test all(isapprox.(X̃' * X̃, Σ, atol=5e-1))
+    @test all(X' * X .≈ Sigma)
+    @test all(isapprox.(Xko' * Xko, Sigma, atol=5e-1))
     @test all(s .≥ 0)
     @test all(1 .≥ s)
-    λ = eigvals(2Σ - Diagonal(s))
+    λ = eigvals(2Sigma - Diagonal(s))
     for λi in λ
         @test λi ≥ 0 || isapprox(λi, 0, atol=1e-8)
     end
@@ -62,11 +62,11 @@ using ToeplitzMatrices
     for i in 1:p, j in 1:p
         if i == j
             # @test isapprox(dot(X[:, i], X[:, i]), 1, atol=1e-1)
-            # @test isapprox(dot(X̃[:, i], X̃[:, i]), 1, atol=1e-1)
-            @test isapprox(dot(X[:, i], X̃[:, i]), Σ[i, i] - s[i], atol=1e-8)
-            @test isapprox(dot(X[:, i], X̃[:, i]), 1 - s[i], atol=1e-8)
+            # @test isapprox(dot(Xko[:, i], Xko[:, i]), 1, atol=1e-1)
+            @test isapprox(dot(X[:, i], Xko[:, i]), Sigma[i, i] - s[i], atol=1e-8)
+            @test isapprox(dot(X[:, i], Xko[:, i]), 1 - s[i], atol=1e-8)
         else
-            @test dot(X[:, i], X̃[:, j]) ≈ dot(X[:, i], X[:, j])
+            @test dot(X[:, i], Xko[:, j]) ≈ dot(X[:, i], X[:, j])
         end
     end
 end
@@ -86,9 +86,9 @@ end
     # generate knockoff
     @time knockoff = modelX_gaussian_knockoffs(X, :sdp, true_mu, Sigma)
     X = knockoff.X
-    X̃ = knockoff.X̃
+    Xko = knockoff.Xko
     s = knockoff.s
-    Σ = knockoff.Σ
+    Sigma = knockoff.Sigma
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -100,13 +100,13 @@ end
     # @rget diag_s X_ko
     # [diag_s s]
     # histogram(vec(X_ko))
-    # histogram(vec(X̃))
+    # histogram(vec(Xko))
 
     # test properties
     @test all(s .≥ 0)
-    @test all(1 .≥ s) # this is true since Σ has diagonal entries 1
-    @test isposdef(Σ)
-    λmin = eigmin(2Σ - Diagonal(s))
+    @test all(1 .≥ s) # this is true since Sigma has diagonal entries 1
+    @test isposdef(Sigma)
+    λmin = eigmin(2Sigma - Diagonal(s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
@@ -125,9 +125,9 @@ end
     # generate knockoff
     @time knockoff = modelX_gaussian_knockoffs(X, :sdp)
     X = knockoff.X
-    X̃ = knockoff.X̃
+    Xko = knockoff.Xko
     s = knockoff.s
-    Σ = knockoff.Σ
+    Sigma = knockoff.Sigma
 
     # compare with Matteo's result
     # @rput Sigma X true_mu
@@ -139,12 +139,12 @@ end
     # @rget diag_s X_ko
     # [diag_s s]
     # histogram(vec(X_ko))
-    # histogram(vec(X̃))
+    # histogram(vec(Xko))
 
     # test properties
     @test all(s .≥ 0)
-    @test isposdef(Σ)
-    λmin = eigmin(2Σ - Diagonal(s))
+    @test isposdef(Sigma)
+    λmin = eigmin(2Sigma - Diagonal(s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
@@ -162,24 +162,24 @@ end
 
     # merge_knockoffs_with_original
     # X = randn(500, 200)
-    # X̃ = randn(500, 800)
-    # # Xfull, original, knockoff = merge_knockoffs_with_original(X, X̃)
-    # merged = merge_knockoffs_with_original(X, X̃)
-    # @test size(merged.XX̃) == (500, 1000)
+    # Xko = randn(500, 800)
+    # # Xfull, original, knockoff = merge_knockoffs_with_original(X, Xko)
+    # merged = merge_knockoffs_with_original(X, Xko)
+    # @test size(merged.XXko) == (500, 1000)
     # @test length(merged.original) == 200
     # @test length(merged.knockoff) == 200
-    # @test all(merged.XX̃[:, merged.original] .== X)
+    # @test all(merged.XXko[:, merged.original] .== X)
 
-    # hc_partition_groups: based on X or Σ
+    # hc_partition_groups: based on X or Sigma
     n = 500
     p = 500
-    Σ = simulate_AR1(p, a=3, b=1)
-    X = rand(MvNormal(Σ), n)' |> Matrix
-    groups = hc_partition_groups(Symmetric(Σ), cutoff=1)
+    Sigma = simulate_AR1(p, a=3, b=1)
+    X = rand(MvNormal(Sigma), n)' |> Matrix
+    groups = hc_partition_groups(Symmetric(Sigma), cutoff=1)
     @test all(groups .== collect(1:p))
     groups = hc_partition_groups(X, cutoff=0)
     @test all(groups .== 1)
-    groups = hc_partition_groups(Symmetric(Σ), cutoff=0.7, linkage=:single)
+    groups = hc_partition_groups(Symmetric(Sigma), cutoff=0.7, linkage=:single)
     # check that between group correlation is below h (must be the case with single linkage)
     unique_groups = unique(groups)
     for g1 in unique_groups, g2 in unique_groups
@@ -187,21 +187,21 @@ end
         idx1 = findall(x -> x == g1, groups)
         idx2 = findall(x -> x == g2, groups)
         for u in idx1, v in idx2
-            @test Σ[u, v] ≤ 0.7
+            @test Sigma[u, v] ≤ 0.7
         end
     end
 
-    # id_partition_groups: based on X or Σ
-    groups = id_partition_groups(Symmetric(Σ))
+    # id_partition_groups: based on X or Sigma
+    groups = id_partition_groups(Symmetric(Sigma))
     groups = id_partition_groups(X)
     @test length(groups) == size(X, 2)
 end
 
 @testset "MK_statistics" begin
     # single knockoffs
-    β = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5]
-    βko = [0.8, 0.4, -0.2, 0.8, 0.1, 0.0]
-    w = MK_statistics(β, βko)
+    beta = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5]
+    betako = [0.8, 0.4, -0.2, 0.8, 0.1, 0.0]
+    w = MK_statistics(beta, betako)
     @test length(w) == 6
     @test w[1] ≈ 0.2
     @test w[2] ≈ -0.2
@@ -246,31 +246,31 @@ end
     X = Knockoffs.sample_DMC(q, Q, n=samples)
 
     # sample knockoff of the markov chains
-    X̃ = zeros(Int, samples, p)
+    Xko = zeros(Int, samples, p)
     N = zeros(p, K)
     d = Categorical([1 / K for _ in 1:K])
     for i in 1:samples
-        markov_knockoffs!(@view(X̃[i, :]), @view(X[i, :]), N, d, Q, q) 
+        markov_knockoffs!(@view(Xko[i, :]), @view(X[i, :]), N, d, Q, q) 
     end
 
     # Check column means match
     Xmean = mean(X, dims=1)
-    X̃mean = mean(X̃, dims=1)
+    Xkomean = mean(Xko, dims=1)
     for i in 2:length(Xmean) # 1st entry might not match to 2 digits for some reason, this is the same in SNPknock
-        @test isapprox(Xmean[i], X̃mean[i], atol=1e-2)
+        @test isapprox(Xmean[i], Xkomean[i], atol=1e-2)
     end
 
     # Check that internal column correlations match
     for i in 2:p-1
         r1 = cor(@view(X[:, i]), @view(X[:, i+1]))
-        r2 = cor(@view(X̃[:, i]), @view(X̃[:, i+1]))
+        r2 = cor(@view(Xko[:, i]), @view(Xko[:, i+1]))
         @test isapprox(r1, r2, atol=1e-2)
     end
 
     # Check that cross column correlations match
     for i in 2:p-1
         r1 = cor(@view(X[:, i]), @view(X[:, i+1]))
-        r2 = cor(@view(X[:, i]), @view(X̃[:, i+1]))
+        r2 = cor(@view(X[:, i]), @view(Xko[:, i+1]))
         @test isapprox(r1, r2, atol=1e-2)
     end
 end
@@ -286,23 +286,23 @@ end
     n = 600
     p = 300
     ρ = 0.5
-    Σ = (1-ρ) * I + ρ * ones(p, p)
+    Sigma = (1-ρ) * I + ρ * ones(p, p)
     μ = zeros(p)
-    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    X = rand(MvNormal(μ, Sigma), n)' |> Matrix
 
     # simulate y
     Random.seed!(seed)
     k = Int(0.2p)
-    βtrue = zeros(p)
-    βtrue[1:k] .= rand(-1:2:1, k) .* rand(Uniform(0.5, 1), k)
-    shuffle!(βtrue)
-    correct_position = findall(!iszero, βtrue)
-    y = X * βtrue + randn(n)
+    betatrue = zeros(p)
+    betatrue[1:k] .= rand(-1:2:1, k) .* rand(Uniform(0.5, 1), k)
+    shuffle!(betatrue)
+    correct_position = findall(!iszero, betatrue)
+    y = X * betatrue + randn(n)
 
     # solve s vector
-    @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ)
-    @time Xko_maxent = modelX_gaussian_knockoffs(X, :maxent, μ, Σ)
-    @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
+    @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Sigma)
+    @time Xko_maxent = modelX_gaussian_knockoffs(X, :maxent, μ, Sigma)
+    @time Xko_mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Sigma)
 
     # run lasso and then apply knockoff-filter to default FDR = 0.01, 0.05, 0.1, 0.25, 0.5
     @time sdp_filter = fit_lasso(y, Xko_sdp, debias=nothing)
@@ -312,15 +312,15 @@ end
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
     for i in eachindex(sdp_filter.fdr_target)
         # extract beta for current fdr
-        βsdp = sdp_filter.βs[i]
-        βmvr = mvr_filter.βs[i]
-        βme = me_filter.βs[i]
+        betasdp = sdp_filter.betas[i]
+        betamvr = mvr_filter.betas[i]
+        betame = me_filter.betas[i]
         
         # compute power and false discovery proportion
-        push!(sdp_power, length(findall(!iszero, βsdp) ∩ correct_position) / k)
-        push!(mvr_power, length(findall(!iszero, βmvr) ∩ correct_position) / k)
-        push!(me_power, length(findall(!iszero, βme) ∩ correct_position) / k)
-        # fdp = length(setdiff(findall(!iszero, βsdp), correct_position)) / max(count(!iszero, βsdp), 1)
+        push!(sdp_power, length(findall(!iszero, betasdp) ∩ correct_position) / k)
+        push!(mvr_power, length(findall(!iszero, betamvr) ∩ correct_position) / k)
+        push!(me_power, length(findall(!iszero, betame) ∩ correct_position) / k)
+        # fdp = length(setdiff(findall(!iszero, betasdp), correct_position)) / max(count(!iszero, betasdp), 1)
         # push!(empirical_fdr, fdp)
     end
 
@@ -372,22 +372,22 @@ end
     p = 500
     Random.seed!(seed)
     ρ = 0.4
-    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
     μ = zeros(p) # true mean parameters
-    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    X = rand(MvNormal(μ, Sigma), n)' |> Matrix
 
     # simulate y
     Random.seed!(seed)
     k = 50
     ϵ = Normal(0, 1)
     d = Normal(0, 1)
-    β = zeros(p)
-    β[1:k] .= rand(d, k)
-    shuffle!(β)
-    y = X * β + rand(ϵ, n) |> Vector{eltype(X)}
+    beta = zeros(p)
+    beta[1:k] .= rand(d, k)
+    shuffle!(beta)
+    y = X * beta + rand(ϵ, n) |> Vector{eltype(X)}
 
     # generate knockoffs
-    @time Xko = modelX_gaussian_knockoffs(X, :maxent, μ, Σ)
+    @time Xko = modelX_gaussian_knockoffs(X, :maxent, μ, Sigma)
 
     # run lasso, followed up by debiasing
     Random.seed!(seed)
@@ -397,7 +397,7 @@ end
 
     # check that debiased result have same support as not debiasing
     for i in eachindex(nodebias.fdr_target)
-        @test issubset(findall(!iszero, yesdebias.βs[i]), findall(!iszero, nodebias.βs[i]))
+        @test issubset(findall(!iszero, yesdebias.betas[i]), findall(!iszero, nodebias.betas[i]))
     end
 end
 
@@ -413,20 +413,20 @@ end
 
     # ASDP (fixed window ranges)
     @time asdp = approx_modelX_gaussian_knockoffs(X, :sdp, windowsize = 99)
-    λmin = eigvals(2*asdp.Σ - Diagonal(asdp.s)) |> minimum
+    λmin = eigvals(2*asdp.Sigma - Diagonal(asdp.s)) |> minimum
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
     # AMVR (arbitrary window ranges)
     window_ranges = [1:99, 100:121, 122:444, 445:500]
     @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, window_ranges);
-    λmin = eigvals(2*amvr.Σ - Diagonal(amvr.s)) |> minimum
+    λmin = eigvals(2*amvr.Sigma - Diagonal(amvr.s)) |> minimum
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
     # AMVR (arbitrary window ranges, m=5)
     m = 5
     window_ranges = [1:99, 100:121, 122:444, 445:500]
     @time amvr = approx_modelX_gaussian_knockoffs(X, :mvr, window_ranges, m=m);
-    λmin = eigvals((m+1)/m*amvr.Σ - Diagonal(amvr.s)) |> minimum
+    λmin = eigvals((m+1)/m*amvr.Sigma - Diagonal(amvr.s)) |> minimum
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
     @test eigmin(Diagonal(amvr.s)) ≥ 0
 end
@@ -445,25 +445,25 @@ end
 
     # debias with least squares
     ko = fit_lasso(y, X, debias=:ls);
-    @test length(ko.βs) == length(ko.a0)
-    for i in 1:length(ko.βs)
-        @show norm(ko.βs[i] - b) # second best
+    @test length(ko.betas) == length(ko.a0)
+    for i in 1:length(ko.betas)
+        @show norm(ko.betas[i] - b) # second best
     end
     # idx = findall(!iszero, b)
-    # [ko.βs[5][idx] b[idx]]
+    # [ko.betas[5][idx] b[idx]]
     
     # debias with lasso
     ko = fit_lasso(y, X, debias=:lasso);
-    @test length(ko.βs) == length(ko.a0)
-    for i in 1:length(ko.βs)
-        @show norm(ko.βs[i] - b) # best
+    @test length(ko.betas) == length(ko.a0)
+    for i in 1:length(ko.betas)
+        @show norm(ko.betas[i] - b) # best
     end
 
     # no debias
     ko = fit_lasso(y, X, debias=nothing);
-    @test length(ko.βs) == length(ko.a0)
-    for i in 1:length(ko.βs)
-        @show norm(ko.βs[i] - b) # worst
+    @test length(ko.betas) == length(ko.a0)
+    for i in 1:length(ko.betas)
+        @show norm(ko.betas[i] - b) # worst
     end
 end
 
@@ -482,28 +482,28 @@ end
 
     # debias with least squares
     ls_ko = fit_lasso(y, X, d = Binomial(), debias=:ls)
-    @test length(ls_ko.βs) == length(ls_ko.a0)
-    for i in 1:length(ls_ko.βs)
-        @show norm(ls_ko.βs[i] - b) # best
+    @test length(ls_ko.betas) == length(ls_ko.a0)
+    for i in 1:length(ls_ko.betas)
+        @show norm(ls_ko.betas[i] - b) # best
     end
     
     # debias with lasso
     lasso_ko = fit_lasso(y, X, d = Binomial(), debias=:lasso)
-    @test length(lasso_ko.βs) == length(lasso_ko.a0)
-    for i in 1:length(lasso_ko.βs)
-        @show norm(lasso_ko.βs[i] - b) # second best
+    @test length(lasso_ko.betas) == length(lasso_ko.a0)
+    for i in 1:length(lasso_ko.betas)
+        @show norm(lasso_ko.betas[i] - b) # second best
     end
 
     # no debias
     nodebias_ko = fit_lasso(y, X, d = Binomial(), debias=nothing)
-    @test length(nodebias_ko.βs) == length(nodebias_ko.a0)
-    for i in 1:length(nodebias_ko.βs)
-        @show norm(nodebias_ko.βs[i] - b) # worst
+    @test length(nodebias_ko.betas) == length(nodebias_ko.a0)
+    for i in 1:length(nodebias_ko.betas)
+        @show norm(nodebias_ko.betas[i] - b) # worst
     end
 
     # visually compare estimated effect sizes (least squares > nodebias > lasso)
     # idx = findall(!iszero, b)
-    # [ls_ko.βs[5][idx] lasso_ko.βs[5][idx] nodebias_ko.βs[5][idx] b[idx]]
+    # [ls_ko.betas[5][idx] lasso_ko.betas[5][idx] nodebias_ko.betas[5][idx] b[idx]]
 end
 
 @testset "predict via knockoff-filter" begin
@@ -523,21 +523,21 @@ end
     # generate knockoffs and predict with debiased beta for each target FDR
     ko = fit_lasso(y, X, debias=:ls, filter_method=:knockoff)
     ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.βs)
+    for i in 1:length(ko.betas)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
 
     ko = fit_lasso(y, X, debias=:lasso, filter_method=:knockoff)
     ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.βs)
+    for i in 1:length(ko.betas)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
 
     ko = fit_lasso(y, X, debias=nothing, filter_method=:knockoff)
     ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.βs)
+    for i in 1:length(ko.betas)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
@@ -554,16 +554,16 @@ end
     n = 1000 # sample size
     m = 5 # number of knockoffs per feature
     groups = repeat(1:groups, inner=5)
-    Σ = simulate_block_covariance(groups, ρ, γ)
+    Sigma = simulate_block_covariance(groups, ρ, γ)
     true_mu = zeros(p)
-    X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
+    X = rand(MvNormal(true_mu, Sigma), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1))
-    Σcopy = copy(Σ)
+    Sigmacopy = copy(Sigma)
     groups_copy = copy(groups)
 
     # equi
-    @time equi = modelX_gaussian_group_knockoffs(X, :equi, groups, true_mu, Σ, m=m)
-    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Symmetric((m+1)/m*Σ - equi.S)))
+    @time equi = modelX_gaussian_group_knockoffs(X, :equi, groups, true_mu, Sigma, m=m)
+    @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Symmetric((m+1)/m*Sigma - equi.S)))
     @test all(x -> x ≥ 0 || x ≈ 0, eigvals(Symmetric(equi.S)))
 
     # CCD (exact Gaussian constructions)
@@ -573,13 +573,13 @@ end
     for method in [:sdp, :mvr, :maxent]
         for (pca, ccd) in zip(inner_pca_iter, inner_ccd_iter)
             @time ko = modelX_gaussian_group_knockoffs(X, method, groups, 
-                true_mu, Σ, m=m, inner_pca_iter=pca, inner_ccd_iter=ccd, 
+                true_mu, Sigma, m=m, inner_pca_iter=pca, inner_ccd_iter=ccd, 
                 tol = tol, verbose=true)
             # check constraints (compensating for numerical error)
-            @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Σ - ko.S)))
+            @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Sigma - ko.S)))
             @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
             # check data integrity
-            @test all(Σ .== Σcopy)
+            @test all(Sigma .== Sigmacopy)
             @test all(groups_copy .== groups)
             # check S has group-block-diagonal structure
             for idx in findall(!iszero, ko.S)
@@ -595,10 +595,10 @@ end
         @time ko = modelX_gaussian_group_knockoffs(X, method, groups, 
             m=m, tol = tol, verbose=true)
         # check constraints (compensating for numerical error)
-        @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Σ - ko.S)))
+        @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Sigma - ko.S)))
         @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
         # check data integrity
-        @test all(Σ .== Σcopy)
+        @test all(Sigma .== Sigmacopy)
         @test all(groups_copy .== groups)
         # check S has group-block-diagonal structure
         for idx in findall(!iszero, ko.S)
@@ -609,12 +609,12 @@ end
 
     # suboptimal
     for method in [:sdp_subopt, :sdp_subopt_correct]
-        @time ko = modelX_gaussian_group_knockoffs(X, method, groups, true_mu, Σ, m=m)
+        @time ko = modelX_gaussian_group_knockoffs(X, method, groups, true_mu, Sigma, m=m)
         # check constraints (compensating for numerical error)
-        @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Σ - ko.S)))
+        @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Sigma - ko.S)))
         @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
         # check data integrity
-        @test all(Σ .== Σcopy)
+        @test all(Sigma .== Sigmacopy)
         @test all(groups_copy .== groups)
         # check S has group-block-diagonal structure
         for idx in findall(!iszero, ko.S)
@@ -627,15 +627,15 @@ end
 @testset "block descent for a single block" begin
     p = 15
     groups = repeat(1:3, inner=5) # each group has 5 variables
-    Σ = Matrix(SymmetricToeplitz(0.4.^(0:(p-1)))) # true covariance matrix
+    Sigma = Matrix(SymmetricToeplitz(0.4.^(0:(p-1)))) # true covariance matrix
     m = 1 # make just 1 knockoff per variable
 
     # initialize with equicorrelated solution
-    Sequi, γ = solve_s_group(Symmetric(Σ), groups, :equi)
+    Sequi, γ = solve_s_group(Symmetric(Sigma), groups, :equi)
     
     # form constraints for block 1
-    Σ11 = Σ[1:5, 1:5]
-    A = (m+1)/m * Σ
+    Sigma11 = Sigma[1:5, 1:5]
+    A = (m+1)/m * Sigma
     D = A - Sequi
     A11 = @view(A[1:5, 1:5])
     D12 = @view(D[1:5, 6:end])
@@ -643,7 +643,7 @@ end
     ub = A11 - D12 * inv(D22) * D12'
     
     # solve first block
-    @time S1_new, success = Knockoffs.solve_group_SDP_single_block(Σ11, ub)
+    @time S1_new, success = Knockoffs.solve_group_SDP_single_block(Sigma11, ub)
     λmin = eigmin(S1_new)
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
     λmin = eigmin(ub - S1_new)
@@ -651,7 +651,7 @@ end
 
     # eyeball result
     # @show S1_new
-    # @show sum(abs.(Σ11 - S1_new))
+    # @show sum(abs.(Sigma11 - S1_new))
 end
 
 @testset "group knockoff utilities" begin
@@ -673,15 +673,15 @@ end
     n = 100
     p = 500
     μ = zeros(p)
-    Σ = simulate_AR1(p, a=3, b=1)
-    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    Sigma = simulate_AR1(p, a=3, b=1)
+    X = rand(MvNormal(μ, Sigma), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1))
 
     # defining groups: hierarchical clustering
     for force_contiguous in [true, false]
         groups1, reps1 = hc_partition_groups(X, 
             force_contiguous=force_contiguous, linkage=:single)
-        groups2, reps2 = hc_partition_groups(Symmetric(Σ), 
+        groups2, reps2 = hc_partition_groups(Symmetric(Sigma), 
             force_contiguous=force_contiguous, linkage=:single)
         @test length(unique(groups1)) == length(reps1)
         @test length(unique(groups2)) == length(reps2)
@@ -698,7 +698,7 @@ end
     for force_contiguous in [true, false]
         groups1, reps1 = id_partition_groups(X, 
             force_contiguous=force_contiguous)
-        groups2, reps2 = id_partition_groups(Symmetric(Σ), 
+        groups2, reps2 = id_partition_groups(Symmetric(Sigma), 
             force_contiguous=force_contiguous)
         @test length(unique(groups1)) == length(reps1)
         @test length(unique(groups2)) == length(reps2)
@@ -717,9 +717,9 @@ end
     p = 500
     k = 50
     n = 250
-    Σ = simulate_AR1(p, a=3, b=1)
+    Sigma = simulate_AR1(p, a=3, b=1)
     true_mu = zeros(p)
-    X = rand(MvNormal(true_mu, Σ), n)' |> Matrix
+    X = rand(MvNormal(true_mu, Sigma), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1))
 
     # tests defining groups by ID and choosing representatives
@@ -744,14 +744,14 @@ end
 
     # representative knockoffs based on conditional independence assumption
     rme = modelX_gaussian_rep_group_knockoffs(
-        X, :maxent, groups1, true_mu, Σ
+        X, :maxent, groups1, true_mu, Sigma
     )
     @test size(rme.S11, 1) ≤ size(rme.S, 1) == p
     @test length(rme.group_reps) ≤ p
 
     # enforcing conditional independent assumption
     rme = modelX_gaussian_rep_group_knockoffs(
-        X, :maxent, groups1, true_mu, Σ, enforce_cond_indep=true
+        X, :maxent, groups1, true_mu, Sigma, enforce_cond_indep=true
     )
     @test typeof(rme.S) <: AbstractMatrix
     Sblocks = Knockoffs.block_diagonalize(rme.S, groups1)
@@ -763,36 +763,36 @@ end
     n = 100 # sample size
     p = 500 # number of covariates
     ρ = 0.4
-    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1)))) # true covariance matrix
     μ = zeros(p) # true mean parameters
-    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    X = rand(MvNormal(μ, Sigma), n)' |> Matrix
 
     # routine for solving s and generating knockoffs satisfy PSD constraint
-    mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Σ, m=3)
-    @test eigmin(4/3 * Σ - Diagonal(mvr_multiple.s)) ≥ 0
-    me_multiple = modelX_gaussian_knockoffs(X, :maxent, μ, Σ, m=5)
-    @test eigmin(6/5 * Σ - Diagonal(me_multiple.s)) ≥ 0
-    sdp_multiple = modelX_gaussian_knockoffs(X, :sdp, μ, Σ, m=5)
-    λmin = eigmin(6/5 * Σ - Diagonal(sdp_multiple.s))
+    mvr_multiple = modelX_gaussian_knockoffs(X, :mvr, μ, Sigma, m=3)
+    @test eigmin(4/3 * Sigma - Diagonal(mvr_multiple.s)) ≥ 0
+    me_multiple = modelX_gaussian_knockoffs(X, :maxent, μ, Sigma, m=5)
+    @test eigmin(6/5 * Sigma - Diagonal(me_multiple.s)) ≥ 0
+    sdp_multiple = modelX_gaussian_knockoffs(X, :sdp, μ, Sigma, m=5)
+    λmin = eigmin(6/5 * Sigma - Diagonal(sdp_multiple.s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
-    sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m=5)
-    λmin = eigmin(6/5 * Σ - Diagonal(sdp_fast_multiple.s))
+    sdp_fast_multiple = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Sigma, m=5)
+    λmin = eigmin(6/5 * Sigma - Diagonal(sdp_fast_multiple.s))
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 
     # Check lasso runs with multiple knockoffs
     k = 15
-    βtrue = zeros(p)
-    βtrue[1:k] .= randn(k)
-    shuffle!(βtrue)
-    correct_position = findall(!iszero, βtrue)
-    y = X * βtrue + randn(n)
+    betatrue = zeros(p)
+    betatrue[1:k] .= randn(k)
+    shuffle!(betatrue)
+    correct_position = findall(!iszero, betatrue)
+    y = X * betatrue + randn(n)
     @time mvr_filter = fit_lasso(y, X, method=:mvr, m=3, filter_method=:knockoff_plus)
     @time me_filter = fit_lasso(y, X, method=:maxent, m=5, filter_method=:knockoff_plus)
 
     @test size(mvr_filter.X) == (n, p)
-    @test size(mvr_filter.ko.X̃) == (n, 3p)
+    @test size(mvr_filter.ko.Xko) == (n, 3p)
     @test size(me_filter.X) == (n, p)
-    @test size(me_filter.ko.X̃) == (n, 5p)
+    @test size(me_filter.ko.Xko) == (n, 5p)
 end
 
 #todo: 
