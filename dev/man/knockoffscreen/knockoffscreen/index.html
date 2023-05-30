@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>KnockoffScreen Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.045/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.24/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../../">Home</a></li><li><a class="tocitem" href="../../fixed/fixed/">Fixed-X Knockoffs</a></li><li><a class="tocitem" href="../../modelX/modelX/">Model-X Knockoffs</a></li><li><a class="tocitem" href="../../group/">Group Knockoffs</a></li><li class="is-active"><a class="tocitem" href>KnockoffScreen Knockoffs</a><ul class="internal"><li><a class="tocitem" href="#Step-0:-Prepare-example-data"><span>Step 0: Prepare example data</span></a></li><li><a class="tocitem" href="#Step-1:-Generate-Knockoffs"><span>Step 1: Generate Knockoffs</span></a></li><li><a class="tocitem" href="#Step-2:-Examine-knockoff-statistics"><span>Step 2: Examine knockoff statistics</span></a></li><li><a class="tocitem" href="#LASSO-example"><span>LASSO example</span></a></li></ul></li><li><a class="tocitem" href="../../ghost_knockoffs/">Ghost Knockoffs</a></li><li><a class="tocitem" href="../../hmm/hmm/">HMM Knockoffs</a></li><li><a class="tocitem" href="../../ipad/">IPAD Knockoffs</a></li><li><a class="tocitem" href="../../JuliaCall/">Calling from R</a></li><li><a class="tocitem" href="../../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>KnockoffScreen Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>KnockoffScreen Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/knockoffscreen/knockoffscreen.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="KnockoffScreen-knockoffs"><a class="docs-heading-anchor" href="#KnockoffScreen-knockoffs">KnockoffScreen knockoffs</a><a id="KnockoffScreen-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffScreen-knockoffs" title="Permalink"></a></h1><p>This is a tutorial for generating KnockoffScreen knockoffs for <a href="https://en.wikipedia.org/wiki/Genome-wide_association_study">genome-wide association studies</a>. This kind of knockoffs is designed for sequence data that have a lot of rare variants. The methodology is described in the following papers</p><blockquote><p>He, Zihuai, Linxi Liu, Chen Wang, Yann Le Guen, Justin Lee, Stephanie Gogarten, Fred Lu et al. &quot;Identification of putative causal loci in whole-genome sequencing data via knockoff statistics.&quot; Nature communications 12, no. 1 (2021): 1-18.</p></blockquote><blockquote><p>He, Zihuai, Yann Le Guen, Linxi Liu, Justin Lee, Shiyang Ma, Andrew C. Yang, Xiaoxia Liu et al. &quot;Genome-wide analysis of common and rare variants via multiple knockoffs at biobank scale, with an application to Alzheimer disease genetics.&quot; The American Journal of Human Genetics 108, no. 12 (2021): 2336-2353</p></blockquote><p>In particular, we generate:</p><p class="math-container">\[\begin{align*}
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>KnockoffScreen Knockoffs · Knockoffs.jl</title><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.045/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.24/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">Knockoffs.jl</a></span></div><form class="docs-search" action="../../../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../../../">Home</a></li><li><a class="tocitem" href="../../fixed/fixed/">Fixed-X Knockoffs</a></li><li><a class="tocitem" href="../../modelX/modelX/">Model-X Knockoffs</a></li><li><a class="tocitem" href="../../group/">Group Knockoffs</a></li><li class="is-active"><a class="tocitem" href>KnockoffScreen Knockoffs</a><ul class="internal"><li><a class="tocitem" href="#Step-0:-Prepare-example-data"><span>Step 0: Prepare example data</span></a></li><li><a class="tocitem" href="#Step-1:-Generate-Knockoffs"><span>Step 1: Generate Knockoffs</span></a></li><li><a class="tocitem" href="#Step-2:-Examine-knockoff-statistics"><span>Step 2: Examine knockoff statistics</span></a></li></ul></li><li><a class="tocitem" href="../../ghost_knockoffs/">Ghost Knockoffs</a></li><li><a class="tocitem" href="../../hmm/hmm/">HMM Knockoffs</a></li><li><a class="tocitem" href="../../ipad/">IPAD Knockoffs</a></li><li><a class="tocitem" href="../../JuliaCall/">Calling from R</a></li><li><a class="tocitem" href="../../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>KnockoffScreen Knockoffs</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>KnockoffScreen Knockoffs</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/biona001/Knockoffs.jl/blob/master/docs/src/man/knockoffscreen/knockoffscreen.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="KnockoffScreen-knockoffs"><a class="docs-heading-anchor" href="#KnockoffScreen-knockoffs">KnockoffScreen knockoffs</a><a id="KnockoffScreen-knockoffs-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffScreen-knockoffs" title="Permalink"></a></h1><div class="admonition is-warning"><header class="admonition-header">Warning</header><div class="admonition-body"><p>KnockoffScreen Knockoffs are provided as experimental feature. </p></div></div><p>This is a tutorial for generating KnockoffScreen knockoffs for <a href="https://en.wikipedia.org/wiki/Genome-wide_association_study">genome-wide association studies</a>. This kind of knockoffs is designed for sequence data that have a lot of rare variants. The methodology is described in the following papers</p><blockquote><p>He, Zihuai, Linxi Liu, Chen Wang, Yann Le Guen, Justin Lee, Stephanie Gogarten, Fred Lu et al. &quot;Identification of putative causal loci in whole-genome sequencing data via knockoff statistics.&quot; Nature communications 12, no. 1 (2021): 1-18.</p></blockquote><blockquote><p>He, Zihuai, Yann Le Guen, Linxi Liu, Justin Lee, Shiyang Ma, Andrew C. Yang, Xiaoxia Liu et al. &quot;Genome-wide analysis of common and rare variants via multiple knockoffs at biobank scale, with an application to Alzheimer disease genetics.&quot; The American Journal of Human Genetics 108, no. 12 (2021): 2336-2353</p></blockquote><p>In particular, we generate:</p><p class="math-container">\[\begin{align*}
 \hat{X}_j &amp;= \hat{\beta_0} + \sum_{k \in B_j}\hat{\beta_k}X_k + \sum_{k \in B_j, k \le j - 1}\hat{\gamma_k}\tilde{X_k}\\
 \hat{\epsilon} &amp;= permute(X_j - \hat{X}_j)\\
 \tilde{X}_j &amp;= \hat{X}_j + \hat{\epsilon}
 \end{align*}\]</p><p>where <span>$B_j$</span> is a ball of variants near <span>$j$</span> and <span>$\hat{\beta}_k, \hat{\gamma}_k$</span> are estimated via least squares. </p><pre><code class="language-julia hljs"># first load packages needed for this tutorial
-using Revise
 using SnpArrays
 using Knockoffs
 using Statistics
@@ -53,31 +52,31 @@ X = convert(Matrix{Float64}, SnpArray(mouse_path * &quot;.bed&quot;), center=tru
 
 # compare SNP 1 with its knockoff
 [X[:, 1] X̃[:, 1]]</code></pre><pre><code class="nohighlight hljs">1940×2 Matrix{Float64}:
- -0.159187  -0.158027
  -0.159187  -0.157256
-  1.26396    1.26416
- -0.159187  -0.158079
+ -0.159187  -0.158219
+  1.26396    1.26388
+ -0.159187  -0.158219
+  1.26396    1.26589
+ -0.159187  -0.158219
+ -0.159187  -0.159424
+ -0.159187  -0.157256
+ -0.159187  -0.158219
   1.26396    1.2641
- -0.159187  -0.15979
- -0.159187  -0.159042
- -0.159187  -0.158219
- -0.159187  -0.156292
-  1.26396    1.26493
   1.26396    1.26685
- -0.159187  -0.157256
-  1.26396    1.26332
+ -0.159187  -0.158986
+  1.26396    1.26589
   ⋮         
-  1.26396    1.26412
   1.26396    1.26589
- -0.159187  -0.158027
+  1.26396    1.2641
+ -0.159187  -0.160036
+ -0.159187  -0.157256
+  1.26396    1.26589
+ -0.159187  -0.159753
+  1.26396    1.26589
  -0.159187  -0.158219
-  1.26396    1.26493
- -0.159187  -0.158306
-  1.26396    1.26589
- -0.159187  -0.158023
+ -0.159187  -0.159005
  -0.159187  -0.15899
- -0.159187  -0.159269
- -0.159187  -0.156292
+ -0.159187  -0.158219
  -1.58233   -1.58241</code></pre><p>Lets also compare <span>$cor(X_i, X_j)$</span> and <span>$cor(X_i, \tilde{X}_j)$</span>. If knockoffs satisfy exchangability, their correlation should be very similar and form a diagonal line. </p><pre><code class="language-julia hljs"># look at pairwise correlation (between first 200 snps)
 r1, r2 = Float64[], Float64[]
 for i in 1:200, j in 1:i
@@ -92,59 +91,4 @@ for j in 1:size(X, 2)
     push!(r1, cor(@view(X[:, j]), @view(X[:, j])))
     push!(r2, cor(@view(X[:, j]), @view(X̃[:, j])))
 end
-histogram(r2, legend=false, xlabel=&quot;cor(Xj, X̃j)&quot;, ylabel=&quot;count&quot;)</code></pre><p><img src="../output_12_0.png" alt="png"/></p><h2 id="LASSO-example"><a class="docs-heading-anchor" href="#LASSO-example">LASSO example</a><a id="LASSO-example-1"></a><a class="docs-heading-anchor-permalink" href="#LASSO-example" title="Permalink"></a></h2><p>Let us apply the generated knockoffs to the model selection problem. In layman&#39;s term, it can be stated as</p><blockquote><p>Given response <span>$\mathbf{y}_{n \times 1}$</span>, design matrix <span>$\mathbf{X}_{n \times p}$</span>, we want to select a subset <span>$S \subset \{1,...,p\}$</span> of variables that are truly causal for <span>$\mathbf{y}$</span>. </p></blockquote><h3 id="Simulate-data"><a class="docs-heading-anchor" href="#Simulate-data">Simulate data</a><a id="Simulate-data-1"></a><a class="docs-heading-anchor-permalink" href="#Simulate-data" title="Permalink"></a></h3><p>We will simulate </p><p class="math-container">\[\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)\]</p><p>where <span>$k=50$</span> positions of <span>$\mathbf{\beta}$</span> is non-zero with effect size <span>$\beta_j \sim N(0, 1)$</span>. The goal is to recover those 50 positions using LASSO.</p><pre><code class="language-julia hljs"># set seed for reproducibility
-Random.seed!(999)
-
-# simulate true beta
-n, p = size(X)
-k = 50
-βtrue = zeros(p)
-βtrue[1:k] .= randn(k)
-shuffle!(βtrue)
-
-# find true causal variables
-correct_position = findall(!iszero, βtrue)
-
-# simulate y
-y = X * βtrue + randn(n);</code></pre><h3 id="Standard-LASSO"><a class="docs-heading-anchor" href="#Standard-LASSO">Standard LASSO</a><a id="Standard-LASSO-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-LASSO" title="Permalink"></a></h3><p>Lets try running standard LASSO, which will produce <span>$\hat{\mathbf{\beta}}_{p \times 1}$</span> where we typically declare SNP <span>$j$</span> to be selected if <span>$\hat{\beta}_j \ne 0$</span>. We use LASSO solver in <a href="https://github.com/JuliaStats/GLMNet.jl">GLMNet.jl</a> package, which is just a Julia wrapper for the GLMnet Fortran code. </p><p>How well does LASSO perform in terms of power and FDR?</p><pre><code class="language-julia hljs"># run 10-fold cross validation to find best λ minimizing MSE
-lasso_cv = glmnetcv(X, y)
-λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
-
-# use λbest to fit LASSO on full data
-βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
-
-# check power and false discovery rate
-power = length(findall(!iszero, βlasso) ∩ correct_position) / k
-FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
-
-#summarize
-count(!iszero, βlasso), power, FDR</code></pre><pre><code class="nohighlight hljs">(414, 0.78, 0.9057971014492754)</code></pre><p>Observe that </p><ul><li>LASSO found a total of 414 SNPs</li><li>LASSO found <span>$39/50 = 70$</span>% of all true predictors</li><li>375/364 SNPs were false positive (false discovery rate is 90%)</li></ul><h3 id="KnockoffLASSO"><a class="docs-heading-anchor" href="#KnockoffLASSO">Knockoff+LASSO</a><a id="KnockoffLASSO-1"></a><a class="docs-heading-anchor-permalink" href="#KnockoffLASSO" title="Permalink"></a></h3><p>Now lets try applying the knockoff methodology. Recall that consists of a few steps </p><ol><li>Run LASSO on <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span></li><li>Compare coefficient difference statistic <span>$W_j$</span> for each <span>$j = 1,...,p$</span>. Here we use <span>$W_j = |\beta_j| - |\beta_{j, knockoff}|$</span></li><li>Choose target FDR <span>$0 \le q \le 1$</span> and compute </li></ol><p class="math-container">\[\tau = min_{t}\left\{t &gt; 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}\]</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>In step 1, <span>$[\mathbf{X} \mathbf{\tilde{X}}]$</span> is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. </p></div></div><pre><code class="language-julia hljs"># interleave knockoffs with originals
-Xfull, original, knockoff = merge_knockoffs_with_original(mouse_path,
-    &quot;knockoffs/mouse.imputed.fastphase.knockoffs&quot;,
-    des=&quot;knockoffs/merged&quot;) 
-Xfull = convert(Matrix{Float64}, Xfull, center=true, scale=true)
-
-# step 1
-knockoff_cv = glmnetcv(Xfull, y)                         # cross validation step
-λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)] # find lambda that minimizes MSE
-βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]    # refit lasso with best lambda
-
-# target FDR is 0.05, 0.1, ..., 0.5
-FDR = collect(0.05:0.05:0.5)
-empirical_power = Float64[]
-empirical_fdr = Float64[]
-for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
-
-    # compute power and false discovery proportion
-    power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
-    fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
-    push!(empirical_power, power)
-    push!(empirical_fdr, fdp)
-end
-
-# visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical power&quot;, legend=false)
-fdr_plot = plot(FDR, empirical_fdr, xlabel=&quot;Target FDR&quot;, ylabel=&quot;Empirical FDR&quot;, legend=false)
-Plots.abline!(fdr_plot, 1, 0, line=:dash)
-plot(power_plot, fdr_plot)</code></pre><p><img src="../output_18_0.png" alt="png"/></p><p>Observe that</p><ul><li>LASSO + knockoffs controls the false discovery rate at below the target (dashed line)</li><li>Controlled FDR is compensated by slight loss of power</li></ul><p>The empirical FDR should hug the target FDR more closely once we repeated the simulation multiple times and generate the knockoffs in a way so that they are not so correlated with the original genotypes. </p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../group/">« Group Knockoffs</a><a class="docs-footer-nextpage" href="../../ghost_knockoffs/">Ghost Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Monday 29 May 2023 02:38">Monday 29 May 2023</span>. Using Julia version 1.8.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+histogram(r2, legend=false, xlabel=&quot;cor(Xj, X̃j)&quot;, ylabel=&quot;count&quot;)</code></pre><p><img src="../output_12_0.png" alt="png"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../group/">« Group Knockoffs</a><a class="docs-footer-nextpage" href="../../ghost_knockoffs/">Ghost Knockoffs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Tuesday 30 May 2023 02:04">Tuesday 30 May 2023</span>. Using Julia version 1.8.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
