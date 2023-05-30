@@ -1,6 +1,11 @@
 
 # KnockoffScreen knockoffs
 
+
+!!! warning
+
+    KnockoffScreen Knockoffs are provided as experimental feature. 
+
 This is a tutorial for generating KnockoffScreen knockoffs for [genome-wide association studies](https://en.wikipedia.org/wiki/Genome-wide_association_study). This kind of knockoffs is designed for sequence data that have a lot of rare variants. The methodology is described in the following papers
 
 > He, Zihuai, Linxi Liu, Chen Wang, Yann Le Guen, Justin Lee, Stephanie Gogarten, Fred Lu et al. "Identification of putative causal loci in whole-genome sequencing data via knockoff statistics." Nature communications 12, no. 1 (2021): 1-18.
@@ -22,7 +27,6 @@ where $B_j$ is a ball of variants near $j$ and $\hat{\beta}_k, \hat{\gamma}_k$ a
 
 ```julia
 # first load packages needed for this tutorial
-using Revise
 using SnpArrays
 using Knockoffs
 using Statistics
@@ -119,31 +123,31 @@ X = convert(Matrix{Float64}, SnpArray(mouse_path * ".bed"), center=true, scale=t
 
 
     1940×2 Matrix{Float64}:
-     -0.159187  -0.158027
      -0.159187  -0.157256
-      1.26396    1.26416
-     -0.159187  -0.158079
+     -0.159187  -0.158219
+      1.26396    1.26388
+     -0.159187  -0.158219
+      1.26396    1.26589
+     -0.159187  -0.158219
+     -0.159187  -0.159424
+     -0.159187  -0.157256
+     -0.159187  -0.158219
       1.26396    1.2641
-     -0.159187  -0.15979
-     -0.159187  -0.159042
-     -0.159187  -0.158219
-     -0.159187  -0.156292
-      1.26396    1.26493
       1.26396    1.26685
-     -0.159187  -0.157256
-      1.26396    1.26332
+     -0.159187  -0.158986
+      1.26396    1.26589
       ⋮         
-      1.26396    1.26412
       1.26396    1.26589
-     -0.159187  -0.158027
+      1.26396    1.2641
+     -0.159187  -0.160036
+     -0.159187  -0.157256
+      1.26396    1.26589
+     -0.159187  -0.159753
+      1.26396    1.26589
      -0.159187  -0.158219
-      1.26396    1.26493
-     -0.159187  -0.158306
-      1.26396    1.26589
-     -0.159187  -0.158023
+     -0.159187  -0.159005
      -0.159187  -0.15899
-     -0.159187  -0.159269
-     -0.159187  -0.156292
+     -0.159187  -0.158219
      -1.58233   -1.58241
 
 
@@ -189,133 +193,3 @@ histogram(r2, legend=false, xlabel="cor(Xj, X̃j)", ylabel="count")
 ![png](output_12_0.png)
 
 
-
-## LASSO example
-
-Let us apply the generated knockoffs to the model selection problem. In layman's term, it can be stated as
-
-> Given response $\mathbf{y}_{n \times 1}$, design matrix $\mathbf{X}_{n \times p}$, we want to select a subset $S \subset \{1,...,p\}$ of variables that are truly causal for $\mathbf{y}$. 
-
-### Simulate data
-
-We will simulate 
-
-$$\mathbf{y}_{n \times 1} \sim N(\mathbf{X}_{n \times p}\mathbf{\beta}_{p \times 1} \ , \ \mathbf{\epsilon}_{n \times 1}), \quad \epsilon_i \sim N(0, 1)$$
-
-where $k=50$ positions of $\mathbf{\beta}$ is non-zero with effect size $\beta_j \sim N(0, 1)$. The goal is to recover those 50 positions using LASSO.
-
-
-```julia
-# set seed for reproducibility
-Random.seed!(999)
-
-# simulate true beta
-n, p = size(X)
-k = 50
-βtrue = zeros(p)
-βtrue[1:k] .= randn(k)
-shuffle!(βtrue)
-
-# find true causal variables
-correct_position = findall(!iszero, βtrue)
-
-# simulate y
-y = X * βtrue + randn(n);
-```
-
-### Standard LASSO
-
-Lets try running standard LASSO, which will produce $\hat{\mathbf{\beta}}_{p \times 1}$ where we typically declare SNP $j$ to be selected if $\hat{\beta}_j \ne 0$. We use LASSO solver in [GLMNet.jl](https://github.com/JuliaStats/GLMNet.jl) package, which is just a Julia wrapper for the GLMnet Fortran code. 
-
-How well does LASSO perform in terms of power and FDR?
-
-
-```julia
-# run 10-fold cross validation to find best λ minimizing MSE
-lasso_cv = glmnetcv(X, y)
-λbest = lasso_cv.lambda[argmin(lasso_cv.meanloss)]
-
-# use λbest to fit LASSO on full data
-βlasso = glmnet(X, y, lambda=[λbest]).betas[:, 1]
-
-# check power and false discovery rate
-power = length(findall(!iszero, βlasso) ∩ correct_position) / k
-FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!iszero, βlasso)
-
-#summarize
-count(!iszero, βlasso), power, FDR
-```
-
-
-
-
-    (414, 0.78, 0.9057971014492754)
-
-
-
-Observe that 
-
-+ LASSO found a total of 414 SNPs
-+ LASSO found $39/50 = 70$% of all true predictors
-+ 375/364 SNPs were false positive (false discovery rate is 90%)
-
-### Knockoff+LASSO
-
-Now lets try applying the knockoff methodology. Recall that consists of a few steps 
-
-1. Run LASSO on $[\mathbf{X} \mathbf{\tilde{X}}]$
-2. Compare coefficient difference statistic $W_j$ for each $j = 1,...,p$. Here we use $W_j = |\beta_j| - |\beta_{j, knockoff}|$
-3. Choose target FDR $0 \le q \le 1$ and compute 
-$$\tau = min_{t}\left\{t > 0: \frac{{\#j: W_j ≤ -t}}{{\#j: W_j ≥ t}} \le q\right\}$$
-
-!!! note
-    
-    In step 1, $[\mathbf{X} \mathbf{\tilde{X}}]$ is written for notational convenience. In practice one must interleave knockoffs with the original variables, where either the knockoff come first or the original genotype come first with equal probability. This is due to the inherent bias of LASSO solvers: when the original and knockoff variable are equally valid, the one listed first will be selected. 
-
-
-```julia
-# interleave knockoffs with originals
-Xfull, original, knockoff = merge_knockoffs_with_original(mouse_path,
-    "knockoffs/mouse.imputed.fastphase.knockoffs",
-    des="knockoffs/merged") 
-Xfull = convert(Matrix{Float64}, Xfull, center=true, scale=true)
-
-# step 1
-knockoff_cv = glmnetcv(Xfull, y)                         # cross validation step
-λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)] # find lambda that minimizes MSE
-βestim = glmnet(Xfull, y, lambda=[λbest]).betas[:, 1]    # refit lasso with best lambda
-
-# target FDR is 0.05, 0.1, ..., 0.5
-FDR = collect(0.05:0.05:0.5)
-empirical_power = Float64[]
-empirical_fdr = Float64[]
-for fdr in FDR
-    βknockoff = extract_beta(βestim, fdr, original, knockoff) # steps 2-3 happen here
-
-    # compute power and false discovery proportion
-    power = length(findall(!iszero, βknockoff) ∩ correct_position) / k
-    fdp = length(setdiff(findall(!iszero, βknockoff), correct_position)) / max(count(!iszero, βknockoff), 1)
-    push!(empirical_power, power)
-    push!(empirical_fdr, fdp)
-end
-
-# visualize FDR and power
-power_plot = plot(FDR, empirical_power, xlabel="Target FDR", ylabel="Empirical power", legend=false)
-fdr_plot = plot(FDR, empirical_fdr, xlabel="Target FDR", ylabel="Empirical FDR", legend=false)
-Plots.abline!(fdr_plot, 1, 0, line=:dash)
-plot(power_plot, fdr_plot)
-```
-
-
-
-
-![png](output_18_0.png)
-
-
-
-Observe that
-
-+ LASSO + knockoffs controls the false discovery rate at below the target (dashed line)
-+ Controlled FDR is compensated by slight loss of power
-
-The empirical FDR should hug the target FDR more closely once we repeated the simulation multiple times and generate the knockoffs in a way so that they are not so correlated with the original genotypes. 

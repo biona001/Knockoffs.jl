@@ -29,6 +29,16 @@ using ToeplitzMatrices
 using Distributions
 ```
 
+    [36m[1m[ [22m[39m[36m[1mInfo: [22m[39mPrecompiling StatsKit [2cb19f9e-ec4d-5c53-8573-a4542a68d3f0]
+    [32mMinimizing 2 	 Time: 0:00:00 (88.81 ms/it)[39m[K
+    [32mMinimizing 57 	 Time: 0:00:00 ( 4.06 ms/it)[39m[K
+    [32mMinimizing 34 	 Time: 0:00:00 ( 2.97 ms/it)[39m[K
+    [32mMinimizing 119 	 Time: 0:00:00 ( 1.72 ms/it)[39m[K
+    [32mMinimizing 203 	 Time: 0:00:00 ( 1.51 ms/it)[39m[K
+    [32mMinimizing 222 	 Time: 0:00:00 ( 1.48 ms/it)[39m[K
+    [36m[1m[ [22m[39m[36m[1mInfo: [22m[39mPrecompiling ToeplitzMatrices [c751599d-da0a-543b-9d20-d0a503d91d24]
+
+
 ## Gaussian model-X group knockoffs with known mean and covariance
 
 To illustrate, lets simulate data $\mathbf{X}$ with covariance $\Sigma$ and mean $\mu$. Our model is
@@ -130,99 +140,45 @@ Generate group knockoffs with the exported function [`modelX_gaussian_group_knoc
 
 
 ```julia
-@time Gme = modelX_gaussian_group_knockoffs(
+@time me = modelX_gaussian_group_knockoffs(
     X, :maxent, groups, μ, Σ, 
     m = 5,              # number of knockoffs per variable to generate
-    tol = 0.0001,       # convergence tolerance
+    tol = 0.001,        # convergence tolerance
     inner_ccd_iter = 1, # optimize every entry of S exactly 1 time before moving on to PCA updates
     inner_pca_iter = 1, # optimize S with respect to pre-computed eigenvectors 1 time before going to CCA updates
     verbose=true);      # whether to print informative intermediate results
 ```
 
-    Maxent initial obj = -10748.931182611366
-    Iter 1 (PCA): obj = -8237.523985375447, δ = 0.16612980949819264, t1 = 0.03, t2 = 0.07
-    Iter 2 (CCD): obj = -7700.4180043840925, δ = 0.03731459026023631, t1 = 0.1, t2 = 0.23, t3 = 0.0
-    Iter 3 (PCA): obj = -7425.308463255121, δ = 0.060823604038161845, t1 = 0.14, t2 = 0.3
-    Iter 4 (CCD): obj = -7308.074499758944, δ = 0.019936923421413913, t1 = 0.18, t2 = 0.47, t3 = 0.0
-    Iter 5 (PCA): obj = -7229.089072737786, δ = 0.036631251375332345, t1 = 0.21, t2 = 0.53
-    Iter 6 (CCD): obj = -7182.085494609535, δ = 0.009753360860322807, t1 = 0.24, t2 = 0.7, t3 = 0.0
-    Iter 7 (PCA): obj = -7142.003455889968, δ = 0.02924379554922749, t1 = 0.27, t2 = 0.75
-    Iter 8 (CCD): obj = -7116.141211182261, δ = 0.008709415093997086, t1 = 0.3, t2 = 0.92, t3 = 0.01
-    Iter 9 (PCA): obj = -7088.633103966935, δ = 0.021931911964248568, t1 = 0.33, t2 = 0.98
-    Iter 10 (CCD): obj = -7071.026287747464, δ = 0.007971315641216871, t1 = 0.36, t2 = 1.15, t3 = 0.01
-    Iter 11 (PCA): obj = -7049.550647201161, δ = 0.018181164682472842, t1 = 0.39, t2 = 1.21
-    Iter 12 (CCD): obj = -7035.956937271431, δ = 0.007331376400204198, t1 = 0.43, t2 = 1.37, t3 = 0.01
-    Iter 13 (PCA): obj = -7018.249208462705, δ = 0.017763228347353627, t1 = 0.45, t2 = 1.44
-    Iter 14 (CCD): obj = -7007.066219165877, δ = 0.006763792193718139, t1 = 0.48, t2 = 1.6, t3 = 0.01
-    Iter 15 (PCA): obj = -6992.312356584215, δ = 0.017052323184397946, t1 = 0.51, t2 = 1.66
-    Iter 16 (CCD): obj = -6982.801633080217, δ = 0.006238045378787146, t1 = 0.54, t2 = 1.83, t3 = 0.01
-    Iter 17 (PCA): obj = -6970.503897017125, δ = 0.0169181936791644, t1 = 0.58, t2 = 1.89
-    Iter 18 (CCD): obj = -6962.256075073076, δ = 0.005754704016835743, t1 = 0.61, t2 = 2.06, t3 = 0.01
-    Iter 19 (PCA): obj = -6951.98847526622, δ = 0.017495516481736216, t1 = 0.64, t2 = 2.12
-    Iter 20 (CCD): obj = -6944.75205618899, δ = 0.005307117648802748, t1 = 0.67, t2 = 2.28, t3 = 0.02
-    Iter 21 (PCA): obj = -6936.16334351868, δ = 0.01803786656173507, t1 = 0.71, t2 = 2.34
-    Iter 22 (CCD): obj = -6929.739879775674, δ = 0.004890636323370091, t1 = 0.75, t2 = 2.51, t3 = 0.02
-    Iter 23 (PCA): obj = -6922.524913590562, δ = 0.017576002827777423, t1 = 0.77, t2 = 2.57
-    Iter 24 (CCD): obj = -6916.783196930395, δ = 0.00450512978065051, t1 = 0.8, t2 = 2.74, t3 = 0.02
-    Iter 25 (PCA): obj = -6910.701374793149, δ = 0.01648855402262321, t1 = 0.83, t2 = 2.8
-    Iter 26 (CCD): obj = -6905.531718965983, δ = 0.004141478762581323, t1 = 0.86, t2 = 2.96, t3 = 0.02
-    Iter 27 (PCA): obj = -6900.35669742446, δ = 0.015157719648886831, t1 = 0.88, t2 = 3.02
-    Iter 28 (CCD): obj = -6895.6834422341135, δ = 0.0037992078852924147, t1 = 0.92, t2 = 3.19, t3 = 0.02
-    Iter 29 (PCA): obj = -6891.254461129407, δ = 0.01392451146460574, t1 = 0.94, t2 = 3.25
-    Iter 30 (CCD): obj = -6887.0118391955575, δ = 0.0034762384975926385, t1 = 0.97, t2 = 3.42, t3 = 0.02
-    Iter 31 (PCA): obj = -6883.190632395787, δ = 0.012848883381779091, t1 = 1.0, t2 = 3.48
-    Iter 32 (CCD): obj = -6879.328073344284, δ = 0.0032005500692677477, t1 = 1.03, t2 = 3.64, t3 = 0.02
-    Iter 33 (PCA): obj = -6876.01003814804, δ = 0.011952533693101768, t1 = 1.05, t2 = 3.7
-    Iter 34 (CCD): obj = -6872.478354404191, δ = 0.0029074018026914923, t1 = 1.08, t2 = 3.87, t3 = 0.03
-    Iter 35 (PCA): obj = -6869.5744362024125, δ = 0.01121455390103929, t1 = 1.11, t2 = 3.93
-    Iter 36 (CCD): obj = -6866.3336891099325, δ = 0.0026315953771842587, t1 = 1.14, t2 = 4.09, t3 = 0.03
-    Iter 37 (PCA): obj = -6863.769768030753, δ = 0.0107275159524292, t1 = 1.19, t2 = 4.15
-    Iter 38 (CCD): obj = -6860.79269413788, δ = 0.0024740941046095376, t1 = 1.22, t2 = 4.33, t3 = 0.03
-    Iter 39 (PCA): obj = -6858.51594212795, δ = 0.010298664583133318, t1 = 1.25, t2 = 4.39
-    Iter 40 (CCD): obj = -6855.771264206441, δ = 0.0024064146309562212, t1 = 1.28, t2 = 4.55, t3 = 0.03
-    Iter 41 (PCA): obj = -6853.735446664343, δ = 0.009915572984871833, t1 = 1.3, t2 = 4.61
-    Iter 42 (CCD): obj = -6851.2074750216725, δ = 0.0023357786291544956, t1 = 1.33, t2 = 4.77, t3 = 0.03
-    Iter 43 (PCA): obj = -6849.379593784872, δ = 0.009608287999421476, t1 = 1.36, t2 = 4.83
-    Iter 44 (CCD): obj = -6847.045770099706, δ = 0.0022650709455480852, t1 = 1.39, t2 = 5.0, t3 = 0.03
-    Iter 45 (PCA): obj = -6845.399072151567, δ = 0.00935618001100869, t1 = 1.42, t2 = 5.06
-    Iter 46 (CCD): obj = -6843.24183819163, δ = 0.0021953758961676087, t1 = 1.45, t2 = 5.22, t3 = 0.03
-    Iter 47 (PCA): obj = -6841.753367578095, δ = 0.009027268125129754, t1 = 1.47, t2 = 5.28
-    Iter 48 (CCD): obj = -6839.759267726732, δ = 0.0021548981851473624, t1 = 1.5, t2 = 5.44, t3 = 0.04
-    Iter 49 (PCA): obj = -6838.408794182777, δ = 0.008816217716468795, t1 = 1.53, t2 = 5.5
-    Iter 50 (CCD): obj = -6836.561658397979, δ = 0.002085650424855929, t1 = 1.56, t2 = 5.66, t3 = 0.04
-    Iter 51 (PCA): obj = -6835.338059571331, δ = 0.008583998864277846, t1 = 1.58, t2 = 5.72
-    Iter 52 (CCD): obj = -6833.621680052428, δ = 0.0020193622588125446, t1 = 1.61, t2 = 5.88, t3 = 0.04
-    Iter 53 (PCA): obj = -6832.507705021808, δ = 0.008357659672822983, t1 = 1.64, t2 = 5.94
-    Iter 54 (CCD): obj = -6830.913171864168, δ = 0.0019596122853489293, t1 = 1.67, t2 = 6.11, t3 = 0.04
-    Iter 55 (PCA): obj = -6829.897889026071, δ = 0.008166006257203585, t1 = 1.7, t2 = 6.17
-    Iter 56 (CCD): obj = -6828.413002054003, δ = 0.0018945753621293698, t1 = 1.73, t2 = 6.33, t3 = 0.04
-    Iter 57 (PCA): obj = -6827.484840513088, δ = 0.007944022932777064, t1 = 1.75, t2 = 6.39
-    Iter 58 (CCD): obj = -6826.10062438168, δ = 0.0018359149332439267, t1 = 1.78, t2 = 6.55, t3 = 0.04
-    Iter 59 (PCA): obj = -6825.2494332900915, δ = 0.007782413558754493, t1 = 1.8, t2 = 6.62
-    Iter 60 (CCD): obj = -6823.956997438751, δ = 0.0017780526622721631, t1 = 1.83, t2 = 6.79, t3 = 0.04
-    Iter 61 (PCA): obj = -6823.17494882124, δ = 0.007545428624149307, t1 = 1.86, t2 = 6.84
-    Iter 62 (CCD): obj = -6821.965768790584, δ = 0.0017207312595902264, t1 = 1.89, t2 = 7.01, t3 = 0.05
-    Iter 63 (PCA): obj = -6821.246264870465, δ = 0.007434174308049364, t1 = 1.91, t2 = 7.07
-    Iter 64 (CCD): obj = -6820.113139892253, δ = 0.0016625779896528147, t1 = 1.94, t2 = 7.24, t3 = 0.05
-    Iter 65 (PCA): obj = -6819.451373736169, δ = 0.0072737103797947756, t1 = 1.97, t2 = 7.3
-    Iter 66 (CCD): obj = -6818.387283413891, δ = 0.0015918188550377254, t1 = 2.0, t2 = 7.47, t3 = 0.05
-    Iter 67 (PCA): obj = -6817.774865622847, δ = 0.00711334427118358, t1 = 2.02, t2 = 7.53
-    Iter 68 (CCD): obj = -6816.773377927246, δ = 0.0015526989102086811, t1 = 2.05, t2 = 7.69, t3 = 0.05
-    Iter 69 (PCA): obj = -6816.205085751263, δ = 0.006988029537547295, t1 = 2.08, t2 = 7.75
-    Iter 70 (CCD): obj = -6815.261423062906, δ = 0.001482617801898897, t1 = 2.11, t2 = 7.91, t3 = 0.05
-    Iter 71 (PCA): obj = -6814.733758473422, δ = 0.006851280378816475, t1 = 2.14, t2 = 7.97
-    Iter 72 (CCD): obj = -6813.844204400972, δ = 0.0014295027056425783, t1 = 2.17, t2 = 8.14, t3 = 0.05
-    Iter 73 (PCA): obj = -6813.352492935046, δ = 0.006708844719793019, t1 = 2.19, t2 = 8.2
-    Iter 74 (CCD): obj = -6812.512641423066, δ = 0.0013762433710736894, t1 = 2.22, t2 = 8.37, t3 = 0.05
-    Iter 75 (PCA): obj = -6812.053537854734, δ = 0.0065632627924375, t1 = 2.24, t2 = 8.42
-    Iter 76 (CCD): obj = -6811.259372541207, δ = 0.001342038854451493, t1 = 2.27, t2 = 8.59, t3 = 0.06
-    Iter 77 (PCA): obj = -6810.8300945867395, δ = 0.0064501287333486295, t1 = 2.29, t2 = 8.65
-    Iter 78 (CCD): obj = -6810.079085892393, δ = 0.001299214537577804, t1 = 2.32, t2 = 8.81, t3 = 0.06
-    Iter 79 (PCA): obj = -6809.676743437872, δ = 0.006344899636897539, t1 = 2.35, t2 = 8.87
-    Iter 80 (CCD): obj = -6808.965593049298, δ = 0.0012766626080034616, t1 = 2.37, t2 = 9.03, t3 = 0.06
-    Iter 81 (PCA): obj = -6808.586676794652, δ = 0.00623872268311287, t1 = 2.4, t2 = 9.09
-    Iter 82 (CCD): obj = -6807.912558663124, δ = 0.0012551259521810696, t1 = 2.42, t2 = 9.26, t3 = 0.06
-     11.951811 seconds (108.59 k allocations: 235.689 MiB)
+    Maxent initial obj = -12356.34252838294
+    Iter 1 (PCA): obj = -8052.261406317257, δ = 0.08590802942739141, t1 = 0.02, t2 = 0.06
+    Iter 2 (CCD): obj = -7794.572748302033, δ = 0.021168745196021455, t1 = 0.06, t2 = 0.22, t3 = 0.0
+    Iter 3 (PCA): obj = -7511.5813673898, δ = 0.05161131551931233, t1 = 0.08, t2 = 0.28
+    Iter 4 (CCD): obj = -7461.192156067138, δ = 0.012741504093028197, t1 = 0.11, t2 = 0.44, t3 = 0.0
+    Iter 5 (PCA): obj = -7338.12850904518, δ = 0.04789239342203643, t1 = 0.13, t2 = 0.5
+    Iter 6 (CCD): obj = -7308.932874229322, δ = 0.010536044596001392, t1 = 0.17, t2 = 0.73, t3 = 0.0
+    Iter 7 (PCA): obj = -7229.540018465826, δ = 0.036888999559287, t1 = 0.32, t2 = 0.81
+    Iter 8 (CCD): obj = -7208.676126818758, δ = 0.0093200457247459, t1 = 0.36, t2 = 0.99, t3 = 0.0
+    Iter 9 (PCA): obj = -7154.410518552632, δ = 0.03082171235011954, t1 = 0.38, t2 = 1.05
+    Iter 10 (CCD): obj = -7137.772110915227, δ = 0.008537926721557176, t1 = 0.41, t2 = 1.21, t3 = 0.01
+    Iter 11 (PCA): obj = -7099.327854453767, δ = 0.031361095723232424, t1 = 0.43, t2 = 1.27
+    Iter 12 (CCD): obj = -7085.247398507873, δ = 0.007935922476527326, t1 = 0.46, t2 = 1.43, t3 = 0.01
+    Iter 13 (PCA): obj = -7057.140483805416, δ = 0.0329120543668779, t1 = 0.48, t2 = 1.49
+    Iter 14 (CCD): obj = -7044.876172687189, δ = 0.0073148711066542684, t1 = 0.51, t2 = 1.65, t3 = 0.01
+    Iter 15 (PCA): obj = -7023.629304760571, δ = 0.03250775080424135, t1 = 0.53, t2 = 1.72
+    Iter 16 (CCD): obj = -7012.850120947548, δ = 0.006854890650307496, t1 = 0.56, t2 = 1.88, t3 = 0.01
+    Iter 17 (PCA): obj = -6996.2718588537, δ = 0.03073822907867497, t1 = 0.58, t2 = 1.94
+    Iter 18 (CCD): obj = -6986.792631541138, δ = 0.00643070491605296, t1 = 0.61, t2 = 2.1, t3 = 0.01
+    Iter 19 (PCA): obj = -6973.531686161966, δ = 0.028115057674247466, t1 = 0.63, t2 = 2.16
+    Iter 20 (CCD): obj = -6965.156942284143, δ = 0.006029270847764364, t1 = 0.66, t2 = 2.33, t3 = 0.01
+    Iter 21 (PCA): obj = -6954.364877631307, δ = 0.025782754495081224, t1 = 0.68, t2 = 2.38
+    Iter 22 (CCD): obj = -6946.941292530272, δ = 0.0056444702455843545, t1 = 0.71, t2 = 2.55, t3 = 0.01
+    Iter 23 (PCA): obj = -6938.050251132212, δ = 0.023339824851938744, t1 = 0.74, t2 = 2.61
+    Iter 24 (CCD): obj = -6931.429620290803, δ = 0.005272863979624524, t1 = 0.77, t2 = 2.77, t3 = 0.02
+    Iter 25 (PCA): obj = -6924.038356243489, δ = 0.020838710472615027, t1 = 0.78, t2 = 2.83
+    Iter 26 (CCD): obj = -6918.112876107202, δ = 0.004918165386397138, t1 = 0.81, t2 = 2.99, t3 = 0.02
+    Iter 27 (PCA): obj = -6911.905927691633, δ = 0.01859000844736733, t1 = 0.83, t2 = 3.05
+    Iter 28 (CCD): obj = -6906.577950472116, δ = 0.004577091626964406, t1 = 0.86, t2 = 3.21, t3 = 0.02
+     19.578308 seconds (65.69 M allocations: 3.483 GiB, 4.39% gc time, 77.76% compilation time)
 
 
 + Here CCD corresponds to optimization each entry ``S_{ij}`` independently, while PCA is a faster update that updates ``S_{new} = S + \delta vv'``. 
@@ -236,12 +192,12 @@ The output is a struct with the following fields
 ```julia
 struct GaussianGroupKnockoff{T<:AbstractFloat, BD<:AbstractMatrix, S<:Symmetric} <: Knockoff
     X::Matrix{T} # n × p design matrix
-    X̃::Matrix{T} # n × mp matrix storing knockoffs of X
+    Xko::Matrix{T} # n × mp matrix storing knockoffs of X
     groups::Vector{Int} # p × 1 vector of group membership
-    S::BD # p × p block-diagonal matrix of the same size as Σ. S and (m+1)/m*Σ - S are both psd
-    γs::Vector{T} # for suboptimal group construction only. These are scalars chosen so that S_i = γ_i * Σ_i
+    S::BD # p × p block-diagonal matrix of the same size as Sigma. S and (m+1)/m*Sigma - S are both psd
+    gammas::Vector{T} # for suboptimal group construction only. These are scalars chosen so that S_i = γ_i * Sigma_i
     m::Int # number of knockoffs per feature generated
-    Σ::S # p × p symmetric covariance matrix. 
+    Sigma::S # p × p symmetric covariance matrix. 
     method::Symbol # method for solving s
     obj::T # final objective value of group knockoff
 end
@@ -250,13 +206,14 @@ Given this result, lets do a sanity check: is $(m+1)/m\Sigma - S$ positive semi-
 
 
 ```julia
-eigmin((m+1)/m*Gme.Σ - Gme.S)
+m = 5
+eigmin((m+1)/m*me.Sigma - me.S)
 ```
 
 
 
 
-    0.05110858707177174
+    0.007406506932664477
 
 
 
@@ -266,7 +223,7 @@ In practice, we often do not have the true covariance matrix $\Sigma$ and the tr
 
 
 ```julia
-Gme_second_order = modelX_gaussian_group_knockoffs(X, :maxent, groups);
+me_second_order = modelX_gaussian_group_knockoffs(X, :maxent, groups);
 ```
 
 This will estimate the covariance matrix via a shrinkage estimator, see documentation API for more details. 
@@ -283,60 +240,67 @@ This model assume that conditional on the group representatives, remaining varia
 
 ```julia
 @time rME = modelX_gaussian_rep_group_knockoffs(
-    X, :maxent, μ, Σ, groups,
-    m = 5,          # number of knockoffs per variable to generate
-    tol = 0.0001,   # convergence tolerance
-    verbose=true);  # whether to print informative intermediate results
+    X, :maxent, groups, μ, Σ, 
+    m = 5,               # number of knockoffs per variable to generate
+    tol = 0.0001,        # convergence tolerance
+    rep_threshold = 0.8, # R2 threshold for choosing representatives
+    verbose=true);       # whether to print informative intermediate results
 ```
 
-    96 representatives for 500 variables, 96 optimization variables
-    Iter 1: δ = 0.14953283217899976
-    Iter 2: δ = 0.1991610624266248
-    Iter 3: δ = 0.01932169475512019
-    Iter 4: δ = 0.005068052646704513
-    Iter 5: δ = 0.0009112831450636683
-    Iter 6: δ = 0.0001230274318336222
-    Iter 7: δ = 2.4675893956049855e-5
-      0.250789 seconds (15.34 k allocations: 214.701 MiB, 14.04% gc time)
+    100 representatives for 500 variables, 108 optimization variables
+    Maxent initial obj = -1251.9504482429606
+    Iter 1 (PCA): obj = -779.3679715355898, δ = 0.396729400414175, t1 = 0.0, t2 = 0.0
+    Iter 2 (CCD): obj = -775.060406275815, δ = 0.0732451631869636, t1 = 0.0, t2 = 0.0, t3 = 0.0
+    Iter 3 (PCA): obj = -742.0320684018326, δ = 0.35854568776631224, t1 = 0.0, t2 = 0.0
+    Iter 4 (CCD): obj = -742.0051586067349, δ = 0.005820330294768541, t1 = 0.0, t2 = 0.0, t3 = 0.0
+    Iter 5 (PCA): obj = -740.2381969308991, δ = 0.06132916410588748, t1 = 0.0, t2 = 0.0
+    Iter 6 (CCD): obj = -740.2377890912246, δ = 0.0007984668584872479, t1 = 0.0, t2 = 0.0, t3 = 0.0
+    Iter 7 (PCA): obj = -739.5557857700379, δ = 0.027095277708548027, t1 = 0.0, t2 = 0.0
+    Iter 8 (CCD): obj = -739.5554840270346, δ = 0.0006939533604367249, t1 = 0.0, t2 = 0.0, t3 = 0.0
+    Iter 9 (PCA): obj = -739.364132913859, δ = 0.014219568405133007, t1 = 0.0, t2 = 0.0
+    Iter 10 (CCD): obj = -739.3640794172708, δ = 0.00026751205521428727, t1 = 0.0, t2 = 0.0, t3 = 0.0
+    Iter 11 (PCA): obj = -739.3004784935146, δ = 0.00699480271009976, t1 = 0.0, t2 = 0.0
+    Iter 12 (CCD): obj = -739.3004578732453, δ = 0.00021513370749886738, t1 = 0.0, t2 = 0.0, t3 = 0.0
+      0.255370 seconds (20.49 k allocations: 219.477 MiB)
 
 
-Note that the resulting knockoffs are still $n \times mp$
+Note that the resulting knockoffs are still $n \times mp$, so we do sample knockoffs for each variable even though the optimization was only carried out on a subset.
 
 
 ```julia
-rME.X̃
+rME.Xko
 ```
 
 
 
 
     250×2500 Matrix{Float64}:
-     -0.747196   -1.2342    -0.702566    …   1.66098    1.79071     1.40427
-      0.600782    0.109681  -1.2857         -0.81733   -0.876087   -0.539925
-     -1.4536     -1.53914   -1.76241        -1.07475   -0.982822   -0.364055
-     -1.24691    -0.878209  -0.122253        0.882058   0.698461    1.27731
-      0.669513    0.478596   0.718306       -1.11829   -0.958759    0.00439087
-     -1.04199    -0.784127  -1.82756     …   0.905066   0.748423    0.339189
-     -0.754254   -0.33635    0.442443        0.24998   -0.0987811   0.0899613
-     -2.35308    -1.81752   -2.28223        -0.164806  -0.104967   -0.447325
-     -2.20415    -2.76933   -2.59485        -0.905337  -0.745101    0.237391
-      2.20236     2.1198     1.64855        -1.02309   -1.22663    -0.745322
-     -1.46614    -0.198733  -0.508032    …  -1.75448   -2.04408    -1.30121
-      0.0185783  -0.123839  -0.524711       -0.169963  -0.0599242   0.0216337
-      0.222628    0.110846  -0.0438031      -1.09253   -1.05077    -1.2574
-      ⋮                                  ⋱                         
-     -0.112625    0.305465  -0.00886701      1.04541    1.33245     0.956846
-      0.804336    1.04927    0.665463        1.24162    0.889683    0.759236
-     -0.732725   -0.719744  -0.423113    …   0.32596    0.521656    0.352721
-     -1.94595    -0.630124  -0.136644       -2.19721   -2.19188    -1.10755
-      2.188       1.77627    0.80627        -0.649521  -0.493163   -0.953951
-     -1.44836    -1.32895   -1.02944         2.1705     1.53445     1.73658
-     -1.72554    -1.06335   -1.27667         0.702605   0.719975    0.858033
-      0.173359    0.713088   0.969075    …  -0.541989  -0.382434   -0.508017
-      1.68208     1.19315    0.725897       -0.490734  -0.324412   -0.0368795
-     -1.22018    -1.25161   -0.824222        0.543467   0.401156    0.398281
-      1.58907     1.72442    2.18569         0.363076   0.644025    0.349402
-     -0.90697    -1.35714   -2.32267         0.526776   0.0533524   0.447866
+     -2.02635    -1.7701      -1.46708     …   1.14117    1.3035      1.51521
+     -0.473473   -0.00353028  -0.446125       -1.43538   -1.61465    -1.0251
+     -0.434336   -1.23647     -1.25906        -0.6267    -0.272594   -0.431613
+      1.56359     0.278573     0.671124        0.630377   0.579558    1.0876
+      0.387161    0.856616     1.44796        -0.760866  -0.748318   -0.495847
+     -0.791019   -0.98869     -0.396516    …   1.6927     0.214687   -0.125589
+      1.26676     0.361408     0.194175       -0.823221  -0.99416    -0.529763
+      0.0446295  -0.0775493   -0.0545377      -0.143951  -0.243873    0.138882
+     -1.43764    -1.35191     -1.47821         0.372513   0.147667    0.263357
+     -0.445685   -0.409486    -0.117022       -0.539456  -0.979681   -1.13224
+     -1.12771    -0.895357    -0.875399    …  -0.428835  -0.722677   -0.0963992
+      3.24501     1.87553      1.4093          0.225577  -0.482896   -0.58531
+     -0.406158   -0.104083    -0.208398       -1.58035   -1.28124    -1.07925
+      ⋮                                    ⋱                         
+      0.0744866  -0.12148     -0.506796        2.27877    1.59647     1.08393
+     -0.639735   -0.0899262   -0.682674        2.26979    2.36776     1.23767
+     -0.743036   -0.078543     0.190691    …   0.280561   0.683024    0.604584
+      0.216802   -0.235232    -0.583439       -1.14196   -0.837435   -1.26028
+      1.39833     0.642316     0.752464       -2.25555   -2.05632    -1.58866
+     -1.35121    -1.18921     -1.48731         1.83777    1.85815     1.37793
+      0.0421617   0.0257475    0.00332313      0.120749  -0.126425   -0.245098
+     -0.257331   -0.0124215    0.259443    …  -0.228297  -0.260701   -0.571025
+      2.36186     1.48677      1.10764         0.599617   0.888141    0.566555
+     -2.95162    -1.58974     -1.50044         0.488967   0.510731   -0.0708063
+      1.8735      1.90576      1.54649         0.263684  -0.0619415   0.573829
+     -1.31383    -0.977912    -2.02039         1.34478    0.644186    0.77451
 
 
 
@@ -392,20 +356,20 @@ println("ME group knockoffs have average group FDR $(mean(group_fdrs))")
 println("ME group knockoffs took average $(mean(group_times)) seconds");
 ```
 
-    Sim 1 group-knockoff power = 1.0, FDR = 0.1, time=6.71429675
-    Sim 2 group-knockoff power = 0.7777777777777778, FDR = 0.0, time=7.203738083
-    Sim 3 group-knockoff power = 0.8888888888888888, FDR = 0.1111111111111111, time=5.199876167
-    Sim 4 group-knockoff power = 0.8, FDR = 0.0, time=7.725970875
-    Sim 5 group-knockoff power = 0.7, FDR = 0.0, time=8.715202042
-    Sim 6 group-knockoff power = 0.5, FDR = 0.0, time=8.797519166
-    Sim 7 group-knockoff power = 1.0, FDR = 0.0, time=6.052631459
-    Sim 8 group-knockoff power = 0.4444444444444444, FDR = 0.0, time=8.221799459
-    Sim 9 group-knockoff power = 0.7, FDR = 0.0, time=9.489696541
-    Sim 10 group-knockoff power = 0.5555555555555556, FDR = 0.0, time=6.281113166
+    Sim 1 group-knockoff power = 1.0, FDR = 0.1, time=9.395477167
+    Sim 2 group-knockoff power = 0.7777777777777778, FDR = 0.0, time=8.08905475
+    Sim 3 group-knockoff power = 0.8888888888888888, FDR = 0.1111111111111111, time=6.093907333
+    Sim 4 group-knockoff power = 0.8, FDR = 0.0, time=8.676211084
+    Sim 5 group-knockoff power = 0.7, FDR = 0.0, time=10.33491675
+    Sim 6 group-knockoff power = 0.5, FDR = 0.0, time=10.055918625
+    Sim 7 group-knockoff power = 1.0, FDR = 0.0, time=6.909068458
+    Sim 8 group-knockoff power = 0.4444444444444444, FDR = 0.0, time=9.819233042
+    Sim 9 group-knockoff power = 0.7, FDR = 0.0, time=11.155753209
+    Sim 10 group-knockoff power = 0.5555555555555556, FDR = 0.0, time=7.340749875
     
     ME group knockoffs have average group power 0.7366666666666667
     ME group knockoffs have average group FDR 0.021111111111111112
-    ME group knockoffs took average 7.4401843708 seconds
+    ME group knockoffs took average 8.7870290293 seconds
 
 
 For comparison, lets try the same simulation but we generate regular (non-grouped) knockoffs
@@ -450,25 +414,26 @@ println("ME (standard) knockoffs have average group FDR $(mean(regular_fdrs))")
 println("ME (standard) knockoffs took average $(mean(regular_times)) seconds");
 ```
 
-    Sim 1 nongroup-knockoff power = 0.7, FDR = 0.2222222222222222, time=5.165706875
-    Sim 2 nongroup-knockoff power = 0.7, FDR = 0.0, time=5.707978708
-    Sim 3 nongroup-knockoff power = 0.2, FDR = 0.0, time=4.334730542
-    Sim 4 nongroup-knockoff power = 0.0, FDR = 0.0, time=6.279638458
-    Sim 5 nongroup-knockoff power = 0.2, FDR = 0.0, time=7.839875459
-    Sim 6 nongroup-knockoff power = 0.0, FDR = 0.0, time=7.261292667
-    Sim 7 nongroup-knockoff power = 0.0, FDR = 0.0, time=4.292064292
-    Sim 8 nongroup-knockoff power = 0.0, FDR = 0.0, time=7.985766
-    Sim 9 nongroup-knockoff power = 0.4, FDR = 0.0, time=8.667096167
-    Sim 10 nongroup-knockoff power = 0.5, FDR = 0.0, time=5.635861
+    Sim 1 nongroup-knockoff power = 0.7, FDR = 0.2222222222222222, time=7.151643042
+    Sim 2 nongroup-knockoff power = 0.7, FDR = 0.0, time=7.163531958
+    Sim 3 nongroup-knockoff power = 0.2, FDR = 0.0, time=5.438854459
+    Sim 4 nongroup-knockoff power = 0.0, FDR = 0.0, time=7.861218583
+    Sim 5 nongroup-knockoff power = 0.2, FDR = 0.0, time=9.57650625
+    Sim 6 nongroup-knockoff power = 0.0, FDR = 0.0, time=8.987028709
+    Sim 7 nongroup-knockoff power = 0.0, FDR = 0.0, time=5.27945125
+    Sim 8 nongroup-knockoff power = 0.0, FDR = 0.0, time=9.898184792
+    Sim 9 nongroup-knockoff power = 0.4, FDR = 0.0, time=10.721144208
+    Sim 10 nongroup-knockoff power = 0.5, FDR = 0.0, time=6.266258084
     
     ME (standard) knockoffs have average group power 0.26999999999999996
     ME (standard) knockoffs have average group FDR 0.02222222222222222
-    ME (standard) knockoffs took average 6.3170010168 seconds
+    ME (standard) knockoffs took average 7.8343821335 seconds
 
 
 ## Conclusion
 
-+ When variables are highly correlated so that one cannot find exact discoveries, group knockoffs may be useful for improving power as it identifies whether a group of variables are non-null without having to pinpoint the exact discovery.
++ When variables are highly correlated so that one cannot find exact discoveries, group knockoffs may be useful for improving power as it identifies whether a group of variables are non-null without having to pinpoint the exact discovery. It trades resolution to discover more causal signals.
 + Group knockoffs control the group FDR to be below the target FDR level. 
 + Groups do not have to be contiguous
-
++ With modest group sizes, group knockoff's compute time is roughly equivalent to standard (non-grouped) knockoffs
++ When $p$ is too large or group sizes are too large, one can employ representative group knockoff strategy. Empirically it has better power and much faster compute times. 

@@ -75,7 +75,7 @@ function fit_lasso(
     ) where T <: AbstractFloat
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     X = ko.X
-    X̃ = ko.X̃
+    X̃ = ko.Xko
     m = ko.m
     p = size(X, 2)
     # cross validate for λ, then refit Lasso with best λ
@@ -203,7 +203,7 @@ function fit_marginal(
     filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
     ) where T <: AbstractFloat
     X = ko.X
-    X̃ = ko.X̃
+    X̃ = ko.Xko
     m = ko.m
     n, p = size(X)
     # compute feature importance statistics (squared marginal Z score abs2.(X'y)/n)

@@ -5,10 +5,10 @@ function predict(
     ŷs = Vector{T}[]
     d = model.d
     link = canonicallink(d)
-    for i in 1:length(model.βs)
+    for i in 1:length(model.betas)
         # compute mean: η = a0 .+ Xβ̂
         η = fill(model.a0[i], size(xtest, 1))
-        BLAS.gemv!('N', one(T), xtest, model.βs[i], one(T), η)
+        BLAS.gemv!('N', one(T), xtest, model.betas[i], one(T), η)
         # apply inverse link to get mean
         μ = GLM.linkinv.(link, η)
         push!(ŷs, μ)
