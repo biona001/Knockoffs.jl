@@ -948,6 +948,12 @@ function solve_group_sdp_hybrid(
             cholupdate!, choldowndate!,
             u, w, ei, ej, verbose=verbose
         )
+        if inner_pca_iter > 0 # update block objectives
+            for (g, idx) in enumerate(group_idx)
+                group_objectives[g] = 
+                    _sdp_block_objective(@view(Σ[idx, idx]), @view(S[idx, idx]))
+            end
+        end
         # check convergence
         converged1 && converged2 && break
     end
