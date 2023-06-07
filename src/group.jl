@@ -40,7 +40,8 @@ function _sdp_block_objective(Σg, Sg)
             obj += abs(Σg[i, j] - Sg[i, j])
         end
     end
-    return obj
+    g = size(Σg, 1)
+    return obj / g^2
 end
 
 """
@@ -1018,6 +1019,7 @@ function _sdp_ccd_iter!(
         obj_new = obj
         offset = 0
         for b in 1:blocks
+            group_size = group_sizes[b]
             #
             # optimize diagonal entries
             #
@@ -1033,7 +1035,7 @@ function _sdp_ccd_iter!(
                 lb ≥ ub && continue
                 # compute new δ, making sure it is in feasible region
                 δj = clamp(Σ[j, j] - S[j, j], lb, ub)
-                change_obj = abs(Σ[j, j]-S[j, j]-δj) - abs(Σ[j, j]-S[j, j])
+                change_obj = (abs(Σ[j, j]-S[j, j]-δj) - abs(Σ[j, j]-S[j, j])) / group_size^2
                 if abs(δj) < 1e-15 || isnan(δj) || isinf(δj) || change_obj > 0.01
                     continue
                 end
@@ -1076,7 +1078,7 @@ function _sdp_ccd_iter!(
                 lb ≥ ub && continue
                 # find δ ∈ [lb, ub] that maximizes objective
                 δ = clamp(Σ[i, j] - S[i, j], lb, ub)
-                change_obj = 2*abs(Σ[i, j]-S[i, j]-δ) - 2*abs(Σ[i, j]-S[i, j])
+                change_obj = (2*abs(Σ[i, j]-S[i, j]-δ) - 2*abs(Σ[i, j]-S[i, j])) / group_size^2
                 if abs(δ) < 1e-15 || isnan(δ) || isinf(δ) || change_obj > 0.01
                     continue
                 end
@@ -1607,14 +1609,15 @@ function diag_mvr_obj_root(m, ajj, bjj, cjj, djj)
     return x1, x2
 end
 function pca_sdp_obj(δ, Σg, Sg, v)
-    size(Σg, 1) == size(Sg, 1) == length(v) || error("Dimension mismatch!")
+    g = size(Σg, 1)
+    g == size(Sg, 1) == length(v) || error("Dimension mismatch!")
     obj = zero(eltype(v))
     @inbounds for j in eachindex(v)
         @simd for i in eachindex(v)
             obj += abs(Σg[i, j] - Sg[i, j] - δ*v[i]*v[j])
         end
     end
-    return obj
+    return obj / g^2
 end
 
 function rank1_cholesky_update!(L, C, j, δ, store1, store2, 
