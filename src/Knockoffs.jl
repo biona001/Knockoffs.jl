@@ -42,6 +42,10 @@ export
     solve_s, 
     solve_s_group,
     solve_s_graphical_group,
+    # specific solvers
+    solve_equi, solve_max_entropy, solve_sdp_ccd, solve_SDP, solve_sdp_ccd, solve_MVR,
+    solve_group_equi, solve_group_max_entropy_hybrid, 
+    solve_group_mvr_hybrid, solve_group_sdp_hybrid, 
     # utilities for running knockoff filter
     mk_threshold,
     threshold, 

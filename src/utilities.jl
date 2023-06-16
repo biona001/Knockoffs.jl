@@ -12,11 +12,12 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_ccd` fast SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
-    + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
-        [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
+    For a list of available options, see [`solve_MVR`](@ref),
+    [`solve_max_entropy`](@ref), [`solve_sdp_ccd`](@ref), [`solve_sdp`](@ref), or
+    [`solve_equi`](@ref)
 
 # Reference
 1. "Controlling the false discovery rate via Knockoffs" by Barber and Candes (2015).
@@ -727,6 +728,24 @@ function download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
     end
 end
 
+"""
+    simulate_block_covariance(groups, ρ, γ, num_v, w)
+
+Simulates a block covariance matrix similar to the one in `Dai & Barber 2016, 
+The knockoff filter for FDR control in group-sparse and multitask regression`. 
+That is, all diagonal elements will be 1, correlation within groups will be `ρ`,
+and correlation between groups will be `ρ*γ`. 
+
+# Inputs
++ `groups`: Vector of group membership
++ `ρ`: within group correlation 
++ `γ`: between group correlation
+
+# Optional arguments
++ `num_v`: Number of added rank 1 update `Σ + v1*v1' + ... + vn*vn'` where `v` 
+    is iid `N(0, w)` (default 0)
++ `w`: variance of the rank 1 update used in `num_v` (default 1)
+"""
 function simulate_block_covariance(
     groups::Vector{Int},
     ρ::T, # within group correlation 

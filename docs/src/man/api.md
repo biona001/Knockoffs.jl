@@ -26,6 +26,25 @@ Pages = ["api.md"]
   solve_s_graphical_group
 ```
 
+## Regular knockoffs Solvers
+
+```@docs
+  solve_equi
+  solve_max_entropy
+  solve_MVR
+  solve_sdp_ccd
+  solve_SDP
+```
+
+## Group knockoffs Solvers
+
+```@docs
+  solve_group_equi
+  solve_group_max_entropy_hybrid
+  solve_group_mvr_hybrid
+  solve_group_sdp_hybrid
+```
+
 ## Other functions
 
 ```@docs

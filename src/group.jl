@@ -59,8 +59,7 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
 + `method`: Method for constructing knockoffs. Options include
     * `:maxent`: (recommended) for fully general maximum entropy group knockoffs
     * `:mvr`: for fully general minimum variance-based reconstructability (MVR) group 
-        knockoffs (contrary to using `:maxent`, we don't do line search for MVR
-        group knockoffs because evaluating the objective is expensive)
+        knockoffs
     * `:equi`: for equi-correlated knockoffs. This is the methodology proposed in
         `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
@@ -314,8 +313,7 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
 + `method`: Method for constructing knockoffs. Options include
     * `:maxent`: (recommended) for fully general maximum entropy group knockoffs
     * `:mvr`: for fully general minimum variance-based reconstructability (MVR) group 
-        knockoffs (contrary to using `:maxent`, we don't do line search for MVR
-        group knockoffs because evaluating the objective is expensive)
+        knockoffs
     * `:equi`: for equi-correlated knockoffs. This is the methodology proposed in
         `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
@@ -326,7 +324,10 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
         using an interior point solver. 
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
-    less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
+    less stringent convergence tolerance, specify `tol = 0.001`.
+    For a list of available options, see [`solve_group_mvr_hybrid`](@ref),
+    [`solve_group_max_entropy_hybrid`](@ref), [`solve_group_sdp_hybrid`](@ref), or
+    [`solve_group_equi`](@ref)
 
 # Output
 + `S`: A matrix solved so that `(m+1)/m*Σ - S ⪰ 0` and `S ⪰ 0`
@@ -833,6 +834,36 @@ function solve_group_SDP_full(
     return JuMP.value.(S), T[], obj
 end
 
+"""
+    solve_group_max_entropy_hybrid(Σ, groups, [outer_iter=100], [inner_pca_iter=1],
+        [inner_ccd_iter=1], [tol=0.0001], [ϵ=1e-6], [m=1], [robust=false], [verbose=false])
+
+Solves the group-knockoff optimization problem based on Maximum Entropy objective.
+Users should call `solve_s_group` instead of this function. 
+
+# Inputs
++ `Σ`: Correlation matrix
++ `groups`: Group membership vector 
+
+# Optional inputs
++ `outer_iter`: Maximum number of outer iterations. Each outer iteration will
+    perform `inner_pca_iter` PCA updates `inner_ccd_iter` full optimization 
+    updates (default = 100).
++ `inner_pca_iter`: Number of full PCA updates before changing to fully
+    general coordinate descent updates (default = 1)
++ `inner_ccd_iter`: Number of full general coordinate descent updates before changing
+    to PCA updates (default = 1)
++ `tol`: convergence tolerance. Algorithm converges when 
+    `abs((obj_new-obj_old)/obj_old) < tol` OR when changes in `S` matrix falls 
+    below 1e-4
++ `ϵ`: tolerance added to the lower and upper bound, prevents numerical issues
+    (default = `1e-6`)
++ `m`: Number of knockoffs per variable (defaults `1`)
++ `robust`: whether to use "robust" Cholesky updates. If `robust=true`, alg will
+    be ~10x slower, only use this if `robust=false` causes cholesky updates to fail.
+    (default `false`)
++ `verbose`: Whether to print intermediate results (default `false`)
+"""
 function solve_group_max_entropy_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
@@ -884,6 +915,36 @@ function solve_group_max_entropy_hybrid(
     return S, T[], obj, L, C
 end
 
+"""
+    solve_group_sdp_hybrid(Σ, groups, [outer_iter=100], [inner_pca_iter=1],
+        [inner_ccd_iter=1], [tol=0.0001], [ϵ=1e-6], [m=1], [robust=false], [verbose=false])
+
+Solves the group-knockoff optimization problem based on SDP objective.
+Users should call `solve_s_group` instead of this function. 
+
+# Inputs
++ `Σ`: Correlation matrix
++ `groups`: Group membership vector 
+
+# Optional inputs
++ `outer_iter`: Maximum number of outer iterations. Each outer iteration will
+    perform `inner_pca_iter` PCA updates `inner_ccd_iter` full optimization 
+    updates (default = 100).
++ `inner_pca_iter`: Number of full PCA updates before changing to fully
+    general coordinate descent updates (default = 1)
++ `inner_ccd_iter`: Number of full general coordinate descent updates before changing
+    to PCA updates (default = 1)
++ `tol`: convergence tolerance. Algorithm converges when 
+    `abs((obj_new-obj_old)/obj_old) < tol` OR when changes in `S` matrix falls 
+    below 1e-4
++ `ϵ`: tolerance added to the lower and upper bound, prevents numerical issues
+    (default = `1e-6`)
++ `m`: Number of knockoffs per variable (defaults `1`)
++ `robust`: whether to use "robust" Cholesky updates. If `robust=true`, alg will
+    be ~10x slower, only use this if `robust=false` causes cholesky updates to fail.
+    (default `false`)
++ `verbose`: Whether to print intermediate results (default `false`)
+"""
 function solve_group_sdp_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
@@ -960,6 +1021,36 @@ function solve_group_sdp_hybrid(
     return S, T[], obj, L, C
 end
 
+"""
+    solve_group_mvr_hybrid(Σ, groups, [outer_iter=100], [inner_pca_iter=1],
+        [inner_ccd_iter=1], [tol=0.0001], [ϵ=1e-6], [m=1], [robust=false], [verbose=false])
+
+Solves the group-knockoff optimization problem based on MVR objective.
+Users should call `solve_s_group` instead of this function. 
+
+# Inputs
++ `Σ`: Correlation matrix
++ `groups`: Group membership vector 
+
+# Optional inputs
++ `outer_iter`: Maximum number of outer iterations. Each outer iteration will
+    perform `inner_pca_iter` PCA updates `inner_ccd_iter` full optimization 
+    updates (default = 100).
++ `inner_pca_iter`: Number of full PCA updates before changing to fully
+    general coordinate descent updates (default = 1)
++ `inner_ccd_iter`: Number of full general coordinate descent updates before changing
+    to PCA updates (default = 1)
++ `tol`: convergence tolerance. Algorithm converges when 
+    `abs((obj_new-obj_old)/obj_old) < tol` OR when changes in `S` matrix falls 
+    below 1e-4
++ `ϵ`: tolerance added to the lower and upper bound, prevents numerical issues
+    (default = `1e-6`)
++ `m`: Number of knockoffs per variable (defaults `1`)
++ `robust`: whether to use "robust" Cholesky updates. If `robust=true`, alg will
+    be ~10x slower, only use this if `robust=false` causes cholesky updates to fail.
+    (default `false`)
++ `verbose`: Whether to print intermediate results (default `false`)
+"""
 function solve_group_mvr_hybrid(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int};
@@ -1786,7 +1877,7 @@ function hc_partition_groups(
     return groups
 end
 
-function hc_partition_groups(X::AbstractMatrix; cutoff = 0.7, min_clusters = 1, 
+function hc_partition_groups(X::AbstractMatrix; cutoff = 0.5, min_clusters = 1, 
     linkage=:complete, force_contiguous=false)
     return hc_partition_groups(Symmetric(cor(X)), cutoff=cutoff, 
         linkage=linkage,min_clusters=min_clusters, 
