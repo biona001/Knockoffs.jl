@@ -80,10 +80,13 @@ function fit_lasso(
     p = size(X, 2)
     # cross validate for λ, then refit Lasso with best λ
     XX̃ = hcat(X, X̃)
+    perm = collect(1:(m+1)*p) |> shuffle!
+    XX̃ .= @view(XX̃[:, perm]) # permute columns of XX̃ so there's no ordering bias
     knockoff_cv = glmnetcv(XX̃, ytmp, d; kwargs...)
     λbest = knockoff_cv.lambda[argmin(knockoff_cv.meanloss)]
     best_fit = glmnet(XX̃, y, lambda=[λbest])
     βestim = vec(best_fit.betas) |> Vector{T}
+    βestim .= @view(βestim[invperm(perm)]) # permute beta back
     a0 = best_fit.a0[1]
     # feature importance statistics
     T0 = βestim[1:p]
