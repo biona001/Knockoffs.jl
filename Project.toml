@@ -1,7 +1,7 @@
 name = "Knockoffs"
 uuid = "878bf26d-0c49-448a-9df5-b057c815d613"
 authors = ["Benjamin Chu <benchu99@hotmail.com> and contributors"]
-version = "1.1.0"
+version = "1.1.1"
 
 [deps]
 BlockDiagonals = "0a1fb500-61f7-11e9-3c65-f5ef3456f9f0"
@@ -36,6 +36,7 @@ CSV = "0.10"
 Clustering = "0.15.1"
 CovarianceEstimation = "0.2.8"
 DataFrames = "1"
+DelimitedFiles = "1"
 Distributions = "0.25"
 ElasticArrays = "1"
 GLM = "1"
