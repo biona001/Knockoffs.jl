@@ -29,16 +29,6 @@ using ToeplitzMatrices
 using Distributions
 ```
 
-    [36m[1m[ [22m[39m[36m[1mInfo: [22m[39mPrecompiling StatsKit [2cb19f9e-ec4d-5c53-8573-a4542a68d3f0]
-    [32mMinimizing 2 	 Time: 0:00:00 (88.81 ms/it)[39m[K
-    [32mMinimizing 57 	 Time: 0:00:00 ( 4.06 ms/it)[39m[K
-    [32mMinimizing 34 	 Time: 0:00:00 ( 2.97 ms/it)[39m[K
-    [32mMinimizing 119 	 Time: 0:00:00 ( 1.72 ms/it)[39m[K
-    [32mMinimizing 203 	 Time: 0:00:00 ( 1.51 ms/it)[39m[K
-    [32mMinimizing 222 	 Time: 0:00:00 ( 1.48 ms/it)[39m[K
-    [36m[1m[ [22m[39m[36m[1mInfo: [22m[39mPrecompiling ToeplitzMatrices [c751599d-da0a-543b-9d20-d0a503d91d24]
-
-
 ## Gaussian model-X group knockoffs with known mean and covariance
 
 To illustrate, lets simulate data $\mathbf{X}$ with covariance $\Sigma$ and mean $\mu$. Our model is
@@ -65,12 +55,13 @@ Given $n$ iid samples from the above distribution, we will generate knockoffs ac
 (X, \tilde{X}) \sim N
 \left(0, \ 
 \begin{pmatrix}
-    \Sigma & \Sigma - diag(s)\\
-    \Sigma - diag(s) & \Sigma
+    \Sigma & \Sigma - S\\
+    \Sigma - S & \Sigma
 \end{pmatrix}
 \right)
 \end{aligned}
 ```
+where $S$ is a block-diagonal matrix satisfying $S \succeq 0$ and $2\Sigma - S \succeq 0$. 
 
 Because variables are highly correlated with its neighbors ($\rho = 0.9$), it becomes difficult to distinguish which among a bunch of highly correlated variables are truly causal. Thus, group knockoffs test whether a *group* of variables have any signal should have better power than standard (single-variable) knockoffs. 
 
@@ -149,36 +140,36 @@ Generate group knockoffs with the exported function [`modelX_gaussian_group_knoc
     verbose=true);      # whether to print informative intermediate results
 ```
 
-    Maxent initial obj = -12356.34252838294
-    Iter 1 (PCA): obj = -8052.261406317257, δ = 0.08590802942739141, t1 = 0.02, t2 = 0.06
-    Iter 2 (CCD): obj = -7794.572748302033, δ = 0.021168745196021455, t1 = 0.06, t2 = 0.22, t3 = 0.0
-    Iter 3 (PCA): obj = -7511.5813673898, δ = 0.05161131551931233, t1 = 0.08, t2 = 0.28
-    Iter 4 (CCD): obj = -7461.192156067138, δ = 0.012741504093028197, t1 = 0.11, t2 = 0.44, t3 = 0.0
-    Iter 5 (PCA): obj = -7338.12850904518, δ = 0.04789239342203643, t1 = 0.13, t2 = 0.5
-    Iter 6 (CCD): obj = -7308.932874229322, δ = 0.010536044596001392, t1 = 0.17, t2 = 0.73, t3 = 0.0
-    Iter 7 (PCA): obj = -7229.540018465826, δ = 0.036888999559287, t1 = 0.32, t2 = 0.81
-    Iter 8 (CCD): obj = -7208.676126818758, δ = 0.0093200457247459, t1 = 0.36, t2 = 0.99, t3 = 0.0
-    Iter 9 (PCA): obj = -7154.410518552632, δ = 0.03082171235011954, t1 = 0.38, t2 = 1.05
-    Iter 10 (CCD): obj = -7137.772110915227, δ = 0.008537926721557176, t1 = 0.41, t2 = 1.21, t3 = 0.01
-    Iter 11 (PCA): obj = -7099.327854453767, δ = 0.031361095723232424, t1 = 0.43, t2 = 1.27
-    Iter 12 (CCD): obj = -7085.247398507873, δ = 0.007935922476527326, t1 = 0.46, t2 = 1.43, t3 = 0.01
-    Iter 13 (PCA): obj = -7057.140483805416, δ = 0.0329120543668779, t1 = 0.48, t2 = 1.49
-    Iter 14 (CCD): obj = -7044.876172687189, δ = 0.0073148711066542684, t1 = 0.51, t2 = 1.65, t3 = 0.01
-    Iter 15 (PCA): obj = -7023.629304760571, δ = 0.03250775080424135, t1 = 0.53, t2 = 1.72
-    Iter 16 (CCD): obj = -7012.850120947548, δ = 0.006854890650307496, t1 = 0.56, t2 = 1.88, t3 = 0.01
-    Iter 17 (PCA): obj = -6996.2718588537, δ = 0.03073822907867497, t1 = 0.58, t2 = 1.94
-    Iter 18 (CCD): obj = -6986.792631541138, δ = 0.00643070491605296, t1 = 0.61, t2 = 2.1, t3 = 0.01
-    Iter 19 (PCA): obj = -6973.531686161966, δ = 0.028115057674247466, t1 = 0.63, t2 = 2.16
-    Iter 20 (CCD): obj = -6965.156942284143, δ = 0.006029270847764364, t1 = 0.66, t2 = 2.33, t3 = 0.01
-    Iter 21 (PCA): obj = -6954.364877631307, δ = 0.025782754495081224, t1 = 0.68, t2 = 2.38
-    Iter 22 (CCD): obj = -6946.941292530272, δ = 0.0056444702455843545, t1 = 0.71, t2 = 2.55, t3 = 0.01
-    Iter 23 (PCA): obj = -6938.050251132212, δ = 0.023339824851938744, t1 = 0.74, t2 = 2.61
-    Iter 24 (CCD): obj = -6931.429620290803, δ = 0.005272863979624524, t1 = 0.77, t2 = 2.77, t3 = 0.02
-    Iter 25 (PCA): obj = -6924.038356243489, δ = 0.020838710472615027, t1 = 0.78, t2 = 2.83
-    Iter 26 (CCD): obj = -6918.112876107202, δ = 0.004918165386397138, t1 = 0.81, t2 = 2.99, t3 = 0.02
-    Iter 27 (PCA): obj = -6911.905927691633, δ = 0.01859000844736733, t1 = 0.83, t2 = 3.05
-    Iter 28 (CCD): obj = -6906.577950472116, δ = 0.004577091626964406, t1 = 0.86, t2 = 3.21, t3 = 0.02
-     19.578308 seconds (65.69 M allocations: 3.483 GiB, 4.39% gc time, 77.76% compilation time)
+    Maxent initial obj = -12356.342528382938
+    Iter 1 (PCA): obj = -8052.261406317261, δ = 0.08590802942739098, t1 = 0.11, t2 = 0.06
+    Iter 2 (CCD): obj = -7794.572748302039, δ = 0.021168745196021146, t1 = 0.17, t2 = 0.18, t3 = 0.0
+    Iter 3 (PCA): obj = -7511.581367389803, δ = 0.051611315519312195, t1 = 0.28, t2 = 0.24
+    Iter 4 (CCD): obj = -7461.192156067141, δ = 0.012741504093028691, t1 = 0.32, t2 = 0.37, t3 = 0.0
+    Iter 5 (PCA): obj = -7338.128509045188, δ = 0.047892393422037396, t1 = 0.39, t2 = 0.43
+    Iter 6 (CCD): obj = -7308.932874229332, δ = 0.01053604459600144, t1 = 0.43, t2 = 0.55, t3 = 0.0
+    Iter 7 (PCA): obj = -7229.540018465837, δ = 0.036888999559287136, t1 = 0.51, t2 = 0.61
+    Iter 8 (CCD): obj = -7208.67612681877, δ = 0.009320045724745799, t1 = 0.55, t2 = 0.74, t3 = 0.0
+    Iter 9 (PCA): obj = -7154.410518552644, δ = 0.030821712350118435, t1 = 0.62, t2 = 0.79
+    Iter 10 (CCD): obj = -7137.772110915237, δ = 0.00853792672155702, t1 = 0.66, t2 = 0.93, t3 = 0.0
+    Iter 11 (PCA): obj = -7099.32785445378, δ = 0.03136109572323209, t1 = 0.77, t2 = 0.98
+    Iter 12 (CCD): obj = -7085.247398507887, δ = 0.007935922476527225, t1 = 0.81, t2 = 1.11, t3 = 0.0
+    Iter 13 (PCA): obj = -7057.1404838054295, δ = 0.03291205436687801, t1 = 0.92, t2 = 1.17
+    Iter 14 (CCD): obj = -7044.876172687204, δ = 0.007314871106654346, t1 = 0.96, t2 = 1.3, t3 = 0.01
+    Iter 15 (PCA): obj = -7023.629304760585, δ = 0.03250775080424084, t1 = 1.06, t2 = 1.36
+    Iter 16 (CCD): obj = -7012.850120947562, δ = 0.006854890650307599, t1 = 1.11, t2 = 1.49, t3 = 0.01
+    Iter 17 (PCA): obj = -6996.271858853715, δ = 0.030738229078674354, t1 = 1.21, t2 = 1.55
+    Iter 18 (CCD): obj = -6986.792631541152, δ = 0.006430704916053182, t1 = 1.25, t2 = 1.68, t3 = 0.01
+    Iter 19 (PCA): obj = -6973.531686161982, δ = 0.028115057674247407, t1 = 1.37, t2 = 1.74
+    Iter 20 (CCD): obj = -6965.156942284159, δ = 0.006029270847763139, t1 = 1.41, t2 = 1.87, t3 = 0.01
+    Iter 21 (PCA): obj = -6954.364877631323, δ = 0.02578275449508116, t1 = 1.48, t2 = 1.93
+    Iter 22 (CCD): obj = -6946.941292530288, δ = 0.005644470245583583, t1 = 1.52, t2 = 2.06, t3 = 0.01
+    Iter 23 (PCA): obj = -6938.0502511322275, δ = 0.023339824851938414, t1 = 1.58, t2 = 2.11
+    Iter 24 (CCD): obj = -6931.429620290818, δ = 0.005272863979625453, t1 = 1.62, t2 = 2.24, t3 = 0.01
+    Iter 25 (PCA): obj = -6924.0383562435045, δ = 0.02083871047261553, t1 = 1.67, t2 = 2.29
+    Iter 26 (CCD): obj = -6918.112876107218, δ = 0.004918165386397036, t1 = 1.71, t2 = 2.42, t3 = 0.01
+    Iter 27 (PCA): obj = -6911.905927691649, δ = 0.018590008447367395, t1 = 1.78, t2 = 2.48
+    Iter 28 (CCD): obj = -6906.577950472131, δ = 0.00457709162696512, t1 = 1.83, t2 = 2.61, t3 = 0.01
+      4.830540 seconds (42.09 k allocations: 236.493 MiB, 0.18% gc time)
 
 
 + Here CCD corresponds to optimization each entry ``S_{ij}`` independently, while PCA is a faster update that updates ``S_{new} = S + \delta vv'``. 
@@ -213,7 +204,7 @@ eigmin((m+1)/m*me.Sigma - me.S)
 
 
 
-    0.007406506932664477
+    0.007406506932664684
 
 
 
@@ -228,14 +219,14 @@ me_second_order = modelX_gaussian_group_knockoffs(X, :maxent, groups);
 
 This will estimate the covariance matrix via a shrinkage estimator, see documentation API for more details. 
 
-## Representative group knockoffs
+## Group knockoffs based on conditional independence assumption
 
-One can choose a few representatives from each group and generate *representative* group knockoffs, with the following advantage:
+One can choose a few representatives from each group and generate *representative* group knockoffs via [`modelX_gaussian_rep_group_knockoffs`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.modelX_gaussian_rep_group_knockoffs). Its advantages include:
 
 + Dramatically improved computational efficiency, since the group-knockoff optimization problem only needs to be carried out on the representative variables.
 + Improved power over standard group knockoffs, since the exchangeability have to be satisfied for less variables, so the resulting knockoffs are more "flexible"
 
-This model assume that conditional on the group representatives, remaining variables are independent by groups. Although this assumption is not always met, we find that group-FDR is never really violated in our experiments with real or simulated data. 
+This model assume that conditional on the group representatives, remaining variables are independent by groups. Although this assumption is not always met, we find that group-FDR is never really violated when `rep_threshold = 0.5` in our experiments with real or simulated data. 
 
 
 ```julia
@@ -243,28 +234,24 @@ This model assume that conditional on the group representatives, remaining varia
     X, :maxent, groups, μ, Σ, 
     m = 5,               # number of knockoffs per variable to generate
     tol = 0.0001,        # convergence tolerance
-    rep_threshold = 0.8, # R2 threshold for choosing representatives
+    rep_threshold = 0.5, # R2 threshold for choosing representatives
     verbose=true);       # whether to print informative intermediate results
 ```
 
-    100 representatives for 500 variables, 108 optimization variables
-    Maxent initial obj = -1251.9504482429606
-    Iter 1 (PCA): obj = -779.3679715355898, δ = 0.396729400414175, t1 = 0.0, t2 = 0.0
-    Iter 2 (CCD): obj = -775.060406275815, δ = 0.0732451631869636, t1 = 0.0, t2 = 0.0, t3 = 0.0
-    Iter 3 (PCA): obj = -742.0320684018326, δ = 0.35854568776631224, t1 = 0.0, t2 = 0.0
-    Iter 4 (CCD): obj = -742.0051586067349, δ = 0.005820330294768541, t1 = 0.0, t2 = 0.0, t3 = 0.0
-    Iter 5 (PCA): obj = -740.2381969308991, δ = 0.06132916410588748, t1 = 0.0, t2 = 0.0
-    Iter 6 (CCD): obj = -740.2377890912246, δ = 0.0007984668584872479, t1 = 0.0, t2 = 0.0, t3 = 0.0
-    Iter 7 (PCA): obj = -739.5557857700379, δ = 0.027095277708548027, t1 = 0.0, t2 = 0.0
-    Iter 8 (CCD): obj = -739.5554840270346, δ = 0.0006939533604367249, t1 = 0.0, t2 = 0.0, t3 = 0.0
-    Iter 9 (PCA): obj = -739.364132913859, δ = 0.014219568405133007, t1 = 0.0, t2 = 0.0
-    Iter 10 (CCD): obj = -739.3640794172708, δ = 0.00026751205521428727, t1 = 0.0, t2 = 0.0, t3 = 0.0
-    Iter 11 (PCA): obj = -739.3004784935146, δ = 0.00699480271009976, t1 = 0.0, t2 = 0.0
-    Iter 12 (CCD): obj = -739.3004578732453, δ = 0.00021513370749886738, t1 = 0.0, t2 = 0.0, t3 = 0.0
-      0.255370 seconds (20.49 k allocations: 219.477 MiB)
+    96 representatives for 500 variables, 96 optimization variables
+    Iter 1: δ = 0.1495328321789994
+    Iter 2: δ = 0.19916106242709308
+    Iter 3: δ = 0.019321694755150942
+    Iter 4: δ = 0.005068052646868659
+    Iter 5: δ = 0.0009112831450813208
+    Iter 6: δ = 0.00012302743183395526
+    Iter 7: δ = 2.467589395582781e-5
+      0.341659 seconds (15.35 k allocations: 214.558 MiB, 5.78% gc time)
 
 
-Note that the resulting knockoffs are still $n \times mp$, so we do sample knockoffs for each variable even though the optimization was only carried out on a subset.
+Observe the 96/500 variables were selected as representatives, resulting in $>10$ times speedup compared to standard group knockoffs. 
+
+Also, the resulting knockoffs is still $n \times mp$, so we do sample knockoffs for each variable even though the optimization was only carried out on a subset.
 
 
 ```julia
@@ -275,32 +262,32 @@ rME.Xko
 
 
     250×2500 Matrix{Float64}:
-     -2.02635    -1.7701      -1.46708     …   1.14117    1.3035      1.51521
-     -0.473473   -0.00353028  -0.446125       -1.43538   -1.61465    -1.0251
-     -0.434336   -1.23647     -1.25906        -0.6267    -0.272594   -0.431613
-      1.56359     0.278573     0.671124        0.630377   0.579558    1.0876
-      0.387161    0.856616     1.44796        -0.760866  -0.748318   -0.495847
-     -0.791019   -0.98869     -0.396516    …   1.6927     0.214687   -0.125589
-      1.26676     0.361408     0.194175       -0.823221  -0.99416    -0.529763
-      0.0446295  -0.0775493   -0.0545377      -0.143951  -0.243873    0.138882
-     -1.43764    -1.35191     -1.47821         0.372513   0.147667    0.263357
-     -0.445685   -0.409486    -0.117022       -0.539456  -0.979681   -1.13224
-     -1.12771    -0.895357    -0.875399    …  -0.428835  -0.722677   -0.0963992
-      3.24501     1.87553      1.4093          0.225577  -0.482896   -0.58531
-     -0.406158   -0.104083    -0.208398       -1.58035   -1.28124    -1.07925
-      ⋮                                    ⋱                         
-      0.0744866  -0.12148     -0.506796        2.27877    1.59647     1.08393
-     -0.639735   -0.0899262   -0.682674        2.26979    2.36776     1.23767
-     -0.743036   -0.078543     0.190691    …   0.280561   0.683024    0.604584
-      0.216802   -0.235232    -0.583439       -1.14196   -0.837435   -1.26028
-      1.39833     0.642316     0.752464       -2.25555   -2.05632    -1.58866
-     -1.35121    -1.18921     -1.48731         1.83777    1.85815     1.37793
-      0.0421617   0.0257475    0.00332313      0.120749  -0.126425   -0.245098
-     -0.257331   -0.0124215    0.259443    …  -0.228297  -0.260701   -0.571025
-      2.36186     1.48677      1.10764         0.599617   0.888141    0.566555
-     -2.95162    -1.58974     -1.50044         0.488967   0.510731   -0.0708063
-      1.8735      1.90576      1.54649         0.263684  -0.0619415   0.573829
-     -1.31383    -0.977912    -2.02039         1.34478    0.644186    0.77451
+     -1.65214    -1.2264     -0.90357    …   2.37346      2.19603     1.85045
+      1.04509     0.742908    0.276858      -0.19256     -0.127092   -0.590027
+      0.202973   -1.17446    -0.66758       -0.493992    -0.240993    0.115518
+      0.718775    0.878739    0.538289       1.44572      1.66234     1.60899
+     -0.432394    0.0979436   1.42076       -0.401493    -0.235617   -0.273724
+     -1.06394    -1.1612     -0.668314   …   1.68086      0.518035    0.473119
+      1.51455     1.30363     0.229759       0.00686854   0.035861   -0.201092
+      0.0646647  -1.05129    -0.120897      -0.621302    -0.287705    0.248626
+     -1.91251    -1.13833    -2.38578        1.17047      0.782406    0.256628
+      0.202989   -0.707357   -0.793931      -0.538658    -0.940356   -0.54821
+     -0.143222   -0.617772   -0.667247   …  -0.582162     0.0561363  -0.0149074
+      1.99224     1.03271     0.248894      -0.101577    -0.766011   -1.01534
+     -0.586636   -0.585003    0.0514114     -1.2039      -0.702172   -0.708949
+      ⋮                                  ⋱                           
+     -0.643646   -0.0710437  -0.380527      -0.395322    -0.667184   -0.0555226
+     -0.36097    -0.174519    1.15659        0.810179     0.23772     0.279265
+      1.00372     0.525153    0.509426   …   0.893199     0.391243    0.0832597
+      0.237773   -0.0549151  -1.04705       -1.05313     -1.19608    -0.863732
+      0.419572    0.611245    1.18161       -0.831543    -0.680479   -1.24888
+     -1.82841    -1.42881    -1.34797        2.41993      2.69197     2.47547
+     -1.0607     -0.798633   -0.798233      -0.578312    -0.510215   -0.0882358
+     -0.622852   -0.0162713   0.743521   …  -0.132991    -0.514501   -0.962194
+     -0.165246    1.11386     0.689408      -0.14881     -0.6484     -0.456806
+     -0.500523   -0.421848   -0.481629       1.01061      0.982484    0.529933
+      2.10645     2.79504     2.12414        0.824754     0.530422    0.777875
+     -0.391608   -0.45099    -0.856056       0.461328    -0.396119   -0.599234
 
 
 
