@@ -28,9 +28,9 @@ data.
 function fit_lasso(
     y::AbstractVecOrMat{T},
     X::AbstractMatrix{T};
-    method::Symbol = :maxent,
+    method::Union{Symbol,String} = :maxent,
     d::Distribution=Normal(),
-    m::Int = 1,
+    m::Number = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff_plus,
@@ -48,9 +48,9 @@ function fit_lasso(
     X::AbstractMatrix{T},
     μ::AbstractVector{T},
     Σ::AbstractMatrix{T};
-    method::Symbol = :maxent,
+    method::Union{Symbol,String} = :maxent,
     d::Distribution=Normal(),
-    m::Int = 1,
+    m::Number = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff_plus,
@@ -152,7 +152,7 @@ function fit_lasso(
         push!(τs, tau_hat)
     end
     return LassoKnockoffFilter(
-        y, X, ko, m, βs, a0s, selected, W, τs, fdrs, d, debias)
+        y, X, ko, Int(m), βs, a0s, selected, W, τs, fdrs, d, debias)
 end
 
 """
@@ -185,9 +185,9 @@ provided, they will be estimated from data.
 function fit_marginal(
     y::AbstractVecOrMat{T},
     X::AbstractMatrix{T};
-    method::Symbol = :maxent,
+    method::Union{Symbol,String} = :maxent,
     d::Distribution=Normal(),
-    m::Int = 1,
+    m::Number = 1,
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
     filter_method::Symbol = :knockoff_plus,
@@ -257,7 +257,7 @@ function fit_marginal(
         push!(selected, sel_idx)
         push!(τs, tau_hat)
     end
-    return MarginalKnockoffFilter(y, X, ko, W, τs, m, selected, fdrs, d)
+    return MarginalKnockoffFilter(y, X, ko, W, τs, Int(m), selected, fdrs, d)
 end
 
 function debias!(

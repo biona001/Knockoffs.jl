@@ -12,7 +12,7 @@ should only be called at the start of each algorithm.
 + `method`: The optimization method for group knockoffs
 """
 function group_block_objective(Σ::AbstractMatrix{T}, S::AbstractMatrix{T}, 
-    groups::Vector{Int}, m::Int, method) where T
+    groups::Vector{Int}, m::Number, method) where T
     size(Σ) == size(S) || error("expected size(Σ) == size(S)")
     if occursin("sdp", string(method)) || occursin("equi", string(method))
         obj = zero(eltype(Σ))
@@ -45,8 +45,8 @@ function _sdp_block_objective(Σg, Sg)
 end
 
 """
-    modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ; [m], [nrep], [covariance_approximator])
-    modelX_gaussian_group_knockoffs(X, method, groups; [m], [nrep], [covariance_approximator])
+    modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ; [m], [covariance_approximator], [kwargs])
+    modelX_gaussian_group_knockoffs(X, method, groups; [m], [covariance_approximator], [kwargs])
 
 Constructs Gaussian model-X group knockoffs. If the covariance `Σ` and mean `μ` 
 are not specified, they will be estimated from data, i.e. we will make second-order
@@ -93,9 +93,9 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 """
 function modelX_gaussian_group_knockoffs(
     X::AbstractMatrix{T}, 
-    method::Symbol,
+    method::Union{Symbol,String},
     groups::AbstractVector{Int};
-    m::Int = 1,
+    m::Number = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs... # extra arguments for solve_s_group
     ) where T
@@ -108,21 +108,22 @@ end
 
 function modelX_gaussian_group_knockoffs(
     X::AbstractMatrix{T}, 
-    method::Symbol,
+    method::Union{Symbol,String},
     groups::AbstractVector{Int},
     μ::AbstractVector{T},
     Σ::AbstractMatrix{T};
-    m::Int = 1,
+    m::Number = 1,
     kwargs...
     ) where T
     # first check errors
     length(groups) == size(X, 2) || 
         error("Expected length(groups) == size(X, 2). Each variable in X needs a group membership.")
+    typeof(method) <: String && (method = Symbol(method))
     # compute S matrix using the specified knockoff method
     S, γs, obj = solve_s_group(Symmetric(Σ), groups, method; m=m, kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, Σ, S; m=m)
-    return GaussianGroupKnockoff(X, X̃, groups, S, γs, m, Symmetric(Σ), method, obj)
+    return GaussianGroupKnockoff(X, X̃, groups, S, γs, Int(m), Symmetric(Σ), method, obj)
 end
 
 """
@@ -156,7 +157,7 @@ function modelX_gaussian_rep_group_knockoffs(
     method::Symbol,
     groups::AbstractVector{Int};
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
-    m::Int = 1,
+    m::Number = 1,
     rep_threshold::T = 0.5,
     kwargs... # extra arguments for solve_s_group
     ) where T
@@ -173,7 +174,7 @@ function modelX_gaussian_rep_group_knockoffs(
     groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
     μ::AbstractVector, # p × 1
     Σ::AbstractMatrix; # p × p
-    m::Int = 1,
+    m::Number = 1,
     rep_threshold::T = 0.5,
     verbose::Bool = false,
     enforce_cond_indep::Bool = false,
@@ -195,7 +196,7 @@ function modelX_gaussian_rep_group_knockoffs(
     X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
 
     return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
-        Symmetric(D), m, Symmetric(Σ), method, obj, enforce_cond_indep)
+        Symmetric(D), Int(m), Symmetric(Σ), method, obj, enforce_cond_indep)
 end
 
 """
@@ -266,7 +267,7 @@ function solve_s_graphical_group(
     groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
     group_reps::AbstractVector{Int}, # Vector{Int} of representatives
     method::Symbol;
-    m::Int = 1,
+    m::Number = 1,
     verbose::Bool = false,
     kwargs... # extra arguments for solve_s_group
     ) where T
@@ -348,7 +349,7 @@ function solve_s_group(
     Σ::Symmetric{T}, 
     groups::Vector{Int},
     method::Symbol;
-    m::Int=1,
+    m::Number=1,
     kwargs...
     ) where T
     # check for errors
@@ -427,7 +428,7 @@ final `S` matrix as well as the cholesky factorizations `L` and `C` where
 + L.L*L.U = cholesky((m+1)/m*Σ - S)
 + C.L*C.U = cholesky(S)
 """
-function initialize_S(Σ, groups::Vector{Int}, m::Int, method, ϵ=1e-8)
+function initialize_S(Σ, groups::Vector{Int}, m::Number, method, ϵ=1e-8)
     S, _, _ = solve_group_equi(Σ, groups, m=m)
     # make minimum eigenvalue ϵ
     evals, evecs = eigen(S)
@@ -477,7 +478,7 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 function solve_group_equi(
     Σ::AbstractMatrix, 
     groups::Vector{Int};
-    m::Int = 1 # number of knockoffs per feature to generate
+    m::Number = 1 # number of knockoffs per feature to generate
     )
     Σblocks = block_diagonalize(Σ, groups)
     Db = Matrix{eltype(Σ)}[]
@@ -503,7 +504,7 @@ Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multi
 function solve_group_SDP_subopt(
     Σ::AbstractMatrix, 
     groups::Vector{Int}; 
-    m::Int = 1,
+    m::Number = 1,
     verbose=false
     )
     model = Model(() -> Hypatia.Optimizer(verbose=verbose))
@@ -530,7 +531,7 @@ end
 function solve_group_SDP_subopt_correct(
     Σ::AbstractMatrix, 
     groups::Vector{Int}; 
-    m::Int = 1,
+    m::Number = 1,
     verbose=false
     )
     model = Model(() -> Hypatia.Optimizer(verbose=verbose))
@@ -618,7 +619,7 @@ end
 function solve_group_maxent_single_block(
     Σ11::AbstractMatrix,
     ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    m::Int; # number of knockoffs to generate
+    m::Number; # number of knockoffs to generate
     optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
     # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
@@ -652,7 +653,7 @@ function solve_group_MVR_single_block(
     ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
     A21::AbstractMatrix,
     D22inv::AbstractMatrix,
-    m::Int; # number of knockoffs to generate
+    m::Number; # number of knockoffs to generate
     optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
     # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
     )
@@ -699,7 +700,7 @@ function solve_group_block_update(
     groups::Vector{Int},
     method::Symbol;
     ϵ::T = 1e-8, # small constant added to the matrix inverse in the constraint to enforce full rank
-    m::Int = 1,
+    m::Number = 1,
     tol=0.01, # converges when changes in s are all smaller than tol
     niter = 100, # max number of cyclic block updates
     verbose::Bool = false,
@@ -796,7 +797,7 @@ end
 function solve_group_SDP_full(
     Σ::AbstractMatrix, 
     groups::Vector{Int}; 
-    m::Int = 1,
+    m::Number = 1,
     optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
     )
     model = Model(() -> optm)
@@ -872,7 +873,7 @@ function solve_group_max_entropy_hybrid(
     inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-6, # tolerance added to the lower and upper bound, prevents numerical issues
-    m::Int = 1, # number of knockoffs per variable
+    m::Number = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
@@ -953,7 +954,7 @@ function solve_group_sdp_hybrid(
     inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-6, # tolerance added to the lower and upper bound, prevents numerical issues
-    m::Int = 1, # number of knockoffs per variable
+    m::Number = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
@@ -1059,7 +1060,7 @@ function solve_group_mvr_hybrid(
     inner_ccd_iter::Int = 1,
     tol=0.0001, # converges when abs((obj_new-obj_old)/obj_old) fall below tol
     ϵ=1e-6, # tolerance added to the lower and upper bound, prevents numerical issues
-    m::Int = 1, # number of knockoffs per variable
+    m::Number = 1, # number of knockoffs per variable
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, CCD alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
@@ -1666,11 +1667,11 @@ end
 # efficient and numerically stable way to evaluate max entropy objective 
 # logdet((m+1)/m*Σ-S) + m*logdet(S) where
 # C is cholesky factor of S and L is cholesky factor of (m+1)/m*Σ-S
-function group_maxent_obj(L::Cholesky, C::Cholesky, m::Int)
+function group_maxent_obj(L::Cholesky, C::Cholesky, m::Number)
     return logdet(L) + m*logdet(C)
 end
 
-function group_mvr_obj(L::Cholesky, C::Cholesky, m::Int, 
+function group_mvr_obj(L::Cholesky, C::Cholesky, m::Number, 
     storage::LowerTriangular{T}=LowerTriangular(zeros(size(L)))) where T
     copyto!(storage, I)
     ldiv!(C.L, storage)

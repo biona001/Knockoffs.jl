@@ -21,7 +21,7 @@ problem.
 + Bai, J., 2003. Inferential theory for factor models of large dimensions. Econometrica, 71(1), pp.135-171.
 + Ahn, S.C. and Horenstein, A.R., 2013. Eigenvalue ratio test for the number of factors. Econometrica, 81(3), pp.1203-1227.
 """
-function ipad(X::AbstractMatrix{T}; r_method = :er, m::Int = 1) where T
+function ipad(X::AbstractMatrix{T}; r_method = :er, m::Number = 1) where T
     n, p = size(X)
     # estimate r
     XXt = X * X'
@@ -52,7 +52,7 @@ function ipad(X::AbstractMatrix{T}; r_method = :er, m::Int = 1) where T
         push!(Xk, Ĉ + Ek)
     end
     X̃ = hcat(Xk...)
-    return IPADKnockoff(X, X̃, m, r, r_method)
+    return IPADKnockoff(X, X̃, Int(m), r, r_method)
 end
 
 v(evals, k::Int) = sum(@views(evals[k+1:end]))

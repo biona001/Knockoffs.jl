@@ -95,7 +95,7 @@ function approx_modelX_gaussian_knockoffs(
     s .*= γ
     # generate knockoffs
     X̃ = condition(X, μ, Σ, Diagonal(s), m=m)
-    return ApproxGaussianKnockoff(X, X̃, s, Symmetric(Σ), method, m)
+    return ApproxGaussianKnockoff(X, X̃, s, Symmetric(Σ), method, Int(m))
 end
 
 # for bisection search

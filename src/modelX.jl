@@ -38,8 +38,8 @@ https://mateuszbaran.github.io/CovarianceEstimation.jl/dev/man/msecomp/#msecomp
 """
 function modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
-    method::Symbol;
-    m::Int = 1,
+    method::Union{Symbol,String};
+    m::Number = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
@@ -52,21 +52,21 @@ end
 
 function modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
-    method::Symbol, 
+    method::Union{Symbol,String}, 
     μ::AbstractVector, 
     Σ::AbstractMatrix; 
-    m::Int = 1,
+    m::Number = 1,
     kwargs...
     )
     # compute s vector using the specified method
-    s = solve_s(Symmetric(Σ), method; m=m, kwargs...)
+    s = solve_s(Symmetric(Σ), Symbol(method); m=m, kwargs...)
     # generate knockoffs
     X̃ = condition(X, μ, Symmetric(Σ), Diagonal(s); m=m)
-    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, m)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, Int(m))
 end
 
 """
-    condition(x::AbstractVector, μ::AbstractVector, Σ::AbstractMatrix, S::AbstractMatrix, [m::Int=1])
+    condition(x::AbstractVector, μ::AbstractVector, Σ::AbstractMatrix, S::AbstractMatrix, [m::Number=1])
 
 Samples a knockoff x̃ from Gaussian x using conditional distribution formulas:
 
@@ -98,7 +98,7 @@ function condition(
     μ::AbstractVector, 
     Σ::AbstractMatrix, 
     S::AbstractMatrix;
-    m::Int = 1
+    m::Number = 1
     )
     n, p = size(X)
     m < 1 && error("m should be 1 or larger but was $m.")
