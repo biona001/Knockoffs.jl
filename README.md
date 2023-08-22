@@ -17,9 +17,12 @@ Pkg.add("Knockoffs")
 ```
 This package supports Julia `v1.8`+. 
 
-## Calling Knockoffs.jl from R and Python
+## For R and Python users
 
-See documentation for usage from R. If many users request of it, I will write a similar tutorial for calling Knockoffs.jl from your favorite language. 
+We provide direct wrappers for `Knockoffs.jl` in both R and Python via the packages
+
++ `knockoffsr`: [https://github.com/biona001/knockoffsr](https://github.com/biona001/knockoffsr)
++ `knockoffspy`: [https://github.com/biona001/knockoffspy](https://github.com/biona001/knockoffspy)
 
 ## Package Features
 

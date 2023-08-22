@@ -16,7 +16,7 @@ makedocs(
         "Ghost Knockoffs" => "man/ghost_knockoffs.md",
         "HMM Knockoffs" => "man/hmm/hmm.md",
         "IPAD Knockoffs" => "man/ipad.md",
-        "Calling from R" => "man/JuliaCall.md",
+        "Calling from R/Python" => "man/JuliaCall.md",
         "API" => "man/api.md",
     ]
 )
