@@ -1855,13 +1855,14 @@ function hc_partition_groups(
     Σ::Symmetric;
     cutoff = 0.5,
     min_clusters = 1,
-    linkage=:complete,
+    linkage::Union{String, Symbol}=:complete,
     force_contiguous = false
     )
     all(x -> x ≈ 1, diag(Σ)) || 
         error("Σ must be scaled to a correlation matrix first.")
     force_contiguous && linkage != :single &&
         error("When force_contiguous = true, linkage must be :single")
+    typeof(linkage) <: String && (linkage = Symbol(linkage))
     # convert correlation matrix to a distance matrix
     distmat = copy(Matrix(Σ))
     @inbounds @simd for i in eachindex(distmat)
