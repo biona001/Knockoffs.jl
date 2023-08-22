@@ -26,7 +26,7 @@ data.
 + `kwargs`: Additional arguments to input into `glmnetcv` and `glmnet`
 """
 function fit_lasso(
-    y::AbstractVector{T},
+    y::AbstractVecOrMat{T},
     X::AbstractMatrix{T};
     method::Symbol = :maxent,
     d::Distribution=Normal(),
@@ -44,7 +44,7 @@ function fit_lasso(
 end
 
 function fit_lasso(
-    y::AbstractVector{T},
+    y::AbstractVecOrMat{T},
     X::AbstractMatrix{T},
     μ::AbstractVector{T},
     Σ::AbstractMatrix{T};
@@ -64,7 +64,7 @@ function fit_lasso(
 end
 
 function fit_lasso(
-    y::AbstractVector{T},
+    y::AbstractVecOrMat{T},
     ko::Knockoff;
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
@@ -73,6 +73,7 @@ function fit_lasso(
     stringent::Bool = false,
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
+    typeof(y) <: AbstractMatrix && (y = vec(y))
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     X = ko.X
     X̃ = ko.Xko
@@ -182,7 +183,7 @@ provided, they will be estimated from data.
 + `kwargs`: Additional arguments to input into `glmnetcv` and `glmnet`
 """
 function fit_marginal(
-    y::AbstractVector{T},
+    y::AbstractVecOrMat{T},
     X::AbstractMatrix{T};
     method::Symbol = :maxent,
     d::Distribution=Normal(),
@@ -199,12 +200,13 @@ function fit_marginal(
 end
 
 function fit_marginal(
-    y::AbstractVector{T},
+    y::AbstractVecOrMat{T},
     ko::Knockoff;
     d::Distribution=Normal(),
     fdrs::Vector{Float64}=[0.01, 0.05, 0.1, 0.25, 0.5],
     filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
     ) where T <: AbstractFloat
+    typeof(y) <: AbstractMatrix && (y = vec(y))
     X = ko.X
     X̃ = ko.Xko
     m = ko.m
@@ -349,7 +351,7 @@ end
 
 # According to GLMNet.jl documentation https://github.com/JuliaStats/GLMNet.jl
 # y needs to be a m by 2 matrix, where the first column is the count of negative responses for each row in X and the second column is the count of positive responses.
-function form_glmnet_logistic_y(y::AbstractVector{T}) where T
+function form_glmnet_logistic_y(y::AbstractVecOrMat{T}) where T
     sort!(unique(y)) == [zero(T), one(T)] || error("y should have values 0 and 1 only")
     glmnet_y = [y .== 0 y .== 1] |> Matrix{T}
     return glmnet_y
