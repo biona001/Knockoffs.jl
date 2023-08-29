@@ -1949,8 +1949,8 @@ function single_linkage_distance(distmat::AbstractMatrix{T}, left::Vector{Int}, 
 end
 
 """
-    choose_group_reps(Σ::Symmetric, groups::AbstractVector; threshold=0.5)
-    choose_group_reps(X::AbstractMatrix, groups::AbstractVector; threshold=0.5)
+    choose_group_reps(Σ::Symmetric, groups::AbstractVector; [threshold=0.5], [prioritize_idx], [Σinv])
+    choose_group_reps(X::AbstractMatrix, groups::AbstractVector; threshold=0.5, [prioritize_idx], [Σinv])
 
 Chooses group representatives. If R is the set of selected variables within a
 group and O is the set of variables outside the group, then we keep adding
@@ -1961,15 +1961,21 @@ proportion of variance explained by R and O exceeds `threshold`.
 + First argument: Either individual level data `X` or the correlation matrix `Σ`.
     If one inputs `Σ`, it must be wrapped in the `Symmetric` argument.
 + `groups`: Vector of group membership. 
+
+# Optional inputs
 + `threshold`: Value between 0 and 1 that controls the number of 
     representatives per group. Larger means more representatives (default 0.5)
++ `prioritize_idx`: Variable indices that should receive priority to be chosen
+    as representatives, defaults to `nothing`
++ `Σinv`: Precomputed `inv(Σ)` (it will be computed if not supplied)
 """
-function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5) where T
+function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5, 
+    prioritize_idx::Union{Vector{Int}, Nothing}=nothing, Σinv=inv(Σ)
+    ) where T
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
     unique_groups = unique(groups)
     group_reps = Int[]
-    Σinv = inv(Σ)
     storage1 = zeros(size(Σ, 1), size(Σ, 2))
     storage2 = zeros(size(Σ, 2))
     @inbounds for g in unique_groups
@@ -1983,6 +1989,11 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5)
         # for each variable in current group, compute an ordering of importance
         Σg = @view(Σ[group_idx, group_idx])
         index = select_best_rss_subset(Σg, group_size) # indices in current groups
+        if !isnothing(prioritize_idx)
+            prioritize_g_idx = filter!(!isnothing, 
+                indexin(prioritize_idx, group_idx[index]))
+            index = prioritize_variants(index, index[prioritize_g_idx])
+        end
         indexΣ = group_idx[index] # indices in Σ
         # keep adding reps in current group until stopping criteria
         R = [indexΣ[1]]
@@ -2023,6 +2034,36 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5)
     end
     return sort!(group_reps)
 end
+function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5,
+    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
+    )
+    Σapprox = cov(covariance_approximator, X)
+    cov2cor!(Σapprox.data, sqrt.(diag(Σapprox)))
+    return choose_group_reps(Σapprox, groups, threshold=threshold)
+end
+
+"""
+    prioritize_variants!(index::AbstractVector, priority_vars::AbstractVector)
+
+Given (unsorted) `index`, we make variables in `priority_vars` appear first 
+in `index`, preserving the original order in `index` and those not in 
+`priority_vars`. 
+
+# Example
+```julia
+index = [11, 4, 5, 9, 7]
+priority_vars = [4, 9]
+result = prioritize_variants(index, priority_vars)
+result == [4, 9, 11, 5, 7]
+```
+"""
+function prioritize_variants(index::AbstractVector, priority_vars::AbstractVector)
+    first_idx = indexin(priority_vars, index)
+    all(!isnothing, first_idx) || 
+        error("Expected all variables in priority_vars to exist in index")
+    second_idx = setdiff(1:length(index), first_idx)
+    return [index[first_idx]; index[second_idx]]
+end
 
 # computes x'*A*y without allocation
 function _dot(x, A, y, storage=zeros(size(A, 1)))
@@ -2030,14 +2071,6 @@ function _dot(x, A, y, storage=zeros(size(A, 1)))
     store = @views storage[1:p]
     mul!(store, A, y)
     return dot(x, store)
-end
-
-function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
-    )
-    Σapprox = cov(covariance_approximator, X)
-    cov2cor!(Σapprox.data, sqrt.(diag(Σapprox)))
-    return choose_group_reps(Σapprox, groups, threshold=threshold)
 end
 
 # faithful re-implementation of Trevor's R code. Probably not the most Julian/efficient Julia code
