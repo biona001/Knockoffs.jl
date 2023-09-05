@@ -1952,10 +1952,11 @@ end
     choose_group_reps(Σ::Symmetric, groups::AbstractVector; [threshold=0.5], [prioritize_idx], [Σinv])
     choose_group_reps(X::AbstractMatrix, groups::AbstractVector; threshold=0.5, [prioritize_idx], [Σinv])
 
-Chooses group representatives. If R is the set of selected variables within a
-group and O is the set of variables outside the group, then we keep adding
-variables to R until the proportion of variance explained by R divided by the
-proportion of variance explained by R and O exceeds `threshold`. 
+Chooses group representatives. Returns indices of `Σ` that are representatives.
+If R is the set of selected variables within a group and O is the set of variables
+outside the group, then we keep adding variables to R until the proportion of
+variance explained by R divided by the proportion of variance explained by R and
+O exceeds `threshold`. 
 
 # Inputs
 + First argument: Either individual level data `X` or the correlation matrix `Σ`.
@@ -2006,7 +2007,7 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5,
             # compute Σ_RORO_inv = inv(Σ[RO, RO]) = 
             # Σinv[RO, RO] - Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
             # using the fact that the quadratic form is low rank
-            L = cholesky(Σinv[ROc, ROc])
+            L = cholesky(Symmetric(Σinv[ROc, ROc]))
             X = inv(L.L) * Σinv[ROc, RO] # X'X = Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
             Σ_RORO_inv = @view(storage1[1:length(RO), 1:length(RO)])
             Σ_RORO_inv .= @view(Σinv[RO, RO])
