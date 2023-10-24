@@ -31,6 +31,10 @@ We provide direct wrappers for `Knockoffs.jl` in both R and Python via the packa
 + Preliminary support for many other kinds of knockoffs (ghost, HMM, IPAD...etc), see documentation. 
 + Built-in functions to compute feature importance scores via Lasso/marginal regressions
 
+## Citation and reproducibility
+
+If you use `Knockoffs.jl` in a research paper, please cite [our paper](https://arxiv.org/abs/2310.15069). Scripts to reproduce the results featured in our paper can be found [here](https://github.com/biona001/group-knockoff-reproducibility).
+
 ## Bug reports and feature requests
 
 Please open an issue if you find a bug or have feature requests. Feature requests are welcomed!
