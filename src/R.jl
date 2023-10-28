@@ -27,3 +27,15 @@ function id_partition_groups(data::AbstractMatrix, isCovariance::Bool;
             force_contiguous=force_contiguous)
     end
 end
+
+function solve_s_group(Σ::Matrix, groups::Vector{Int},
+    method::Union{Symbol, String}; m::Number=1, kwargs...)
+    return solve_s_group(Symmetric(Σ), groups, method, m=m, kwargs...)
+end
+
+function solve_s_graphical_group(Σ::Matrix, groups::Vector{Int},
+    group_reps::AbstractVector{Int}, method::Union{Symbol, String}; 
+    m::Number=1, verbose::Bool=false, kwargs...)
+    return solve_s_graphical_group(Symmetric(Σ), groups, group_reps, 
+        method, m=m, verbose=verbose, kwargs...)
+end

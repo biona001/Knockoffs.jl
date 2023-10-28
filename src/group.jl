@@ -154,7 +154,7 @@ by [`choose_group_reps`](@ref)
 """
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, 
-    method::Symbol,
+    method::Union{Symbol, String},
     groups::AbstractVector{Int};
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     m::Number = 1,
@@ -170,7 +170,7 @@ end
 # todo: Efficient sampling of knockoffs when `m>1` using conditional independence
 function modelX_gaussian_rep_group_knockoffs(
     X::AbstractMatrix{T}, # n × p
-    method::Symbol,
+    method::Union{Symbol, String},
     groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
     μ::AbstractVector, # p × 1
     Σ::AbstractMatrix; # p × p
@@ -266,7 +266,7 @@ function solve_s_graphical_group(
     Σ::Symmetric{T}, # p × p
     groups::AbstractVector{Int}, # p × 1 Vector{Int} of group membership
     group_reps::AbstractVector{Int}, # Vector{Int} of representatives
-    method::Symbol;
+    method::Union{Symbol, String};
     m::Number = 1,
     verbose::Bool = false,
     kwargs... # extra arguments for solve_s_group
@@ -348,7 +348,7 @@ contiguous.
 function solve_s_group(
     Σ::Symmetric{T}, 
     groups::Vector{Int},
-    method::Symbol;
+    method::Union{Symbol, String};
     m::Number=1,
     kwargs...
     ) where T
@@ -361,6 +361,7 @@ function solve_s_group(
             "Consider running `modelX_gaussian_rep_group_knockoffs` to speed up convergence."
         flush(stdout)
     end
+    method = Symbol(method)
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
@@ -698,7 +699,7 @@ end
 function solve_group_block_update(
     Σ::AbstractMatrix{T}, 
     groups::Vector{Int},
-    method::Symbol;
+    method::Union{Symbol, String};
     ϵ::T = 1e-8, # small constant added to the matrix inverse in the constraint to enforce full rank
     m::Number = 1,
     tol=0.01, # converges when changes in s are all smaller than tol
