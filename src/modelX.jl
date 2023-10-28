@@ -101,6 +101,7 @@ function condition(
     m::Number = 1
     )
     n, p = size(X)
+    m = Int(m)
     m < 1 && error("m should be 1 or larger but was $m.")
     Σinv = inv(Symmetric(Σ))
     ΣinvS = Σinv * S
