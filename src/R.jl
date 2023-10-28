@@ -28,6 +28,11 @@ function id_partition_groups(data::AbstractMatrix, isCovariance::Bool;
     end
 end
 
+function solve_s(Σ::Matrix, method::Union{Symbol, String}; 
+    m::Number=1, kwargs...)
+    return solve_s(Symmetric(Σ), method, m=m, kwargs...)
+end
+
 function solve_s_group(Σ::Matrix, groups::Vector{Int},
     method::Union{Symbol, String}; m::Number=1, kwargs...)
     return solve_s_group(Symmetric(Σ), groups, method, m=m, kwargs...)

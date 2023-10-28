@@ -24,8 +24,9 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function solve_s(Σ::Symmetric, method::Symbol; m::Int=1, kwargs...)
+function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwargs...)
     m < 1 && error("m should be 1 or larger but was $m.")
+    method = Symbol(method)
     # create correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
@@ -68,7 +69,7 @@ https://arxiv.org/pdf/1610.02351.pdf
 """
 function solve_SDP(
     Σ::AbstractMatrix; # correlation matrix
-    m::Int = 1, # number of multiple knockoffs to generate
+    m::Number = 1, # number of multiple knockoffs to generate
     optm=Hypatia.Optimizer(verbose=false) # Any solver compatible with JuMP
     )
     # Build model via JuMP
@@ -102,7 +103,7 @@ correlation matrix Σ. Users should call `solve_s` instead of this function.
 """
 function solve_equi(
     Σ::AbstractMatrix{T}; # correlation matrix
-    m::Int = 1 # number of multiple knockoffs to generate
+    m::Number = 1 # number of multiple knockoffs to generate
     ) where T
     λmin = eigvals(Σ) |> minimum
     sj = min(1, (m+1)/m * λmin)
@@ -125,7 +126,7 @@ function solve_MVR(
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
-    m::Int = 1, # number of knockoffs per variable
+    m::Number = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -219,7 +220,7 @@ function solve_max_entropy(
     niter::Int = 100,
     tol=1e-6, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
-    m::Int = 1, # number of knockoffs per variable
+    m::Number = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -286,7 +287,7 @@ function solve_sdp_ccd(
     λ::T = 0.5, # barrier coefficient
     μ::T = 0.8, # decay parameter
     niter::Int = 100,
-    m::Int = 1, # number of knockoffs per variable
+    m::Number = 1, # number of knockoffs per variable
     tol=1e-6, # converges when lambda < tol?
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
