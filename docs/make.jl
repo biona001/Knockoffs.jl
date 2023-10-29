@@ -3,7 +3,7 @@ using Documenter
 
 makedocs(
     sitename = "Knockoffs.jl",
-    format = Documenter.HTML(),
+    format = Documenter.HTML(size_threshold = nothing),
     modules = [Knockoffs],
     authors = "Benjamin Chu",
     clean = true,

@@ -21,7 +21,7 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 + `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`
     which tends to give good empirical performance when p>n. See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
-    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled

@@ -16,7 +16,7 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
     For a list of available options, see [`solve_MVR`](@ref),
-    [`solve_max_entropy`](@ref), [`solve_sdp_ccd`](@ref), [`solve_sdp`](@ref), or
+    [`solve_max_entropy`](@ref), [`solve_sdp_ccd`](@ref), [`solve_SDP`](@ref), or
     [`solve_equi`](@ref)
 
 # Reference

@@ -61,3 +61,8 @@ Pages = ["api.md"]
   normalize_col!
   rapid
 ```
+
+```@autodocs
+Modules = [Knockoffs]
+Order   = [:function, :type]
+```

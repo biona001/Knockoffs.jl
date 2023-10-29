@@ -19,7 +19,7 @@ Generate Ghost knockoffs given a list of z-scores (GWAS summary statistic).
     `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See 
     CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
-    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 
 # optional inputs
 + `m`: Number of knockoffs
@@ -44,11 +44,18 @@ end
 """
     sample_mvn_efficient(C::AbstractMatrix{T}, D::AbstractMatrix{T}, m::Int)
 
-Efficiently samples from a multivariate normal N(0, A) distribution where
-    [ C   C-D  ...  C-D ]
-A = [C-D   C    ..  C-D ]   (total m blocks per row/col)
-    [ ⋮        ⋱    ⋮   ]
-    [C-D  C-D        C  ]
+Efficiently samples from `N(0, A)` where
+```math
+\\begin{aligned}
+A &= \\begin{pmatrix}
+    C & C-D & \\cdots & C-D\\\\
+    C-D & C & \\cdots & C-D\\\\
+    \\vdots & & \\ddots & \\vdots\\\\
+    C-D & C-D & & C
+\\end{pmatrix}
+\\end{aligned}
+```
+Note there are `m` blocks per row/col
 """
 function sample_mvn_efficient(C::AbstractMatrix{T}, D::AbstractMatrix{T}, m::Int) where T
     p = size(C, 1)

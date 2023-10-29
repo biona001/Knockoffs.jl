@@ -14,7 +14,7 @@ computing its knockoff.
     * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
-    [`solve_max_entropy`](@ref), and [`solve_sdp_fast`](@ref)
+    [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 
 # Output
 + `GaussianKnockoff`: A struct containing the original (column-normalized) `X`
