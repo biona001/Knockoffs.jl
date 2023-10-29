@@ -1951,7 +1951,6 @@ end
 
 """
     choose_group_reps(Σ::Symmetric, groups::AbstractVector; [threshold=0.5], [prioritize_idx], [Σinv])
-    choose_group_reps(X::AbstractMatrix, groups::AbstractVector; threshold=0.5, [prioritize_idx], [Σinv])
 
 Chooses group representatives. Returns indices of `Σ` that are representatives.
 If R is the set of selected variables within a group and O is the set of variables
@@ -1960,8 +1959,7 @@ variance explained by R divided by the proportion of variance explained by R and
 O exceeds `threshold`. 
 
 # Inputs
-+ First argument: Either individual level data `X` or the correlation matrix `Σ`.
-    If one inputs `Σ`, it must be wrapped in the `Symmetric` argument.
++ `Σ`: Correlation matrix wrapped in the `Symmetric` argument.
 + `groups`: Vector of group membership. 
 
 # Optional inputs
@@ -2035,13 +2033,6 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5,
         end
     end
     return sort!(group_reps)
-end
-function choose_group_reps(X::AbstractMatrix, groups::Vector{Int}; threshold=0.5,
-    covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw)
-    )
-    Σapprox = cov(covariance_approximator, X)
-    cov2cor!(Σapprox.data, sqrt.(diag(Σapprox)))
-    return choose_group_reps(Σapprox, groups, threshold=threshold)
 end
 
 """
