@@ -164,7 +164,10 @@ function solve_MVR(
             # update convergence tol
             abs(δj) > max_delta && (max_delta = abs(δj))
         end
-        verbose && println("Iter $l: δ = $max_delta")
+        if verbose
+            println("Iter $l: δ = $max_delta")
+            flush(stdout)
+        end
         # declare convergence if changes in s are all smaller than tol
         max_delta < tol && break
     end
@@ -267,7 +270,10 @@ function solve_max_entropy(
             abs(δ) > max_delta && (max_delta = abs(δ))
         end
         # declare convergence if changes in s are all smaller than tol
-        verbose && println("Iter $l: δ = $max_delta")
+        if verbose
+            println("Iter $l: δ = $max_delta")
+            flush(stdout)
+        end
         max_delta < tol && break 
     end
     return s
@@ -304,7 +310,10 @@ function solve_sdp_ccd(
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
-        verbose && println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
+        if verbose
+            println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
+            flush(stdout)
+        end
         for j in 1:p
             @simd for i in 1:p
                 ỹ[i] = (m+1)/m * Σ[i, j]

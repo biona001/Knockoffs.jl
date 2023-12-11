@@ -778,6 +778,7 @@ function solve_group_block_update(
         if verbose
             obj = group_block_objective(Σ, S, groups, m, method)
             println("Iter $l: obj = $obj, δ = $max_delta")
+            flush(stdout)
         end
         max_delta < tol && break 
     end
@@ -1201,6 +1202,7 @@ function _sdp_ccd_iter!(
                 "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
+            flush(stdout)
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
@@ -1328,6 +1330,7 @@ function _mvr_ccd_iter!(
                 "t1 = $(round(t1, digits=2)), t2 = $(round(t2, digits=2))," * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
+            flush(stdout)
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
@@ -1442,6 +1445,7 @@ function _maxent_ccd_iter!(
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
+            flush(stdout)
         end
         change_obj = abs((obj_new - obj) / obj)
         obj = obj_new
@@ -1505,6 +1509,7 @@ function _maxent_pca_ccd_iter!(
             println("Iter $(print_iter) (PCA): obj = $obj_new, δ = $max_delta, t1 = " * 
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
             print_iter += 1
+            flush(stdout)
         end
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
@@ -1574,6 +1579,7 @@ function _mvr_pca_ccd_iter!(
             println("Iter $print_iter (PCA): obj = $obj_new, δ = $max_delta, t1 = " * 
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2))")
             print_iter += 1
+            flush(stdout)
         end
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
@@ -1653,6 +1659,7 @@ function _sdp_pca_ccd_iter!(
                 "$(round(t1, digits=2)), t2 = $(round(t2, digits=2)), " * 
                 "t3 = $(round(t3, digits=2))")
             print_iter += 1
+            flush(stdout)
         end
         # check convergence
         change_obj = abs((obj_new - obj) / obj)
