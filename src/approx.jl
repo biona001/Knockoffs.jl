@@ -60,14 +60,17 @@ end
 # todo: make sure Σ can stay as block diagonal
 function approx_modelX_gaussian_knockoffs(
     X::AbstractMatrix, 
-    method::Symbol,
+    method::Union{Symbol,String},
     window_ranges::Vector{UnitRange{Int64}};
     m::Int = 1,
     covariance_approximator=LinearShrinkage(DiagonalUnequalVariance(), :lw),
     kwargs...
     )
+    typeof(method) <: String && (method = Symbol(method))
     covariates_by_windows = sum(length.(window_ranges))
-    covariates_by_windows == size(X, 2) || error("window_ranges have $covariates_by_windows dimensions but X has $(size(X, 2))")
+    covariates_by_windows == size(X, 2) || 
+        error("window_ranges have $covariates_by_windows dimensions but X has $(size(X, 2))")
+
     windows = length(window_ranges)
     block_covariances = Vector{Matrix{Float64}}(undef, windows)
     block_s = Vector{Vector{Float64}}(undef, windows)
