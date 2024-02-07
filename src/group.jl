@@ -1368,12 +1368,12 @@ function _maxent_ccd_iter!(
                 t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej)
                 t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
                 ajj, bjj = dot(u, u), dot(v, v)
-                sj_new = (m*bjj-ajj) / ((m+1)*ajj*bjj)
+                δ = (m*bjj-ajj) / ((m+1)*ajj*bjj)
                 # ensure feasibility
                 ub = 1 / ajj - ϵ
                 lb = -1 / bjj + ϵ
                 lb ≥ ub && continue
-                δ = clamp(sj_new - S[j, j], lb, ub)
+                δ = clamp(δ, lb, ub)
                 # update S if objective improves
                 change_obj = log(1 - δ*ajj) + m*log(1 + δ*bjj)
                 if change_obj < 0 || abs(δ) < 1e-15 || isnan(δ) || isinf(δ)
