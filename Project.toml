@@ -1,7 +1,7 @@
 name = "Knockoffs"
 uuid = "878bf26d-0c49-448a-9df5-b057c815d613"
 authors = ["Benjamin Chu <benchu99@hotmail.com> and contributors"]
-version = "1.1.8"
+version = "2.0.0"
 
 [deps]
 BlockDiagonals = "0a1fb500-61f7-11e9-3c65-f5ef3456f9f0"

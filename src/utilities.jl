@@ -463,33 +463,6 @@ function sample_DMC(q, Q; n=1)
 end
 
 """
-    download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
-
-Downloads the 1000 genomes phase 3 reference panel in VCF format. Each chromosome
-is separated into different VCF files accompanied by a tabix index file. By default, 
-data will be saved in a folder called "1000genomes" in the Knockoffs package 
-directory, i.e. in `Knockoffs.datadir()`.
-"""
-function download_1000genomes(; chr="all", outdir=Knockoffs.datadir())
-    link = "https://bochet.gcc.biostat.washington.edu/beagle/1000_Genomes_phase3_v5a/b37.vcf"
-    outpath = joinpath(outdir, "1000genomes")
-    isdir(outpath) || mkdir(outpath)
-    if chr == "all"
-        for chr in vcat(string.(1:22), "X")
-            vcffile = "chr$chr.1kg.phase3.v5a.vcf.gz"
-            tabixfile = "chr$chr.1kg.phase3.v5a.vcf.gz.tbi"
-            Downloads.download(joinpath(link, vcffile), joinpath(outpath, vcffile))
-            Downloads.download(joinpath(link, tabixfile), joinpath(outpath, tabixfile))
-        end
-    else
-        vcffile = "chr$chr.1kg.phase3.v5a.vcf.gz"
-        tabixfile = "chr$chr.1kg.phase3.v5a.vcf.gz.tbi"
-        Downloads.download(joinpath(link, vcffile), joinpath(outpath, vcffile))
-        Downloads.download(joinpath(link, tabixfile), joinpath(outpath, tabixfile))
-    end
-end
-
-"""
     simulate_block_covariance(groups, ρ, γ, num_v, w)
 
 Simulates a block covariance matrix similar to the one in `Dai & Barber 2016, 

@@ -1,3 +1,9 @@
+# This file contains experimental code implementing the GhostKnockoff methodology 
+# described in this paper: https://www.nature.com/articles/s41467-022-34932-z.
+# An improved version of GhostKnockoffs is implemented in the package 
+# GhostKnockoffGWAS https://github.com/biona001/GhostKnockoffGWAS, thus the 
+# code here is archived and shouldn't be used.
+
 """
     ghost_knockoffs(Zscores, D, Σinv; [m=1])
     ghost_knockoffs(Zscores, Z_pos, H_pos, H, method; [windowsize], [covariance_approximator], [kwargs])

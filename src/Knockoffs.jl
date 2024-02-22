@@ -32,12 +32,10 @@ export
     # functions that generate knockoffs
     fixed_knockoffs,
     modelX_gaussian_knockoffs,
-    ghost_knockoffs,
     modelX_gaussian_group_knockoffs,
     modelX_gaussian_rep_group_knockoffs,
     approx_modelX_gaussian_knockoffs,
     ipad,
-    full_knockoffscreen,
     # solvers
     solve_s, 
     solve_s_group,
@@ -90,7 +88,6 @@ include("utilities.jl")
 include("knockoffscreen.jl")
 include("fit_lasso.jl")
 include("approx.jl")
-include("ghost.jl")
 include("predict.jl")
 include("group.jl")
 include("ipad.jl")
