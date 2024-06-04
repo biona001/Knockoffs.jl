@@ -46,7 +46,7 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol; kwargs...) where T <: Abs
     D = Diagonal(s)
     γ, P = eigen(2D - D*Σinv*D)
     clamp!(γ, 0, typemax(T)) # numerical stability
-    C = Diagonal(sqrt.(γ)) * P
+    C = Diagonal(sqrt.(γ)) * P'
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
     return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, 1)

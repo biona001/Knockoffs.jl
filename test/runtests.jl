@@ -23,6 +23,11 @@ using ToeplitzMatrices
     s = knockoff.s
     Sigma = knockoff.Sigma
 
+    # basic knockoff properties
+    all(isapprox.(X'*X, Sigma, atol=1e-8))
+    all(isapprox.(Xko'*Xko, Sigma, atol=1e-8))
+    all(isapprox.(X'*Xko, Sigma - Diagonal(s), atol=1e-8))
+
     # compare with Matteo's result
     # @rput X
     # R"""
