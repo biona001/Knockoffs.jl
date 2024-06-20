@@ -1,6 +1,8 @@
 """
-    fit_lasso(y, X, method=:maxent, ...)
-    fit_lasso(y, X, μ, Σ, method=:maxent, ...)
+    fit_lasso(y, X, [method], [d], [m], [fdrs], [groups], [filter_method], 
+        [debias], [kwargs...])
+    fit_lasso(y, X, μ, Σ, [method], [d], [m], [fdrs], [groups], [filter_method], 
+        [debias], [kwargs...])
 
 Generates model-X knockoffs with `method`, runs Lasso, then applies the 
 knockoff-filter. If `μ` and `Σ` are not provided, they will be estimated from

@@ -2088,7 +2088,7 @@ function select_one(C::AbstractMatrix, vlist, RSS0, tol=1e-12)
     R2 = 1 - vmin/RSS0
     return index, R2, residC[nzero, nzero], vlist[nzero]
 end
-function select_best_rss_subset(C::AbstractMatrix, k::Int)
+function select_best_rss_subset(C::AbstractMatrix, k::Int, r2_threshold=1-1e-12)
     p = size(C, 2)
     # p ≤ k && return collect(1:p) # quick return
     indices = zeros(Int, k)
@@ -2101,9 +2101,10 @@ function select_best_rss_subset(C::AbstractMatrix, k::Int)
         R2[i] = r2
         C = Cnew
         vlist = vnew
+        r2 > r2_threshold && break # terminate alg when explained r2 ≈ 1 
     end
-    # return indices, R2
-    return indices
+    # return non-0 indices
+    return indices[findall(x -> x > 0, indices)]
 end
 
 function assign_members_cor!(groups, Σ, non_rep, centers)
