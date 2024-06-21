@@ -1977,10 +1977,51 @@ O exceeds `threshold`.
 + `Σinv`: Precomputed `inv(Σ)` (it will be computed if not supplied)
 """
 function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5, 
-    prioritize_idx::Union{Vector{Int}, Nothing}=nothing, Σinv=inv(Σ)
+    prioritize_idx::Union{Vector{Int}, Nothing}=nothing, Σinv=nothing
     ) where T
     all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
+
+    # boundary case: check for linearly dependent columns
+    p = size(Σ, 1)
+    dependent_cols = Int[]
+    @inbounds for i in 1:p
+        xi = @view(Σ[:, i])
+        for j in i+1:p
+            xj = @view(Σ[:, j])
+            is_dependent = true
+            for k in 1:i
+                if !isapprox(xi[k], xj[k])
+                    is_dependent = false
+                    break
+                end
+            end
+            if is_dependent
+                if isnothing(prioritize_idx) 
+                    push!(dependent_cols, j)
+                else
+                    j ∈ prioritize_idx ? push!(dependent_cols, i) : push!(dependent_cols, j)
+                end
+            end
+        end
+    end
+    unique!(dependent_cols)
+    if length(dependent_cols) > 0
+        independent_cols = setdiff(1:p, dependent_cols)
+        Σsub = Symmetric(Σ[independent_cols, independent_cols])
+        groups_sub = groups[independent_cols]
+        if !isnothing(prioritize_idx)
+            prioritize_idx = [idx - count(x -> x < idx, dependent_cols) 
+                            for idx in prioritize_idx]
+        end
+        group_reps_sub = choose_group_reps(Σsub, groups_sub, threshold=threshold, 
+            prioritize_idx=prioritize_idx)
+        group_reps = independent_cols[group_reps_sub]
+        return group_reps
+    end
+
+    # all columns linearly indepedent: run main alg
+    isnothing(Σinv) && (Σinv = inv(Σ))
     unique_groups = unique(groups)
     group_reps = Int[]
     storage1 = zeros(size(Σ, 1), size(Σ, 2))
@@ -2026,7 +2067,6 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5,
                 Σ_ROj = Σ[RO, j]
                 R2_R = _dot(Σ_Rj, Σ_RR_inv, Σ_Rj, storage2) # R2_R = Σ_Rj*Σ_RR_inv*Σ_Rj
                 R2_RO = _dot(Σ_ROj, Symmetric(Σ_RORO_inv), Σ_ROj, storage2)
-                R2_R / R2_RO
                 ratio += R2_R / R2_RO
             end
             ratio /= length(Rc)

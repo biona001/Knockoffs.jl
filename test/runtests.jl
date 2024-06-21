@@ -771,6 +771,35 @@ end
         -0.03975762881225776 -0.042632500750932216 0.8269051049537056 0.1598138853324871 0.9999999999999998 1.0])
     groups = [1, 2, 3, 4, 3, 3]
     group_reps = choose_group_reps(Sigma, groups, threshold=0.5)
+    @test group_reps == [1, 2, 3, 4]
+    group_reps = choose_group_reps(Sigma, groups, threshold=0.999)
+    @test group_reps == [1, 2, 3, 4, 5]
+
+    # issue 72: 
+    n = 10
+    x = randn(n, n)
+    x[:, 2] .= x[:, 1]
+    x[:, 8] .= x[:, 10]
+    x[:, 9] .= x[:, 10]
+    Σ = Symmetric(cor(x))
+    groups = hc_partition_groups(Σ)
+    group_reps = choose_group_reps(Σ, groups, threshold=0.5)
+    @test groups[1] == groups[2]
+    @test groups[8] == groups[9] == groups[10]
+    @test length(intersect(group_reps, 1:2)) ≤ 1 # only 1 variable from features 1-2 are selected
+    @test length(intersect(group_reps, 8:10)) ≤ 1 # only 1 variable from features 8-10 are selected
+
+    prioritize_idx = [2, 9] # prioritize features 2 and 9 to be representatives
+    group_reps = choose_group_reps(Σ, groups, threshold=0.5, prioritize_idx=prioritize_idx)
+    if groups[1] != groups[8]
+        # if features [1, 2] belong to different group than [8, 9, 10]
+        # then both 2 and 9 should be selected
+        @test 2 ∈ group_reps
+        @test 9 ∈ group_reps
+    else
+        # if [1, 2] and [8, 9, 10] are in the same group, then 9 may not get selected
+        @test 2 ∈ group_reps
+    end
 end
 
 @testset "multiple knockoffs" begin
