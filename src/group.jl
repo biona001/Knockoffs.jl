@@ -78,8 +78,8 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
 + `kwargs`: Extra keyword arguments for `solve_s_group`
 
 # How to define groups
-The exported functions `hc_partition_groups` and `id_partition_groups` can be used
-to build a group membership vector. 
+The exported functions `hc_partition_groups` can be used to build a group 
+membership vector. 
 
 # A note on compute time
 The computational complexity of group knockoffs scales quadratically with group size.
@@ -1768,56 +1768,6 @@ function rank2_cholesky_update!(
 end
 
 """
-    id_partition_groups(X::AbstractMatrix; [rss_target], [force_contiguous])
-    id_partition_groups(Σ::Symmetric; [rss_target], [force_contiguous])
-
-Compute group members based on interpolative decompositions. An initial pass 
-first selects the most representative features such that regressing each 
-non-represented feature on the selected will have residual less than `rss_target`.
-The selected features are then defined as group centers and the remaining 
-features are assigned to groups
-
-# Inputs
-+ `G`: Either individual level data `X` or a correlation matrix `Σ`. If one
-    inputs `Σ`, it must be wrapped in the `Symmetric` argument, otherwise
-    we will treat it as individual level data
-+ `rss_target`: Target residual level (greater than 0) for the first pass, smaller
-    means more groups
-+ `force_contiguous`: Whether groups are forced to be contiguous. If true,
-    variants are assigned its left or right center, whichever
-    has the largest correlation with it without breaking contiguity.
-
-# Outputs
-+ `groups`: Length `p` vector of group membership for each variable
-
-Note: interpolative decomposition is a stochastic algorithm. Set a seed to
-guarantee reproducible results. 
-"""
-function id_partition_groups(
-    G::AbstractMatrix;
-    rss_target = 0.25,
-    force_contiguous = false
-    )
-    p = size(G, 2)
-    rss_target ≥ 0 || error("Expected rss_target to be > 0.")
-    # get empirical correlation matrix
-    Σ = typeof(G) <: Symmetric ? Matrix(G) : cor(G)
-    all(x -> x ≈ 1, diag(Σ)) || error("G must be scaled to a correlation matrix first.")
-    # step 1: compute rep columns by applying ID to X or cholesky of Σ
-    A = typeof(G) <: Symmetric ? cholesky(PositiveFactorizations.Positive, G).U : G
-    selected, _, _ = id(A)
-    rk = search_rank(Σ, A, selected, rss_target)
-    centers = sort(selected[1:rk])
-    # step 2: bin non-represented members
-    groups = zeros(Int, p)
-    groups[centers] .= 1:rk
-    non_rep = setdiff(1:p, centers)
-    force_contiguous ? assign_members_cor_adj!(groups, Σ, non_rep, centers) : 
-                       assign_members_cor!(groups, Σ, non_rep, centers)
-    return groups
-end
-
-"""
     hc_partition_groups(X::AbstractMatrix; [cutoff], [min_clusters], [force_contiguous])
     hc_partition_groups(Σ::Symmetric; [cutoff], [min_clusters], [force_contiguous])
 
@@ -2147,46 +2097,6 @@ function select_best_rss_subset(C::AbstractMatrix, k::Int, r2_threshold=1-1e-12)
     return indices[findall(x -> x > 0, indices)]
 end
 
-function assign_members_cor!(groups, Σ, non_rep, centers)
-    for j in non_rep
-        center, best_dist = 0, typemin(eltype(Σ))
-        # find which of the representatives have largest absolute correlation with j
-        for c in centers
-            if abs(Σ[c, j]) > best_dist
-                center = c
-                best_dist = abs(Σ[c, j])
-            end
-        end
-        # assign j to the group of its representative
-        groups[j] = groups[center]
-    end
-    return groups
-end
-
-function assign_members_cor_adj!(groups, Σ, non_rep, rep_columns)
-    issorted(rep_columns) || error("Expected rep_columns to be sorted")
-    rep_columns_tmp = copy(rep_columns)
-    for j in shuffle(non_rep)
-        group_on_right = searchsortedfirst(rep_columns_tmp, j)
-        if group_on_right > length(rep_columns_tmp) # no group on the right
-            nearest_rep = rep_columns_tmp[end]
-            push!(rep_columns_tmp, j)
-        elseif group_on_right == 1 # j comes before the first group
-            nearest_rep = rep_columns_tmp[1]
-            insert!(rep_columns_tmp, 1, j)
-        else # test which of the nearest representative is more correlated with j
-            left  = rep_columns_tmp[group_on_right - 1]
-            right = rep_columns_tmp[group_on_right]
-            nearest_rep = abs(Σ[left, j]) > abs(Σ[right, j]) ? left : right
-        end
-        # assign j to the group of its representative
-        groups[j] = groups[nearest_rep]
-        insert!(rep_columns_tmp, group_on_right, j)
-    end
-    issorted(groups) || error("assign_members_cor_adj!: groups not contiguous")
-    return groups
-end
-
 """
     search_rank(A::AbstractMatrix, sk::Vector{Int}, target=0.25, verbose=false)
 
@@ -2246,22 +2156,6 @@ function test_residuals(invΣ, Σ::AbstractMatrix{T}, not_selected, selected, ta
         end
     end
     return success
-end
-
-"""
-    interpolative_decomposition(A::AbstractMatrix, rk::Int)
-
-Computes the interpolative decomposition of A with rank `rk`
-and returns the top `rk` most representative columns of `A`
-"""
-function interpolative_decomposition(A::AbstractMatrix, rk::Int)
-    p = size(A, 1)
-    # quick return
-    rk > p && return collect(1:p)
-    length(A) == 1 && return [1]
-    # Run ID
-    col_selected, redun_cols, T = id(A, rank=rk)
-    return col_selected
 end
 
 function get_PCA_vectors(Σ::AbstractMatrix{T}, groups::AbstractVector{Int}) where T

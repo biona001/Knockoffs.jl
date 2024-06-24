@@ -195,11 +195,6 @@ end
             @test Sigma[u, v] ≤ 0.7
         end
     end
-
-    # id_partition_groups: based on X or Sigma
-    groups = id_partition_groups(Symmetric(Sigma))
-    groups = id_partition_groups(X)
-    @test length(groups) == size(X, 2)
 end
 
 @testset "MK_statistics" begin
@@ -674,7 +669,7 @@ end
     val, pos = findmin(distmat[group1, group2])
     @test val == Knockoffs.single_linkage_distance(distmat, group1, group2)
 
-    # data for hc_partition_groups and id_partition_groups
+    # data for hc_partition_groups
     n = 100
     p = 500
     μ = zeros(p)
@@ -698,23 +693,6 @@ end
             end
         end
     end
-
-    # defining groups: interpolative decomposition
-    for force_contiguous in [true, false]
-        groups1, reps1 = id_partition_groups(X, 
-            force_contiguous=force_contiguous)
-        groups2, reps2 = id_partition_groups(Symmetric(Sigma), 
-            force_contiguous=force_contiguous)
-        @test length(unique(groups1)) == length(reps1)
-        @test length(unique(groups2)) == length(reps2)
-        # test contiguity
-        if force_contiguous
-            for g in unique(groups1)
-                idx = findall(x -> x == g, groups1)
-                @test all(diff(idx) .== 1)
-            end
-        end
-    end
 end
 
 @testset "representative group knockoffs" begin
@@ -726,16 +704,6 @@ end
     true_mu = zeros(p)
     X = rand(MvNormal(true_mu, Sigma), n)' |> Matrix
     zscore!(X, mean(X, dims=1), std(X, dims=1))
-
-    # tests defining groups by ID and choosing representatives
-    groups1 = id_partition_groups(X)
-    groups2 = id_partition_groups(Symmetric(cor(X)))
-    @test length(groups1) == length(groups2)
-    group_reps1 = choose_group_reps(Symmetric(Sigma), groups1, threshold=0.5)
-    group_reps2 = choose_group_reps(Symmetric(Sigma), groups1, threshold=0.7)
-    group_reps3 = choose_group_reps(Symmetric(Sigma), groups1, threshold=0.9)
-    @test issubset(group_reps1, group_reps2)
-    @test issubset(group_reps2, group_reps3)
 
     # tests defining groups by ID and choosing representatives
     groups1 = hc_partition_groups(X)

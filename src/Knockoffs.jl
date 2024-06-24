@@ -24,7 +24,6 @@ using Reexport
 using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
-using LowRankApprox: id
 
 @reexport using GLM
 
@@ -73,7 +72,6 @@ export
     simulate_block_covariance, 
     download_1000genomes,
     hc_partition_groups, 
-    id_partition_groups,
     choose_group_reps,
     normalize_col, 
     normalize_col!,

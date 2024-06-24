@@ -81,7 +81,7 @@ zscore!(X, mean(X, dims=1), std(X, dims=1)); # standardize columns of X
 
 ## Define group memberships
 
-To generate group knockoffs, we need to vector specifying group membership. One can define this vector manually, or use the built-in functions [`hc_partition_groups`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hc_partition_groups) or [`id_partition_groups`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.id_partition_groups). 
+To generate group knockoffs, we need to vector specifying group membership. One can define this vector manually, or use the built-in functions [`hc_partition_groups`](https://biona001.github.io/Knockoffs.jl/dev/man/api/#Knockoffs.hc_partition_groups) which runs hierarchical clustering. 
 
 
 ```julia

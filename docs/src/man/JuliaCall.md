@@ -16,6 +16,6 @@ The name space is setup so that standard syntax of Julia translates directly ove
 
 + All `Knockoffs.jl` commands are prefaced by `ko$` (in R) or `ko.` (in python)
 + For `R` users, all commands with a `!` are replaced with `_bang`, for example `solve_s!` becomes `solve_s_bang`.
-+ All `Knockoffs.jl` functions that require a `Symmetric` matrix as inputs now accepts a regular matrix. However, for `hc_partition_groups` and `id_partition_groups`, one must provide an extra argument `isCovariance` to indicate whether the input data should be treated as a design matrix or a covariance matrix.
++ All `Knockoffs.jl` functions that require a `Symmetric` matrix as inputs now accepts a regular matrix. However, for `hc_partition_groups`, one must provide an extra argument `isCovariance` to indicate whether the input data should be treated as a design matrix or a covariance matrix.
 
 The first 2 points follows the practice of [diffeqr](https://github.com/SciML/diffeqr/tree/master).
