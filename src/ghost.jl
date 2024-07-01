@@ -5,7 +5,6 @@
 
 """
     ghost_knockoffs(Zscores, D, Σinv; [m=1])
-    ghost_knockoffs(Zscores, Z_pos, H_pos, H, method; [windowsize], [covariance_approximator], [kwargs])
 
 Generate Ghost knockoffs given a list of z-scores (GWAS summary statistic). 
 
@@ -14,17 +13,6 @@ Generate Ghost knockoffs given a list of z-scores (GWAS summary statistic).
 + `D`: Matrix obtained from solving the knockoff problem satisfying 
     `(m+1)/m*Σ - D ⪰ 0`
 + `Σinv`: Inverse of the covariance matrix
-+ `Z_pos`: A sorted list of SNP position for each SNP in `Zscores`
-+ `H_pos`: A sorted list of SNP position in the reference panel `H`
-+ `H`: A haplotype reference panel. Each row is a sample and each column is a variant.
-+ `method`: Can be any of the method in [`approx_modelX_gaussian_knockoffs`](@ref)
-+ `windowsize`: Number of covariates to be included in a block. Each block consists of
-    adjacent variables. The last block could contain less than `windowsize` variables. 
-+ `covariance_approximator`: A covariance estimator, defaults to 
-    `LinearShrinkage(DiagonalUnequalVariance(), :lw)`. See 
-    CovarianceEstimation.jl for more options.
-+ `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
-    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 
 # optional inputs
 + `m`: Number of knockoffs
