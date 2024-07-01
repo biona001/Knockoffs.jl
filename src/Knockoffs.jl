@@ -35,6 +35,7 @@ export
     modelX_gaussian_rep_group_knockoffs,
     approx_modelX_gaussian_knockoffs,
     ipad,
+    ghost_knockoffs,
     # solvers
     solve_s, 
     solve_s_group,
@@ -90,6 +91,7 @@ include("predict.jl")
 include("group.jl")
 include("ipad.jl")
 include("R.jl")
+include("ghost.jl")
 include("experimental/hmm_wrapper.jl")
 include("experimental/hmm.jl")
 include("experimental/dmc.jl")
