@@ -1929,7 +1929,6 @@ O exceeds `threshold`.
 function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5, 
     prioritize_idx::Union{Vector{Int}, Nothing}=nothing, Σinv=nothing
     ) where T
-    all(x -> x ≈ 1, diag(Σ)) || error("Σ must be scaled to a correlation matrix first.")
     0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
 
     # boundary case: check for linearly dependent columns
