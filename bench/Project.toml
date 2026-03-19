@@ -1,0 +1,11 @@
+name = "KnockoffsBenchmarks"
+uuid = "d7f3e0e8-d07c-5b99-a2b6-c37b3b9b3333"
+version = "0.1.0"
+
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+BlockDiagonals = "0a1fb500-61f7-11e9-3c65-f5ef3456f9f0"
+Knockoffs = "878bf26d-0c49-448a-9df5-b057c815d613"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+PositiveFactorizations = "85a6dd25-e78a-55b7-8502-1745935b8125"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
