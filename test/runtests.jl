@@ -589,11 +589,11 @@ end
         end
     end
 
-    # block updates (2nd order constructions)
+    # block updates (exact constructions with known mean/covariance)
     tol = 0.01
     for method in [:sdp_block, :mvr_block, :maxent_block]
         @time ko = modelX_gaussian_group_knockoffs(X, method, groups, 
-            m=m, tol = tol, verbose=true)
+            true_mu, Sigma, m=m, tol = tol, verbose=true)
         # check constraints (compensating for numerical error)
         @test all(x -> x ≥ -1e-7, eigvals(Symmetric((m+1)/m*Sigma - ko.S)))
         @test all(x -> x ≥ -1e-7, eigvals(Symmetric(ko.S)))
@@ -768,6 +768,29 @@ end
         # if [1, 2] and [8, 9, 10] are in the same group, then 9 may not get selected
         @test 2 ∈ group_reps
     end
+
+    # same result with/without precomputed inverse covariance
+    Σ = Symmetric(simulate_AR1(40, a=3, b=1))
+    groups = repeat(1:8, inner=5)
+    reps_noinv = choose_group_reps(Σ, groups, threshold=0.6)
+    reps_inv = choose_group_reps(Σ, groups, threshold=0.6, Σinv=inv(Σ))
+    @test reps_noinv == reps_inv
+
+    # priority index should be retained among duplicate columns
+    # (issue-72 style edge case, but forces a specific duplicate to survive)
+    Σdup = Symmetric([1.0 0.14138129031570185 -0.07530156753912527 0.1425092255960416 -0.03975762881225776 -0.03975762881225776;
+                      0.14138129031570185 1.0 -0.06269073019504869 0.18796864772097638 -0.042632500750932216 -0.042632500750932216;
+                      -0.07530156753912527 -0.06269073019504869 1.0 0.10393405423314547 0.8269051049537056 0.8269051049537056;
+                      0.1425092255960416 0.18796864772097638 0.10393405423314547 1.0 0.1598138853324871 0.1598138853324871;
+                      -0.03975762881225776 -0.042632500750932216 0.8269051049537056 0.1598138853324871 1.0 0.9999999999999998;
+                      -0.03975762881225776 -0.042632500750932216 0.8269051049537056 0.1598138853324871 0.9999999999999998 1.0])
+    groupsdup = [1, 2, 3, 4, 3, 3]
+    reps_priority_dup = choose_group_reps(Σdup, groupsdup, threshold=0.999, prioritize_idx=[6])
+    @test 6 ∈ reps_priority_dup
+    @test 5 ∉ reps_priority_dup
+
+    # dimension mismatch check
+    @test_throws Exception choose_group_reps(Symmetric(Matrix{Float64}(I, 3, 3)), [1, 1], threshold=0.5)
 end
 
 @testset "multiple knockoffs" begin
