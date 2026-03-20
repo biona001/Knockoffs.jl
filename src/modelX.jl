@@ -90,8 +90,6 @@ and Entropy Maximization" by Gimenez and Zou.
 
 # Todo
 + When s is the zero vector, X̃ should be identical to X but it isn't
-+ Consider changing sampling code to using Distribution's MvNormal
-+ For multiple knockoffs, can we avoid storing a pm × pm matrix in memory?
 """
 function condition(
     X::AbstractMatrix, 
@@ -111,12 +109,20 @@ function condition(
         L = cholesky(PositiveFactorizations.Positive, Σ̃).L
         return X - (X .- μ') * ΣinvS + randn(n, p) * L
     end
-    # todo: can we form Σ̃ using SymmetricToeplitz? 
-    # So we don't need to actually store a matrix of size pm × pm in memory?
-    Σ̃ = repeat(C - S, m, m)
-    Σ̃ += BlockDiagonal([S for _ in 1:m]) # note S is variable D in Gimenez and Zou
-    μi = X - (X .- μ') * ΣinvS # in Gaminez and Zou, μi = Dinv(Σ)μ-(I-Dinv(Σ))X = (algebra..) = X-(X.-μ')*ΣinvS
-    μfull = repeat(μi, 1, m)
-    L = cholesky(PositiveFactorizations.Positive, Symmetric(Σ̃)).L
-    return μfull + randn(n, m*p) * L
+    # Efficient sampling using Jiaqi's trick: avoids forming an mp × mp covariance matrix.
+    # Each knockoff j is decomposed as: μi + shared_component + (ind_j - ind_avg),
+    # where shared_component ~ N(0, C - (m-1)/m * S) and ind_j ~ N(0, S) are i.i.d.
+    # This gives the correct block covariance: diag blocks = C, off-diag blocks = C - S.
+    # Note: S is variable D in Gimenez and Zou.
+    L_shared = cholesky(PositiveFactorizations.Positive, Symmetric(C - (m-1)/m * S)).L
+    L_ind = cholesky(PositiveFactorizations.Positive, Symmetric(S)).L
+    μi = X - (X .- μ') * ΣinvS # in Gimenez and Zou, μi = Dinv(Σ)μ-(I-Dinv(Σ))X = (algebra..) = X-(X.-μ')*ΣinvS
+    E1 = randn(n, p) * L_shared'  # n×p shared component, rows ~ N(0, C - (m-1)/m * S)
+    E2 = [randn(n, p) * L_ind' for _ in 1:m]  # each n×p, rows ~ N(0, S) i.i.d.
+    E2_avg = sum(E2) / m
+    X̃ = similar(X, n, m*p)
+    for j in 1:m
+        X̃[:, (j-1)*p+1 : j*p] .= μi .+ E1 .+ E2[j] .- E2_avg
+    end
+    return X̃
 end
