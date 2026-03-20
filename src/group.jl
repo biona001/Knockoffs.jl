@@ -193,10 +193,10 @@ function modelX_gaussian_rep_group_knockoffs(
         method, m=m, verbose=verbose; kwargs...)
 
     # sample multiple knockoffs (todo: sample each independently)
-    X̃ = condition(X, μ, Σ, Symmetric(D); m=m)
+    X̃ = condition(X, μ, sigma, Symmetric(D); m=m)
 
     return GaussianRepGroupKnockoff(X, X̃, groups, group_reps, S, 
-        Symmetric(D), Int(m), Symmetric(Σ), method, obj, enforce_cond_indep)
+        Symmetric(D), Int(m), Symmetric(sigma), method, obj, enforce_cond_indep)
 end
 
 """
@@ -1930,105 +1930,148 @@ function choose_group_reps(Σ::Symmetric{T}, groups::Vector{Int}; threshold=0.5,
     prioritize_idx::Union{Vector{Int}, Nothing}=nothing, Σinv=nothing
     ) where T
     0 < threshold < 1 || error("threshold should be in (0, 1) but was $threshold")
+    length(groups) == size(Σ, 1) ||
+        error("Expected length(groups) == size(Σ, 1)")
 
-    # boundary case: check for linearly dependent columns
-    p = size(Σ, 1)
-    dependent_cols = Int[]
-    @inbounds for i in 1:p
-        xi = @view(Σ[:, i])
-        for j in i+1:p
-            xj = @view(Σ[:, j])
-            is_dependent = true
-            for k in 1:i
-                if !isapprox(xi[k], xj[k])
-                    is_dependent = false
-                    break
-                end
-            end
-            if is_dependent
-                if isnothing(prioritize_idx) 
-                    push!(dependent_cols, j)
-                else
-                    j ∈ prioritize_idx ? push!(dependent_cols, i) : push!(dependent_cols, j)
-                end
-            end
-        end
-    end
-    unique!(dependent_cols)
-    if length(dependent_cols) > 0
-        independent_cols = setdiff(1:p, dependent_cols)
+    # Boundary case: remove duplicated (linearly dependent) columns first.
+    independent_cols, dependent_cols = _split_dependent_columns(Σ, prioritize_idx)
+    if !isempty(dependent_cols)
         Σsub = Symmetric(Σ[independent_cols, independent_cols])
         groups_sub = groups[independent_cols]
-        if !isnothing(prioritize_idx)
-            prioritize_idx = [idx - count(x -> x < idx, dependent_cols) 
-                            for idx in prioritize_idx]
-        end
+        prioritize_sub = _remap_indices(prioritize_idx, independent_cols)
         group_reps_sub = choose_group_reps(Σsub, groups_sub, threshold=threshold, 
-            prioritize_idx=prioritize_idx)
+            prioritize_idx=prioritize_sub)
         group_reps = independent_cols[group_reps_sub]
         return group_reps
     end
 
-    # all columns linearly indepedent: run main alg
+    # Main algorithm.
     isnothing(Σinv) && (Σinv = inv(Σ))
     unique_groups = unique(groups)
     group_reps = Int[]
-    storage1 = zeros(size(Σ, 1), size(Σ, 2))
-    storage2 = zeros(size(Σ, 2))
+    p = size(Σ, 1)
+    storage1 = zeros(T, p, p)
+    storage2 = zeros(T, p)
     @inbounds for g in unique_groups
-        group_idx = findall(x -> x == g, groups) # all variables in this group
-        O = findall(x -> x != g, groups) # all variables outside the group
+        group_idx = findall(x -> x == g, groups)
         group_size = length(group_idx)
-        if length(group_idx) == 1
+        if group_size == 1
             push!(group_reps, group_idx[1])
             continue
         end
-        # for each variable in current group, compute an ordering of importance
+        O = findall(x -> x != g, groups)
+
+        # Compute an ordering of within-group importance, then increase the
+        # number of representatives until the A1 stopping criterion is met.
         Σg = @view(Σ[group_idx, group_idx])
-        index = select_best_rss_subset(Σg, group_size) # indices in current groups
+        index = select_best_rss_subset(Σg, group_size)
         if !isnothing(prioritize_idx)
-            prioritize_g_idx = filter!(!isnothing, 
-                indexin(prioritize_idx, group_idx[index]))
-            index = prioritize_variants(index, index[prioritize_g_idx])
+            priority_pos = filter(!isnothing, indexin(prioritize_idx, group_idx[index]))
+            if !isempty(priority_pos)
+                index = prioritize_variants(index, index[priority_pos])
+            end
         end
-        indexΣ = group_idx[index] # indices in Σ
-        # keep adding reps in current group until stopping criteria
+
+        indexΣ = group_idx[index]
         R = [indexΣ[1]]
         push!(group_reps, indexΣ[1])
-        for i in 2:group_size
-            RO = union(R, O) # variables in R and O
-            Rc = setdiff(indexΣ, R) # variables not yet selected
-            ROc = setdiff(1:size(Σ, 1), RO)
-            Σ_RR_inv = inv(Σ[R, R])
-            # compute Σ_RORO_inv = inv(Σ[RO, RO]) = 
-            # Σinv[RO, RO] - Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
-            # using the fact that the quadratic form is low rank
-            L = cholesky(Symmetric(Σinv[ROc, ROc]))
-            X = inv(L.L) * Σinv[ROc, RO] # X'X = Σinv[RO, ROc] * inv(Σinv[ROc, ROc]) * Σinv[ROc, RO]
-            Σ_RORO_inv = @view(storage1[1:length(RO), 1:length(RO)])
-            Σ_RORO_inv .= @view(Σinv[RO, RO])
-            BLAS.syrk!('U', 'T', -one(T), X, one(T), Σ_RORO_inv) # upper triangular only
-            # LinearAlgebra.copytri!(Σ_RORO_inv, 'U')
-            # compute ratio of variation explained by j
-            ratio = zero(T)
-            for j in Rc
-                Σ_Rj = Σ[R, j]
-                Σ_ROj = Σ[RO, j]
-                R2_R = _dot(Σ_Rj, Σ_RR_inv, Σ_Rj, storage2) # R2_R = Σ_Rj*Σ_RR_inv*Σ_Rj
-                R2_RO = _dot(Σ_ROj, Symmetric(Σ_RORO_inv), Σ_ROj, storage2)
-                ratio += R2_R / R2_RO
-            end
-            ratio /= length(Rc)
+        while length(R) < group_size
+            ratio = _mean_explained_variance_ratio!(
+                Σ, Σinv, R, O, indexΣ, storage1, storage2
+            )
             if ratio > threshold
                 break
-            else
-                # select ith variable
-                push!(R, indexΣ[i])
-                push!(group_reps, indexΣ[i])
             end
+            next_rep = indexΣ[length(R) + 1]
+            push!(R, next_rep)
+            push!(group_reps, next_rep)
         end
     end
     return sort!(group_reps)
+end
+
+function _split_dependent_columns(
+    Σ::Symmetric{T},
+    prioritize_idx::Union{Vector{Int}, Nothing}
+    ) where T
+    p = size(Σ, 1)
+    prioritized = isnothing(prioritize_idx) ? Set{Int}() : Set(prioritize_idx)
+    dependent_cols = Int[]
+    @inbounds for i in 1:p-1
+        for j in i+1:p
+            _columns_match(Σ, i, j) || continue
+            keep_i = i in prioritized
+            keep_j = j in prioritized
+            if keep_i && !keep_j
+                push!(dependent_cols, j)
+            elseif keep_j && !keep_i
+                push!(dependent_cols, i)
+            else
+                push!(dependent_cols, j)
+            end
+        end
+    end
+    sort!(unique!(dependent_cols))
+    independent_cols = setdiff(1:p, dependent_cols)
+    return independent_cols, dependent_cols
+end
+
+function _columns_match(
+    Σ::Symmetric{T},
+    i::Int,
+    j::Int;
+    atol::Real = 1e-10,
+    rtol::Real = 1e-8
+    ) where T
+    @inbounds for k in axes(Σ, 1)
+        isapprox(Σ[k, i], Σ[k, j], atol=atol, rtol=rtol) || return false
+    end
+    return true
+end
+
+function _remap_indices(
+    prioritize_idx::Union{Vector{Int}, Nothing},
+    kept_cols::Vector{Int}
+    )
+    isnothing(prioritize_idx) && return nothing
+    old_to_new = Dict(col => i for (i, col) in pairs(kept_cols))
+    remapped = Int[]
+    for idx in prioritize_idx
+        haskey(old_to_new, idx) && push!(remapped, old_to_new[idx])
+    end
+    return isempty(remapped) ? nothing : remapped
+end
+
+function _mean_explained_variance_ratio!(
+    Σ::Symmetric{T},
+    Σinv::AbstractMatrix,
+    R::Vector{Int},
+    O::Vector{Int},
+    indexΣ::Vector{Int},
+    storage1::AbstractMatrix{T},
+    storage2::AbstractVector{T}
+    ) where T
+    RO = union(R, O)
+    Rc = setdiff(indexΣ, R)
+    ROc = setdiff(1:size(Σ, 1), RO)
+    Σ_RR_inv = inv(Σ[R, R])
+
+    # Compute inv(Σ[RO, RO]) from Σinv using block matrix inverse identities.
+    L = cholesky(Symmetric(Σinv[ROc, ROc]))
+    X = inv(L.L) * Σinv[ROc, RO]
+    Σ_RORO_inv = @view(storage1[1:length(RO), 1:length(RO)])
+    Σ_RORO_inv .= @view(Σinv[RO, RO])
+    BLAS.syrk!('U', 'T', -one(T), X, one(T), Σ_RORO_inv)
+
+    ratio = zero(T)
+    for j in Rc
+        Σ_Rj = Σ[R, j]
+        Σ_ROj = Σ[RO, j]
+        R2_R = _dot(Σ_Rj, Σ_RR_inv, Σ_Rj, storage2)
+        R2_RO = _dot(Σ_ROj, Symmetric(Σ_RORO_inv), Σ_ROj, storage2)
+        ratio += R2_R / R2_RO
+    end
+    return ratio / length(Rc)
 end
 
 """
