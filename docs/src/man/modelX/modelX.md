@@ -440,6 +440,13 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
 end
 ```
 
+For instance, to get selected variables at 10% FDR (i.e. `fdr_target[3] = 0.1`):
+```julia
+knockoff_filter.selected[3]  # indices of selected variables at 10% FDR
+knockoff_filter.taus[3]      # knockoff threshold used to achieve 10% FDR
+knockoff_filter.betas[3]     # estimated effect sizes at 10% FDR
+```
+
 Lets do 10 simulations and visualize power and FDR trade-off:
 
 
@@ -450,7 +457,8 @@ empirical_power = zeros(5)
 empirical_fdr = zeros(5)
 for i in 1:nsims
     @time knockoff_filter = fit_lasso(y, X, method=:mvr)
-    for i in eachindex(knockoff_filter.fdr_target)
+    FDR = knockoff_filter.fdr_target
+    for i in eachindex(FDR)
         selected = knockoff_filter.selected[i]
         power = length(selected ∩ correct_position) / k
         fdp = length(setdiff(selected, correct_position)) / max(length(selected), 1)
