@@ -227,6 +227,64 @@ end
     @test all(τ .== [0.4, 0.2, 0.0, 0.5, 0.4, 0.2])
 end
 
+@testset "multiple knockoff q-values" begin
+    Random.seed!(2026)
+    p = 60
+    m = 3
+    T0 = randn(p)
+    Tk = [randn(p) for _ in 1:m]
+    κ, τ, W = MK_statistics(T0, Tk)
+    qvalues = get_knockoff_qvalue(κ, τ, m)
+
+    @test length(qvalues) == p
+    @test all((0 .<= qvalues) .& (qvalues .<= 1))
+
+    for fdr in [0.01, 0.05, 0.1, 0.2, 0.4]
+        tau_hat = mk_threshold(τ, κ, m, fdr)
+        standard_selected = findall(x -> x ≥ tau_hat, W)
+        qvalue_selected = findall(x -> x ≤ fdr, qvalues)
+        @test standard_selected == qvalue_selected
+    end
+end
+
+@testset "q-value selection matches standard selection on simulated data" begin
+    Random.seed!(2026)
+    n = 220
+    p = 80
+    m = 3
+    ρ = 0.35
+    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    μ = zeros(p)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+
+    β = zeros(p)
+    signal_idx = sample(1:p, 12, replace=false)
+    β[signal_idx] .= rand([-1.5, -1.0, 1.0, 1.5], 12)
+    y = X * β + 0.8 .* randn(n)
+
+    ko = modelX_gaussian_knockoffs(X, :equi, μ, Σ, m=m)
+    fdrs = [0.02, 0.05, 0.1, 0.2, 0.3]
+    marginal_filter = fit_marginal(y, ko, fdrs=fdrs)
+    @test !isnothing(marginal_filter.qvalues)
+
+    # Recompute threshold-based selections from (κ, τ, W)
+    y_std = zscore(y, mean(y), std(y))
+    X_std = zscore(X, mean(X, dims=1), std(X, dims=1))
+    Xko_std = zscore(ko.Xko, mean(ko.Xko, dims=1), std(ko.Xko, dims=1))
+    T0 = abs2.(X_std' * y_std) ./ n
+    Tk = [abs2.(Transpose(@view(Xko_std[:, (k-1)*p+1:k*p])) * y_std) ./ n for k in 1:m]
+    κ, τ, W = MK_statistics(T0, Tk)
+    qvalues = get_knockoff_qvalue(κ, τ, m)
+
+    for (i, fdr) in enumerate(fdrs)
+        tau_hat = mk_threshold(τ, κ, m, fdr)
+        standard_selected = findall(x -> x ≥ tau_hat, W)
+        qvalue_selected = findall(x -> x ≤ fdr, qvalues)
+        @test standard_selected == qvalue_selected
+        @test marginal_filter.selected[i] == qvalue_selected
+    end
+end
+
 # from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
 @testset "Markov chain knockoffs have the right correlation structure" begin
     p = 20 # Number of states in markov chain

@@ -94,9 +94,11 @@ function fit_lasso(
     # feature importance statistics
     T0 = βestim[1:p]
     Tk = m > 1 ? [βestim[k*p+1:(k+1)*p] for k in 1:m] : βestim[p+1:end]
+    group_labels_for_stats = nothing
     if hasproperty(ko, :groups)
         groups = ko.groups
         unique_groups = unique(groups)
+        group_labels_for_stats = unique_groups
         T0_group = T[]
         Tk_group = m > 1 ? [T[] for k in 1:m] : T[]
         for g in unique_groups
@@ -122,11 +124,17 @@ function fit_lasso(
             W = MK_statistics(T0, Tk)
         end
     end
+    qvalues = if m > 1
+        isnothing(group_labels_for_stats) ? get_knockoff_qvalue(κ, τ, m) :
+            get_knockoff_qvalue(κ, τ, m; groups=group_labels_for_stats)
+    else
+        nothing
+    end
     # knockoff filter for each target fdr level
-    βs, a0s, selected, τs = Vector{T}[], T[], Vector{Int}[], T[], T[]
+    βs, a0s, selected, τs = Vector{T}[], T[], Vector{Int}[], T[]
     for fdr in fdrs
         tau_hat = m > 1 ? mk_threshold(τ, κ, m, fdr) : threshold(W, fdr, filter_method)
-        sel_idx = findall(x -> x ≥ tau_hat, W)
+        sel_idx = m > 1 ? findall(x -> x ≤ fdr, qvalues) : findall(x -> x ≥ tau_hat, W)
         # threshold non selected beta values
         β_filtered = zeros(T, p)
         if hasproperty(ko, :groups)
@@ -154,7 +162,7 @@ function fit_lasso(
         push!(τs, tau_hat)
     end
     return LassoKnockoffFilter(
-        y, X, ko, Int(m), βs, a0s, selected, W, τs, fdrs, d, debias)
+        y, X, ko, Int(m), βs, a0s, selected, W, qvalues, τs, fdrs, d, debias)
 end
 
 """
@@ -223,9 +231,11 @@ function fit_marginal(
     else
         Tk = abs2.(X̃_std'*y_std) ./ n
     end
+    group_labels_for_stats = nothing
     if hasproperty(ko, :groups)
         groups = ko.groups
         unique_groups = unique(groups)
+        group_labels_for_stats = unique_groups
         T0_group = T[]
         Tk_group = m > 1 ? [T[] for k in 1:m] : T[]
         for g in unique_groups
@@ -251,15 +261,21 @@ function fit_marginal(
             W = MK_statistics(T0, Tk)
         end
     end
+    qvalues = if m > 1
+        isnothing(group_labels_for_stats) ? get_knockoff_qvalue(κ, τ, m) :
+            get_knockoff_qvalue(κ, τ, m; groups=group_labels_for_stats)
+    else
+        nothing
+    end
     # knockoff filter
     τs, selected = T[], Vector{Int}[]
     for fdr in fdrs
         tau_hat = m > 1 ? mk_threshold(τ, κ, m, fdr) : threshold(W, fdr, filter_method)
-        sel_idx = findall(x -> x ≥ tau_hat, W)
+        sel_idx = m > 1 ? findall(x -> x ≤ fdr, qvalues) : findall(x -> x ≥ tau_hat, W)
         push!(selected, sel_idx)
         push!(τs, tau_hat)
     end
-    return MarginalKnockoffFilter(y, X, ko, W, τs, Int(m), selected, fdrs, d)
+    return MarginalKnockoffFilter(y, X, ko, W, qvalues, τs, Int(m), selected, fdrs, d)
 end
 
 function debias!(

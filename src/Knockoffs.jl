@@ -46,6 +46,7 @@ export
     solve_group_mvr_hybrid, solve_group_sdp_hybrid, 
     # utilities for running knockoff filter
     mk_threshold,
+    get_knockoff_qvalue,
     threshold, 
     MK_statistics,
     # functions related to fitting

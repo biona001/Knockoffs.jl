@@ -125,6 +125,7 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
     a0 :: Vector{T}   # intercepts for each model in betas
     selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
     W :: Vector{T} # length p vector of feature importance
+    qvalues :: Union{Nothing, Vector{Float64}} # knockoff q-values (only populated for multiple knockoffs)
     taus :: Vector{T} # threshold for significance. For fdr fdr_target[i], tau[i] is threshold, and all W ≥ tau[i] is selected
     fdr_target :: Vector{T} # target FDR level for each taus and betas
     d :: UnivariateDistribution # distribution of y
@@ -136,6 +137,7 @@ struct MarginalKnockoffFilter{T} <: KnockoffFilter
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
     W :: Vector{T} # length p vector of feature importance
+    qvalues :: Union{Nothing, Vector{Float64}} # knockoff q-values (only populated for multiple knockoffs)
     taus :: Vector{T} # threshold for significance. For fdr fdr_target[i], tau[i] is threshold, and all W ≥ tau[i] is selected
     m :: Int # number of knockoffs per feature generated
     # T0 :: Vector{T} # marginal correlations y'*X
