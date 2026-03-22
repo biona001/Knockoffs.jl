@@ -1,17 +1,30 @@
 function predict(
     model::LassoKnockoffFilter{T},
-    xtest::AbstractMatrix{T}
+    xtest::AbstractMatrix{T},
+    q::Real;
+    debias::Union{Nothing, Symbol}=model.debias,
+    kwargs...,
     ) where T
-    ŷs = Vector{T}[]
+    β, a0 = selected_coefficients(model, q; debias=debias, kwargs...)
     d = model.d
     link = canonicallink(d)
-    for i in 1:length(model.betas)
-        # compute mean: η = a0 .+ Xβ̂
-        η = fill(model.a0[i], size(xtest, 1))
-        BLAS.gemv!('N', one(T), xtest, model.betas[i], one(T), η)
-        # apply inverse link to get mean
-        μ = GLM.linkinv.(link, η)
-        push!(ŷs, μ)
+    # compute mean: η = a0 .+ Xβ̂
+    η = fill(a0, size(xtest, 1))
+    BLAS.gemv!('N', one(T), xtest, β, one(T), η)
+    # apply inverse link to get mean
+    return GLM.linkinv.(link, η)
+end
+
+function predict(
+    model::LassoKnockoffFilter{T},
+    xtest::AbstractMatrix{T},
+    qs::AbstractVector{<:Real};
+    debias::Union{Nothing, Symbol}=model.debias,
+    kwargs...,
+    ) where T
+    ŷs = Vector{T}[]
+    for q in qs
+        push!(ŷs, predict(model, xtest, q; debias=debias, kwargs...))
     end
     return ŷs
 end

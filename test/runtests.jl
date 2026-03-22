@@ -264,8 +264,8 @@ end
 
     ko = modelX_gaussian_knockoffs(X, :equi, μ, Σ, m=m)
     fdrs = [0.02, 0.05, 0.1, 0.2, 0.3]
-    marginal_filter = fit_marginal(y, ko, fdrs=fdrs)
-    @test !isnothing(marginal_filter.qvalues)
+    marginal_filter = fit_marginal(y, ko)
+    @test length(marginal_filter.qvalues) == p
 
     # Recompute threshold-based selections from (κ, τ, W)
     y_std = zscore(y, mean(y), std(y))
@@ -281,7 +281,7 @@ end
         standard_selected = findall(x -> x ≥ tau_hat, W)
         qvalue_selected = findall(x -> x ≤ fdr, qvalues)
         @test standard_selected == qvalue_selected
-        @test marginal_filter.selected[i] == qvalue_selected
+        @test selected_variables(marginal_filter, fdr) == qvalue_selected
     end
 end
 
@@ -368,11 +368,11 @@ end
     @time me_filter = fit_lasso(y, Xko_maxent, debias=nothing)
 
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
-    for i in eachindex(sdp_filter.fdr_target)
-        # extract beta for current fdr
-        betasdp = sdp_filter.betas[i]
-        betamvr = mvr_filter.betas[i]
-        betame = me_filter.betas[i]
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        # extract beta for current q-value threshold
+        betasdp, _ = selected_coefficients(sdp_filter, q; debias=nothing)
+        betamvr, _ = selected_coefficients(mvr_filter, q; debias=nothing)
+        betame, _ = selected_coefficients(me_filter, q; debias=nothing)
         
         # compute power and false discovery proportion
         push!(sdp_power, length(findall(!iszero, betasdp) ∩ correct_position) / k)
@@ -454,8 +454,10 @@ end
     @time yesdebias = fit_lasso(y, Xko, debias=:ls)
 
     # check that debiased result have same support as not debiasing
-    for i in eachindex(nodebias.fdr_target)
-        @test issubset(findall(!iszero, yesdebias.betas[i]), findall(!iszero, nodebias.betas[i]))
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        βn, _ = selected_coefficients(nodebias, q; debias=nothing)
+        βd, _ = selected_coefficients(yesdebias, q; debias=:ls)
+        @test issubset(findall(!iszero, βd), findall(!iszero, βn))
     end
 end
 
@@ -503,25 +505,25 @@ end
 
     # debias with least squares
     ko = fit_lasso(y, X, debias=:ls);
-    @test length(ko.betas) == length(ko.a0)
-    for i in 1:length(ko.betas)
-        @show norm(ko.betas[i] - b) # second best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ko, q; debias=:ls)
+        @show norm(β̂ - b) # second best
     end
     # idx = findall(!iszero, b)
     # [ko.betas[5][idx] b[idx]]
     
     # debias with lasso
     ko = fit_lasso(y, X, debias=:lasso);
-    @test length(ko.betas) == length(ko.a0)
-    for i in 1:length(ko.betas)
-        @show norm(ko.betas[i] - b) # best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ko, q; debias=:lasso)
+        @show norm(β̂ - b) # best
     end
 
     # no debias
     ko = fit_lasso(y, X, debias=nothing);
-    @test length(ko.betas) == length(ko.a0)
-    for i in 1:length(ko.betas)
-        @show norm(ko.betas[i] - b) # worst
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ko, q; debias=nothing)
+        @show norm(β̂ - b) # worst
     end
 end
 
@@ -540,23 +542,23 @@ end
 
     # debias with least squares
     ls_ko = fit_lasso(y, X, d = Binomial(), debias=:ls)
-    @test length(ls_ko.betas) == length(ls_ko.a0)
-    for i in 1:length(ls_ko.betas)
-        @show norm(ls_ko.betas[i] - b) # best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ls_ko, q; debias=:ls)
+        @show norm(β̂ - b) # best
     end
     
     # debias with lasso
     lasso_ko = fit_lasso(y, X, d = Binomial(), debias=:lasso)
-    @test length(lasso_ko.betas) == length(lasso_ko.a0)
-    for i in 1:length(lasso_ko.betas)
-        @show norm(lasso_ko.betas[i] - b) # second best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(lasso_ko, q; debias=:lasso)
+        @show norm(β̂ - b) # second best
     end
 
     # no debias
     nodebias_ko = fit_lasso(y, X, d = Binomial(), debias=nothing)
-    @test length(nodebias_ko.betas) == length(nodebias_ko.a0)
-    for i in 1:length(nodebias_ko.betas)
-        @show norm(nodebias_ko.betas[i] - b) # worst
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(nodebias_ko, q; debias=nothing)
+        @show norm(β̂ - b) # worst
     end
 
     # visually compare estimated effect sizes (least squares > nodebias > lasso)
@@ -580,22 +582,22 @@ end
 
     # generate knockoffs and predict with debiased beta for each target FDR
     ko = fit_lasso(y, X, debias=:ls, filter_method=:knockoff)
-    ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.betas)
+    ŷs = Knockoffs.predict(ko, Xtest, [0.01, 0.05, 0.1, 0.25, 0.5], debias=:ls)
+    for i in eachindex(ŷs)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
 
     ko = fit_lasso(y, X, debias=:lasso, filter_method=:knockoff)
-    ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.betas)
+    ŷs = Knockoffs.predict(ko, Xtest, [0.01, 0.05, 0.1, 0.25, 0.5], debias=:lasso)
+    for i in eachindex(ŷs)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
 
     ko = fit_lasso(y, X, debias=nothing, filter_method=:knockoff)
-    ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.betas)
+    ŷs = Knockoffs.predict(ko, Xtest, [0.01, 0.05, 0.1, 0.25, 0.5], debias=nothing)
+    for i in eachindex(ŷs)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end

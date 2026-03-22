@@ -52,6 +52,8 @@ export
     # functions related to fitting
     fit_lasso, 
     fit_marginal, 
+    selected_variables,
+    selected_coefficients,
     debias!, 
     # functions for prediction routine after lasso fit
     predict, R2, auc, 

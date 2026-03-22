@@ -31,6 +31,40 @@ function threshold(w::AbstractVector{T}, q::Number,
 end
 
 """
+    get_knockoff_qvalue(w; method=:knockoff_plus, rej_bounds=10000)
+
+Compute knockoff q-values for the single-knockoff filter. The q-value for each
+feature is the minimum target FDR at which that feature is selected.
+"""
+function get_knockoff_qvalue(
+    w::AbstractVector{T};
+    method::Symbol=:knockoff_plus,
+    rej_bounds::Int=10000,
+    ) where T <: AbstractFloat
+    rej_bounds > 0 || error("rej_bounds should be positive but got $rej_bounds")
+    offset = method == :knockoff ? 0 : method == :knockoff_plus ? 1 :
+        error("method should be :knockoff or :knockoff_plus but was $method.")
+    thresholds = sort(abs.(w), rev=true)
+    max_index = min(length(thresholds), rej_bounds)
+    ratio = zeros(Float64, max_index)
+    for i in 1:max_index
+        t = thresholds[i]
+        ratio[i] = (offset + count(x -> x ≤ -t, w)) / count(x -> x ≥ t, w)
+    end
+    qvalues = ones(Float64, length(w))
+    for j in eachindex(w)
+        w[j] > 0 || continue
+        qj = 1.0
+        for i in 1:max_index
+            thresholds[i] <= w[j] || continue
+            qj = min(qj, ratio[i])
+        end
+        qvalues[j] = min(1.0, qj)
+    end
+    return qvalues
+end
+
+"""
     mk_threshold(τ::Vector{T}, κ::Vector{Int}, m::Int, q::Number)
 
 Chooses the multiple knockoff threshold `τ̂ > 0` by setting
