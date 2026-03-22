@@ -290,7 +290,7 @@ rME.Xko
 ## Lasso Example
 
 Lets see the empirical power and FDR group knockoffs over 10 simulations when
-+ the targer FDR is 10%
++ the target FDR is 10% (i.e. `fdr_target[3] = 0.1`)
 + we generate $m=5$ knockoffs per feature
 + ``\beta_j \sim \pm 0.25`` for 10 causal ``j``s
 
@@ -326,7 +326,7 @@ for sim in 1:10
 
     # group ME knockoffs
     t = @elapsed ko_filter = fit_lasso(y, X, method=:maxent, groups=groups, m=5)
-    selected = ko_filter.selected[3]
+    selected = ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
     power = length(intersect(correct_groups, selected)) / length(correct_groups)
     fdr = length(setdiff(selected, correct_groups)) / max(1, length(selected))
     println("Sim $sim group-knockoff power = $power, FDR = $fdr, time=$t")
@@ -384,7 +384,7 @@ for sim in 1:10
 
     # group ME knockoffs
     t = @elapsed ko_filter = fit_lasso(y, X, method=:maxent, m=5)
-    selected = ko_filter.selected[3]
+    selected = ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
     power = length(intersect(correct_snps, selected)) / length(correct_snps)
     fdr = length(setdiff(selected, correct_snps)) / max(1, length(selected))
     println("Sim $sim nongroup-knockoff power = $power, FDR = $fdr, time=$t")
