@@ -27,7 +27,9 @@ We provide direct wrappers for `Knockoffs.jl` in both R and Python via the packa
 ## Package Features
 
 + Fast coordinate descent algorithms for MVR, ME, and SDP model-X knockoffs
-+ Grouped MVR/ME/SDP knockoffs for improved power when there are highly correlated features. We also provide a representative group knockoff approach, based on graphical models, which is much more computationally efficient and empirically has superior power. 
++ Efficient multiple knockoff sampling for improved knockoff stability and power
++ Variable selection based on knockoff q-values
++ Grouped MVR/ME/SDP knockoffs for improved power when there are highly correlated features. We also provide a representative group knockoff approach for faster group-knockoff optimization 
 + Preliminary support for many other kinds of knockoffs (ghost, HMM, IPAD...etc), see documentation. 
 + Built-in functions to compute feature importance scores via Lasso/marginal regressions
 
