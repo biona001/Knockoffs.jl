@@ -52,6 +52,8 @@ export
     # functions related to fitting
     fit_lasso, 
     fit_marginal, 
+    select_variables,
+    select_groups,
     selected_variables,
     selected_coefficients,
     debias!, 

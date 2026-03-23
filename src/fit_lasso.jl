@@ -7,7 +7,7 @@
 Generates model-X knockoffs with `method`, runs Lasso, then applies the 
 knockoff filter. If `μ` and `Σ` are not provided, they will be estimated from
 data. Feature selection is done on demand via q-values with
-`selected_variables(model, q)` and `selected_coefficients(model, q)`.
+`select_variables(model, q)` and `selected_coefficients(model, q)`.
 
 # Inputs
 + `y`: A `n × 1` response vector
@@ -132,14 +132,37 @@ function fit_lasso(
 end
 
 """
-    selected_variables(model::KnockoffFilter, q::Real)
+    select_variables(model::KnockoffFilter, q::Real)
 
 Select statistics whose q-value is at most `q`.
 """
-function selected_variables(model::KnockoffFilter, q::Real)
+function select_variables(model::KnockoffFilter, q::Real)
     0 ≤ q ≤ 1 || error("Target FDR should be between 0 and 1 but got $q")
     return findall(x -> x ≤ q, model.qvalues)
 end
+
+"""
+    select_groups(model::KnockoffFilter, q::Real)
+
+Return selected groups and variable indices in each selected group.
+
+# Output
++ `selected_groups`: Group labels selected at q-value level `q`
++ `selected_group_vars`: `selected_group_vars[i]` stores variable indices in
+    `selected_groups[i]`
+"""
+function select_groups(model::KnockoffFilter, q::Real)
+    hasproperty(model.ko, :groups) ||
+        error("select_groups requires a grouped knockoff model.")
+    selected_stats = select_variables(model, q)
+    selected_groups = isnothing(model.stat_groups) ? selected_stats :
+        model.stat_groups[selected_stats]
+    selected_groups = unique(selected_groups)
+    selected_group_vars = [findall(isequal(g), model.ko.groups) for g in selected_groups]
+    return selected_groups, selected_group_vars
+end
+
+Base.@deprecate selected_variables(model::KnockoffFilter, q::Real) select_variables(model, q)
 
 """
     selected_coefficients(model::LassoKnockoffFilter, q::Real; [debias], [kwargs...])
@@ -153,7 +176,7 @@ function selected_coefficients(
     kwargs...,
     ) where T
     β_filtered = zeros(T, length(model.beta))
-    selected_stats = selected_variables(model, q)
+    selected_stats = select_variables(model, q)
     if hasproperty(model.ko, :groups)
         groups = model.ko.groups
         selected_groups = isnothing(model.stat_groups) ? selected_stats :

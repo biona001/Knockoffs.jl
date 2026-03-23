@@ -281,7 +281,34 @@ end
         standard_selected = findall(x -> x ≥ tau_hat, W)
         qvalue_selected = findall(x -> x ≤ fdr, qvalues)
         @test standard_selected == qvalue_selected
-        @test selected_variables(marginal_filter, fdr) == qvalue_selected
+        @test select_variables(marginal_filter, fdr) == qvalue_selected
+    end
+end
+
+@testset "select_groups returns group labels and member indices" begin
+    Random.seed!(2027)
+    n = 180
+    p = 70
+    Σ = Matrix(SymmetricToeplitz(0.3.^(0:(p-1))))
+    μ = zeros(p)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    zscore!(X, mean(X, dims=1), std(X, dims=1))
+    groups = hc_partition_groups(X, cutoff=0.5)
+
+    β = zeros(p)
+    β[sample(1:p, 10, replace=false)] .= rand([-1.0, 1.0], 10)
+    y = X * β + 0.7 .* randn(n)
+
+    ko_filter = fit_lasso(y, X, μ, Σ, method=:equi, groups=groups, m=1)
+    q = 0.2
+    selected_stats = select_variables(ko_filter, q)
+    selected_groups, selected_group_vars = select_groups(ko_filter, q)
+    expected_groups = isnothing(ko_filter.stat_groups) ? selected_stats :
+        ko_filter.stat_groups[selected_stats]
+    @test selected_groups == expected_groups
+    @test length(selected_groups) == length(selected_group_vars)
+    for (g, vars) in zip(selected_groups, selected_group_vars)
+        @test all(==(g), @view(ko_filter.ko.groups[vars]))
     end
 end
 
