@@ -21,7 +21,7 @@ Pages = [
     "man/knockoffscreen/knockoffscreen.md",
     "man/ghost_knockoffs.md",
     "man/hmm/hmm.md",
-    "man/ipad.md",
+    "man/pca.md",
     "man/JuliaCall.md",
     "man/api.md"
 ]
