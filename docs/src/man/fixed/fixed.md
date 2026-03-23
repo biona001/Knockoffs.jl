@@ -1,4 +1,3 @@
-
 # Fixed-X knockoffs
 
 This tutorial generates fixed-X knockoffs and checks some of its basic properties. The methodology is described in the following paper
@@ -37,7 +36,7 @@ normalize_col!(X)    # normalize columns of X
 @time me = fixed_knockoffs(X, :maxent);
 ```
 
-      0.767067 seconds (102 allocations: 22.303 MiB)
+      5.953172 seconds (37.58 M allocations: 1.825 GiB, 8.69% gc time, 151.58% compilation time: 35% of which was recompilation)
 
 
 The return type is a `Knockoff` struct, which contains the following fields
@@ -74,32 +73,32 @@ We can check some knockoff properties. For instance, is it true that $X'\tilde{X
 
 
     40000×2 Matrix{Float64}:
-      0.376926     0.376926
-     -0.0434507   -0.0434507
-     -0.00211772  -0.00211772
-     -0.00720163  -0.00720163
-     -0.0160462   -0.0160462
-      0.00304937   0.00304937
-     -0.0207398   -0.0207398
-     -0.0171064   -0.0171064
-      0.0164143    0.0164143
-     -0.0314399   -0.0314399
-     -0.01243     -0.01243
-      0.0308754    0.0308754
-      0.0194948    0.0194948
-      ⋮           
-     -0.0183637   -0.0183637
-      0.0180358    0.0180358
-     -0.0269833   -0.0269833
-      0.00231273   0.00231273
-      0.0047828    0.0047828
-      0.0191073    0.0191073
-      0.0116001    0.0116001
-     -0.0203994   -0.0203994
-      0.00449654   0.00449654
-     -0.00696245  -0.00696245
-     -0.0045149   -0.0045149
-      0.363215     0.363215
+      0.480169      0.480169
+      0.000171683   0.000171683
+      0.0392342     0.0392342
+      0.00219372    0.00219372
+     -0.0582466    -0.0582466
+      0.0550328     0.0550328
+     -0.0451275    -0.0451275
+      0.00659594    0.00659594
+      0.0526269     0.0526269
+      0.0150172     0.0150172
+     -0.00834715   -0.00834715
+      0.0105334     0.0105334
+      0.0107362     0.0107362
+      ⋮            
+      0.00341999    0.00341999
+      0.0263146     0.0263146
+     -0.0106239    -0.0106239
+      0.00751558    0.00751558
+      0.086276      0.086276
+      0.0155147     0.0155147
+      0.00996313    0.00996313
+      0.0439478     0.0439478
+     -0.00537325   -0.00537325
+     -0.00990987   -0.00990987
+     -0.0180614    -0.0180614
+      0.429411      0.429411
 
 
 
@@ -140,32 +139,32 @@ y = X * βtrue + randn(n)
 
 
     1000-element Vector{Float64}:
-      11.443750905602776
-       0.9838821881590077
-       4.005284705393306
-      -3.7700161069515
-     -13.00069065413081
-      -3.723567487544001
-      -0.023706041074809142
-      -7.7754509432906405
-      -1.3428086906548775
-       2.997872505761214
-       3.0159247260525435
-       7.447226561613222
-       0.8552180712448658
-       ⋮
-       7.5361496693874495
-       4.931186951450571
-      -2.257175596026274
-      -0.5319905325018484
-       8.025043090281391
-       6.3728542780832385
-      -3.0432136216197696
-       0.77378700225668
-      -3.454973406104122
-      -5.29163844545535
-       2.74314096421341
-       0.05144992498465495
+      0.675281613898412
+      0.5618673666929682
+     -0.4146439288103276
+      0.8987401717031627
+      0.8998503840647872
+      0.8084207163260753
+      1.2976744998677376
+     -1.684475098067243
+     -0.4336702901328552
+      0.0533463769107666
+      0.16210573321245056
+      1.213391824024179
+      0.39494828633580303
+      ⋮
+      0.13962121266001332
+     -1.2966631575614131
+     -0.324552752397086
+     -1.6955340821447908
+     -1.1215540315989214
+     -0.6224593146274248
+      0.8890865054379217
+     -0.3683043014539441
+     -0.6927911070411009
+      1.8741468046858631
+     -0.6021143586672851
+      0.016019797345184973
 
 
 
@@ -190,26 +189,21 @@ FDR = length(setdiff(findall(!iszero, βlasso), correct_position)) / count(!isze
 println("Lasso power = $power, FDR = $FDR")
 ```
 
-    Lasso power = 0.96, FDR = 0.5
+    Lasso power = 0.0, FDR = NaN
 
 
 About half of all discoveries from Lasso regression are false positives. 
 
 ### Knockoff+LASSO
 
-Now lets try applying the knockoff methodology. Recall that consists of a few steps 
-
-1. Run LASSO on $[\mathbf{X} \mathbf{\tilde{X}}]$
-2. Compare feature importance score $W_j = \text{score}(x_j) - \text{score}(\tilde{x}_j)$ for each $j = 1,...,p$. Here we use $W_j = |\beta_j| - |\tilde{\beta}_{j}|$
-3. Choose target FDR $q \in [0, 1]$ and compute 
-$$\tau = min_{t}\left\{t > 0: \frac{{\{\#j: W_j ≤ -t}\}}{max(1, {\{\#j: W_j ≥ t}\})} \le q\right\}$$
+Now lets try applying the knockoff methodology. 
 
 
 ```julia
 @time knockoff_filter = fit_lasso(y, me);
 ```
 
-      1.049388 seconds (835 allocations: 46.274 MiB)
+      1.989758 seconds (18.05 M allocations: 938.772 MiB, 6.28% gc time, 34.72% compilation time)
 
 
 The return type is now a `LassoKnockoffFilter`, which contains the following information
@@ -220,23 +214,30 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
     m :: Int # number of knockoffs per feature generated
-    betas :: Vector{Vector{T}} # betas[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
-    a0 :: Vector{T}   # intercepts for each model in betas
-    selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
+    beta :: Vector{T} # full lasso coefficients before q-value thresholding
+    a0 :: T   # intercept for the full lasso model
     W :: Vector{T} # length p vector of feature importance
-    taus :: Vector{T} # threshold for significance. For fdr fdr_target[i], tau[i] is threshold, and all W ≥ tau[i] is selected
-    fdr_target :: Vector{T} # target FDR level for each taus and betas
+    qvalues :: Vector{Float64} # knockoff q-values
+    stat_groups :: Union{Nothing, Vector{Int}} # group labels corresponding to W/qvalues entries
     d :: UnivariateDistribution # distribution of y
     debias :: Union{Nothing, Symbol} # how betas and a0 have been debiased (`nothing` for not debiased)
+    stringent :: Bool # group debiasing behavior
 end
 ```
 
-For instance, to get selected variables at 10% FDR (i.e. `fdr_target[3] = 0.1`):
+For instance, to get selected variables at 10% FDR:
+
+
 ```julia
-knockoff_filter.selected[3]  # indices of selected variables at 10% FDR
-knockoff_filter.taus[3]      # knockoff threshold used to achieve 10% FDR
-knockoff_filter.betas[3]     # estimated effect sizes at 10% FDR
+selected = select_variables(knockoff_filter, 0.1)
 ```
+
+
+
+
+    Int64[]
+
+
 
 Given these information, we can e.g. visualize power and FDR trade-off:
 
@@ -244,8 +245,9 @@ Given these information, we can e.g. visualize power and FDR trade-off:
 ```julia
 # run 10 simulations and compute empirical power/FDR
 nsims = 10
-empirical_power = zeros(5)
-empirical_fdr = zeros(5)
+FDR = collect(0.01:0.01:0.2)
+empirical_power = zeros(length(FDR))
+empirical_fdr = zeros(length(FDR))
 for i in 1:nsims
     # simulate data
     X = randn(1000, 200)
@@ -261,9 +263,8 @@ for i in 1:nsims
     @time knockoff_filter = fit_lasso(y, me)
 
     # compute FDR/power
-    FDR = knockoff_filter.fdr_target
     for i in eachindex(FDR)
-        selected = knockoff_filter.selected[i]
+        selected = select_variables(knockoff_filter, FDR[i]) 
         power = length(selected ∩ correct_position) / k
         fdp = length(setdiff(selected, correct_position)) / max(length(selected), 1)
         empirical_power[i] += power
@@ -280,32 +281,32 @@ Plots.abline!(fdr_plot, 1, 0, line=:dash)
 plot(power_plot, fdr_plot)
 ```
 
-      0.730351 seconds (102 allocations: 22.303 MiB, 0.75% gc time)
-      0.882967 seconds (835 allocations: 46.349 MiB)
-      0.508460 seconds (102 allocations: 22.303 MiB)
-      0.888551 seconds (835 allocations: 46.278 MiB)
-      0.643473 seconds (102 allocations: 22.303 MiB)
-      0.891910 seconds (835 allocations: 46.492 MiB, 0.18% gc time)
-      0.432557 seconds (102 allocations: 22.303 MiB)
-      0.859462 seconds (835 allocations: 46.205 MiB)
-      0.474027 seconds (102 allocations: 22.303 MiB)
-      0.879261 seconds (835 allocations: 46.277 MiB)
-      0.586823 seconds (102 allocations: 22.303 MiB, 0.48% gc time)
-      0.883496 seconds (835 allocations: 46.421 MiB)
-      0.742627 seconds (102 allocations: 22.303 MiB)
-      0.878495 seconds (835 allocations: 46.127 MiB)
-      0.576416 seconds (102 allocations: 22.303 MiB)
-      0.884102 seconds (835 allocations: 46.204 MiB, 0.15% gc time)
-      0.617052 seconds (102 allocations: 22.303 MiB)
-      0.885246 seconds (835 allocations: 46.493 MiB)
-      0.536176 seconds (102 allocations: 22.303 MiB)
-      0.872704 seconds (835 allocations: 46.127 MiB, 0.15% gc time)
+      0.086780 seconds (149 allocations: 22.178 MiB)
+      1.167725 seconds (1.16 k allocations: 49.696 MiB, 1.15% gc time)
+      0.076191 seconds (149 allocations: 22.178 MiB, 1.12% gc time)
+      1.125222 seconds (1.16 k allocations: 49.695 MiB, 0.07% gc time)
+      0.075398 seconds (149 allocations: 22.178 MiB)
+      1.116443 seconds (1.16 k allocations: 49.695 MiB, 0.15% gc time)
+      0.077468 seconds (149 allocations: 22.178 MiB, 1.05% gc time)
+      1.133483 seconds (1.16 k allocations: 49.696 MiB, 0.15% gc time)
+      0.069382 seconds (149 allocations: 22.178 MiB, 1.18% gc time)
+      1.131411 seconds (1.16 k allocations: 49.696 MiB, 0.10% gc time)
+      0.076411 seconds (149 allocations: 22.178 MiB, 1.17% gc time)
+      1.138530 seconds (1.16 k allocations: 49.696 MiB, 0.15% gc time)
+      0.074894 seconds (149 allocations: 22.178 MiB)
+      1.182430 seconds (1.16 k allocations: 49.696 MiB, 0.62% gc time)
+      0.071245 seconds (149 allocations: 22.178 MiB, 1.22% gc time)
+      1.172055 seconds (1.16 k allocations: 50.008 MiB, 0.14% gc time)
+      0.070234 seconds (149 allocations: 22.178 MiB)
+      1.462285 seconds (1.16 k allocations: 50.187 MiB, 22.24% gc time)
+      0.078844 seconds (149 allocations: 22.178 MiB)
+      1.127343 seconds (1.16 k allocations: 50.008 MiB, 0.07% gc time)
 
 
 
 
 
-![png](output_15_1.png)
+![](output_17_1.png)
 
 
 

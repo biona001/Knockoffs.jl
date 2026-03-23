@@ -1,16 +1,19 @@
+# PCA knockoffs
 
-# IPAD knockoffs
-
-This tutorial generates knockoffs based on the [intertwined probabilistic factors decoupling (IPAD)](https://www.tandfonline.com/doi/full/10.1080/01621459.2019.1654878) method, described in the following paper
+This tutorial covers **PCA knockoffs** (the IPAD-style construction), based on the [intertwined probabilistic factors decoupling (IPAD)](https://www.tandfonline.com/doi/full/10.1080/01621459.2019.1654878) method described in the following paper
 
 > Fan, Yingying, Jinchi Lv, Mahrad Sharifvaghefi, and Yoshimasa Uematsu. "IPAD: stable interpretable forecasting with knockoffs inference." Journal of the American Statistical Association 115, no. 532 (2020): 1822-1834.
 
+In this implementation, IPAD is effectively a PCA/factor-model knockoff construction: we estimate a low-rank signal plus residual noise, then sample knockoffs from that approximation.
+
 As we will see shortly,
 
-+ IPAD knockoffs are more powerful and much more efficient to generate than model-X MVR/ME/SDP knockoffs, if we can assume a low-dimensional factored model for the data matrix `X`. 
-+ If `X` doesn't really assume a factored model, then IPAD knockoff's empirical FDR will be inflated, sometimes severely so.
++ PCA (IPAD-style) knockoffs are more powerful and much more efficient to generate than model-X MVR/ME/SDP knockoffs when a low-dimensional factor model is reasonable for `X`.
++ Because this is an approximate construction, if `X` does not follow the factor-model assumption, empirical FDR can be inflated (sometimes severely).
++ This approximation can be especially useful in very high dimensions (e.g. `p >> 10000`) where exact model-X knockoff generation can be computationally expensive.
 
-Our comparison uses target FDR 10%,  Lasso coefficient difference statistic, and we explore 3 ways (ER, GR, VR) to choose the number of latent factors `r` for IPAD knockoffs.
+Our comparison uses target FDR 10%, Lasso coefficient difference statistic, and we explore 3 ways (ER, GR, VE) to choose the number of latent factors `r` for PCA/IPAD knockoffs.
+
 
 
 ```julia
@@ -23,6 +26,7 @@ using ToeplitzMatrices
 using Distributions
 using Random
 using CSV, DataFrames
+
 ```
 
 ## Test1: Simulate under factored model
@@ -34,6 +38,7 @@ This is design 1 of [IPAD: Stable Interpretable Forecasting with Knockoffs Infer
 + ``y = X\beta + \sqrt{c}\epsilon`` where ``c = 0.2``
 + 50 causal variables with $\beta_i = A = 0.1$
 + For MVR/ME/SDP, we generate 2nd order knockoffs by estimating a shrinked covariance matrix
+
 
 
 ```julia
@@ -77,7 +82,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         ipad_er_t = @elapsed ipad_er = ipad(X, r_method = :er, m = m)
         ipad_er_ko_filter = fit_lasso(y, ipad_er)
-        selected = ipad_er_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_er_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_er_power = length(selected ∩ correct_position) / k
         ipad_er_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -85,7 +90,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         ipad_gr_t = @elapsed ipad_gr = ipad(X, r_method = :gr, m = m)
         ipad_gr_ko_filter = fit_lasso(y, ipad_gr)
-        selected = ipad_gr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_gr_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_gr_power = length(selected ∩ correct_position) / k
         ipad_gr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -93,7 +98,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         ipad_ve_t = @elapsed ipad_ve = ipad(X, r_method = :ve, m = m)
         ipad_ve_ko_filter = fit_lasso(y, ipad_ve)
-        selected = ipad_ve_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_ve_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_ve_power = length(selected ∩ correct_position) / k
         ipad_ve_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -101,7 +106,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         me_t = @elapsed me = modelX_gaussian_knockoffs(X, :maxent, m = m)
         me_ko_filter = fit_lasso(y, me)
-        selected = me_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(me_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         me_power = length(selected ∩ correct_position) / k
         me_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -109,7 +114,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         mvr_t = @elapsed mvr = modelX_gaussian_knockoffs(X, :mvr, m = m)
         mvr_ko_filter = fit_lasso(y, mvr)
-        selected = mvr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(mvr_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         mvr_power = length(selected ∩ correct_position) / k
         mvr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -117,7 +122,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
-        selected = sdp_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(sdp_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
         sdp_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -181,86 +186,87 @@ end
 
 nsims = 10
 result = compare_ipad(nsims);
+
 ```
 
-    ipad ER: power = 0.98, FDR = 0.07547169811320754, rank = 3, time = 0.232
-    ipad GR: power = 0.98, FDR = 0.07547169811320754, rank = 3, time = 0.068
-    ipad VE: power = 1.0, FDR = 0.16666666666666666, rank = 257, time = 0.052
-    ME: power = 0.0, FDR = 0.0, time = 2.312
-    MVR: power = 0.0, FDR = 0.0, time = 2.953
-    SDP: power = 0.48, FDR = 0.0, time = 11.525
+    ipad ER: power = 0.98, FDR = 0.09259259259259259, rank = 3, time = 0.234
+    ipad GR: power = 0.98, FDR = 0.09259259259259259, rank = 3, time = 0.028
+    ipad VE: power = 0.9, FDR = 0.08163265306122448, rank = 257, time = 0.316
+    ME: power = 0.0, FDR = 0.0, time = 2.258
+    MVR: power = 0.0, FDR = 0.0, time = 2.938
+    SDP: power = 0.0, FDR = 0.0, time = 11.668
     
     
-    ipad ER: power = 1.0, FDR = 0.2647058823529412, rank = 3, time = 0.029
-    ipad GR: power = 1.0, FDR = 0.2647058823529412, rank = 3, time = 0.028
-    ipad VE: power = 1.0, FDR = 0.12280701754385964, rank = 263, time = 0.031
-    ME: power = 0.5, FDR = 0.0, time = 2.256
-    MVR: power = 0.4, FDR = 0.0, time = 2.944
-    SDP: power = 0.94, FDR = 0.0784313725490196, time = 11.536
+    ipad ER: power = 0.96, FDR = 0.02040816326530612, rank = 3, time = 0.023
+    ipad GR: power = 0.96, FDR = 0.02040816326530612, rank = 3, time = 0.023
+    ipad VE: power = 0.98, FDR = 0.0392156862745098, rank = 263, time = 0.025
+    ME: power = 0.62, FDR = 0.0, time = 2.26
+    MVR: power = 0.26, FDR = 0.0, time = 3.514
+    SDP: power = 0.88, FDR = 0.0, time = 11.725
     
     
-    ipad ER: power = 0.96, FDR = 0.02040816326530612, rank = 3, time = 0.043
-    ipad GR: power = 0.96, FDR = 0.02040816326530612, rank = 3, time = 0.027
-    ipad VE: power = 0.98, FDR = 0.09259259259259259, rank = 257, time = 0.031
-    ME: power = 0.66, FDR = 0.0, time = 2.268
-    MVR: power = 0.66, FDR = 0.0, time = 3.047
-    SDP: power = 0.8, FDR = 0.024390243902439025, time = 11.565
+    ipad ER: power = 0.98, FDR = 0.07547169811320754, rank = 3, time = 0.027
+    ipad GR: power = 0.98, FDR = 0.07547169811320754, rank = 3, time = 0.023
+    ipad VE: power = 0.96, FDR = 0.07692307692307693, rank = 257, time = 0.024
+    ME: power = 0.78, FDR = 0.025, time = 2.249
+    MVR: power = 0.74, FDR = 0.0, time = 3.068
+    SDP: power = 0.8, FDR = 0.0, time = 11.733
     
     
-    ipad ER: power = 0.94, FDR = 0.04081632653061224, rank = 3, time = 0.049
-    ipad GR: power = 0.94, FDR = 0.04081632653061224, rank = 3, time = 0.027
-    ipad VE: power = 0.92, FDR = 0.041666666666666664, rank = 260, time = 0.225
-    ME: power = 0.0, FDR = 0.0, time = 2.61
-    MVR: power = 0.0, FDR = 0.0, time = 2.943
-    SDP: power = 0.0, FDR = 0.0, time = 11.484
+    ipad ER: power = 0.98, FDR = 0.02, rank = 3, time = 0.028
+    ipad GR: power = 0.98, FDR = 0.02, rank = 3, time = 0.032
+    ipad VE: power = 1.0, FDR = 0.1935483870967742, rank = 260, time = 0.032
+    ME: power = 0.44, FDR = 0.0, time = 2.361
+    MVR: power = 0.0, FDR = 0.0, time = 3.188
+    SDP: power = 0.6, FDR = 0.0, time = 11.738
     
     
-    ipad ER: power = 1.0, FDR = 0.20634920634920634, rank = 3, time = 0.029
-    ipad GR: power = 1.0, FDR = 0.20634920634920634, rank = 3, time = 0.03
-    ipad VE: power = 0.98, FDR = 0.07547169811320754, rank = 256, time = 0.03
-    ME: power = 0.78, FDR = 0.025, time = 2.255
-    MVR: power = 0.64, FDR = 0.0, time = 3.009
-    SDP: power = 0.9, FDR = 0.1, time = 11.51
+    ipad ER: power = 0.96, FDR = 0.07692307692307693, rank = 3, time = 0.025
+    ipad GR: power = 0.96, FDR = 0.07692307692307693, rank = 3, time = 0.023
+    ipad VE: power = 0.96, FDR = 0.09433962264150944, rank = 256, time = 0.025
+    ME: power = 0.3, FDR = 0.0, time = 2.259
+    MVR: power = 0.3, FDR = 0.0, time = 2.94
+    SDP: power = 0.62, FDR = 0.0, time = 11.854
     
     
-    ipad ER: power = 1.0, FDR = 0.05660377358490566, rank = 3, time = 0.03
-    ipad GR: power = 1.0, FDR = 0.05660377358490566, rank = 3, time = 0.029
-    ipad VE: power = 0.9, FDR = 0.1346153846153846, rank = 253, time = 0.03
-    ME: power = 0.84, FDR = 0.023255813953488372, time = 2.294
-    MVR: power = 0.78, FDR = 0.025, time = 2.946
-    SDP: power = 0.76, FDR = 0.05, time = 11.468
+    ipad ER: power = 0.86, FDR = 0.0851063829787234, rank = 3, time = 0.027
+    ipad GR: power = 0.86, FDR = 0.0851063829787234, rank = 3, time = 0.022
+    ipad VE: power = 0.86, FDR = 0.044444444444444446, rank = 253, time = 0.025
+    ME: power = 0.22, FDR = 0.0, time = 2.299
+    MVR: power = 0.0, FDR = 0.0, time = 3.065
+    SDP: power = 0.0, FDR = 0.0, time = 11.629
     
     
-    ipad ER: power = 0.92, FDR = 0.09803921568627451, rank = 3, time = 0.033
-    ipad GR: power = 0.92, FDR = 0.09803921568627451, rank = 3, time = 0.036
-    ipad VE: power = 0.92, FDR = 0.041666666666666664, rank = 256, time = 0.029
-    ME: power = 0.54, FDR = 0.0, time = 2.257
-    MVR: power = 0.62, FDR = 0.0, time = 2.95
-    SDP: power = 0.8, FDR = 0.047619047619047616, time = 11.574
+    ipad ER: power = 1.0, FDR = 0.05660377358490566, rank = 3, time = 0.029
+    ipad GR: power = 1.0, FDR = 0.05660377358490566, rank = 3, time = 0.03
+    ipad VE: power = 1.0, FDR = 0.09090909090909091, rank = 256, time = 0.047
+    ME: power = 0.8, FDR = 0.047619047619047616, time = 2.272
+    MVR: power = 0.46, FDR = 0.0, time = 3.019
+    SDP: power = 0.64, FDR = 0.0, time = 11.816
     
     
-    ipad ER: power = 1.0, FDR = 0.10714285714285714, rank = 3, time = 0.029
-    ipad GR: power = 1.0, FDR = 0.10714285714285714, rank = 3, time = 0.03
-    ipad VE: power = 1.0, FDR = 0.15254237288135594, rank = 260, time = 0.028
-    ME: power = 0.66, FDR = 0.0, time = 2.254
-    MVR: power = 0.66, FDR = 0.0, time = 3.003
-    SDP: power = 0.8, FDR = 0.0, time = 11.761
+    ipad ER: power = 1.0, FDR = 0.038461538461538464, rank = 3, time = 0.025
+    ipad GR: power = 1.0, FDR = 0.038461538461538464, rank = 3, time = 0.03
+    ipad VE: power = 1.0, FDR = 0.09090909090909091, rank = 260, time = 0.03
+    ME: power = 0.28, FDR = 0.0, time = 2.321
+    MVR: power = 0.22, FDR = 0.0, time = 3.015
+    SDP: power = 0.86, FDR = 0.022727272727272728, time = 11.645
     
     
-    ipad ER: power = 1.0, FDR = 0.09090909090909091, rank = 3, time = 0.031
-    ipad GR: power = 1.0, FDR = 0.09090909090909091, rank = 3, time = 0.027
-    ipad VE: power = 1.0, FDR = 0.07407407407407407, rank = 257, time = 0.032
-    ME: power = 0.0, FDR = 0.0, time = 2.245
-    MVR: power = 0.0, FDR = 0.0, time = 2.952
-    SDP: power = 0.86, FDR = 0.0, time = 11.547
+    ipad ER: power = 1.0, FDR = 0.10714285714285714, rank = 3, time = 0.024
+    ipad GR: power = 1.0, FDR = 0.10714285714285714, rank = 3, time = 0.022
+    ipad VE: power = 1.0, FDR = 0.16666666666666666, rank = 257, time = 0.024
+    ME: power = 0.74, FDR = 0.0, time = 2.273
+    MVR: power = 0.74, FDR = 0.0, time = 2.965
+    SDP: power = 0.9, FDR = 0.18181818181818182, time = 11.911
     
     
-    ipad ER: power = 0.94, FDR = 0.14545454545454545, rank = 3, time = 0.048
-    ipad GR: power = 0.94, FDR = 0.14545454545454545, rank = 3, time = 0.026
-    ipad VE: power = 0.94, FDR = 0.1896551724137931, rank = 255, time = 0.04
-    ME: power = 0.68, FDR = 0.0, time = 2.269
-    MVR: power = 0.7, FDR = 0.0, time = 2.962
-    SDP: power = 0.9, FDR = 0.021739130434782608, time = 11.542
+    ipad ER: power = 1.0, FDR = 0.07407407407407407, rank = 3, time = 0.027
+    ipad GR: power = 1.0, FDR = 0.07407407407407407, rank = 3, time = 0.024
+    ipad VE: power = 1.0, FDR = 0.0196078431372549, rank = 255, time = 0.025
+    ME: power = 0.42, FDR = 0.0, time = 2.554
+    MVR: power = 0.42, FDR = 0.0, time = 2.942
+    SDP: power = 0.0, FDR = 0.0, time = 11.639
     
     
 
@@ -269,33 +275,36 @@ result = compare_ipad(nsims);
 ```julia
 # check average
 @show result;
+
 ```
 
     result = 6×4 DataFrame
-     Row │ method   power    FDR         time
-         │ String   Float64  Float64     Float64
-    ─────┼──────────────────────────────────────────
-       1 │ IPAD-er    0.974  0.11059      0.055441
-       2 │ IPAD-gr    0.974  0.11059      0.032905
-       3 │ IPAD-ve    0.964  0.109176     0.0528907
-       4 │ ME         0.466  0.00482558   2.30208
-       5 │ MVR        0.446  0.0025       2.97096
-       6 │ SDP        0.724  0.032218    11.5513
+     Row │ method   power    FDR        time
+         │ String   Float64  Float64    Float64
+    ─────┼─────────────────────────────────────────
+       1 │ IPAD-er    0.972  0.0646784   0.0469601
+       2 │ IPAD-gr    0.972  0.0646784   0.0258329
+       3 │ IPAD-ve    0.966  0.0898197   0.0572764
+       4 │ ME         0.46   0.0072619   2.31053
+       5 │ MVR        0.314  0.0         3.06538
+       6 │ SDP        0.53   0.0204545  11.7358
 
 
-Summary (when $X$ follows the IPAD model assumption)
+Summary (when $X$ follows the factor-model/PCA assumption)
 
 + All methods control FDR (target = 10%) 
 + ER and GR method always find the correct rank (r = 3), while VE overestimates the rank
-+ IPAD method has much better power compared to model-X knockoffs via ME/MVR/SDP construction
++ PCA/IPAD method has much better power compared to model-X knockoffs via ME/MVR/SDP construction
 + Surprisingly, ME/MVR has worse power than SDP
-+ IPAD method is much more efficient to construct
++ PCA/IPAD method is much more efficient to construct
+
 
 ## Test2: Try $X$ that's not a factored model
 
 + Here ``y \sim N(X\beta, 1)`` and ``X_i \sim N(0, \Sigma)`` where ``\Sigma`` is an AR(1) model.
 + 50 causal SNPs with ``\beta_i \sim \pm N(0, 0.5)``
 + For MVR/ME/SDP knockoffs, we assume the true ``\mu`` and ``\Sigma`` are available. 
+
 
 
 ```julia
@@ -334,7 +343,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         ipad_er_t = @elapsed ipad_er = ipad(X, r_method = :er, m = m)
         ipad_er_ko_filter = fit_lasso(y, ipad_er)
-        selected = ipad_er_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_er_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_er_power = length(selected ∩ correct_position) / k
         ipad_er_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -342,7 +351,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         ipad_gr_t = @elapsed ipad_gr = ipad(X, r_method = :gr, m = m)
         ipad_gr_ko_filter = fit_lasso(y, ipad_gr)
-        selected = ipad_gr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_gr_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_gr_power = length(selected ∩ correct_position) / k
         ipad_gr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -350,7 +359,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         ipad_ve_t = @elapsed ipad_ve = ipad(X, r_method = :ve, m = m)
         ipad_ve_ko_filter = fit_lasso(y, ipad_ve)
-        selected = ipad_ve_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_ve_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_ve_power = length(selected ∩ correct_position) / k
         ipad_ve_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -358,7 +367,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         me_t = @elapsed me = modelX_gaussian_knockoffs(X, :maxent, μ, Σ, m = m)
         me_ko_filter = fit_lasso(y, me)
-        selected = me_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(me_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         me_power = length(selected ∩ correct_position) / k
         me_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -366,7 +375,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         mvr_t = @elapsed mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ,m = m)
         mvr_ko_filter = fit_lasso(y, mvr)
-        selected = mvr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(mvr_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         mvr_power = length(selected ∩ correct_position) / k
         mvr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -374,7 +383,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
-        selected = sdp_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(sdp_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
         sdp_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -438,6 +447,7 @@ end
 
 nsims = 10
 result = compare_ipad2(nsims);
+
 ```
 
     ipad ER: power = 0.0, FDR = 0.0, rank = 496, time = 0.052
@@ -525,6 +535,7 @@ result = compare_ipad2(nsims);
 
 ```julia
 @show result;
+
 ```
 
     result = 6×4 DataFrame
@@ -539,9 +550,9 @@ result = compare_ipad2(nsims);
        6 │ SDP        0.282  0.0422859  8.85414
 
 
-Summary (when $X$ does not follow the factored model)
+Summary (when $X$ does not follow the factor-model assumption)
 
-+ IPAD methods have slightly~pretty inflated FDR (target = 10%) 
++ PCA/IPAD methods have slightly~pretty inflated FDR (target = 10%) 
 + ER/GR/VE finds wildly differing ranks
 
 
@@ -549,6 +560,7 @@ Summary (when $X$ does not follow the factored model)
 
 + Here we simulate ``X_i \sim N(0, \Sigma)`` where ``\Sigma`` is from the European [gnomAD LD panel](https://gnomad.broadinstitute.org/downloads#v2-linkage-disequilibrium). 
 + ``\Sigma`` can be downloaded and extract with the software [EasyLD.jl](https://github.com/biona001/EasyLD.jl). 
+
 
 
 ```julia
@@ -599,7 +611,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         ipad_er_t = @elapsed ipad_er = ipad(X, r_method = :er, m = m)
         ipad_er_ko_filter = fit_lasso(y, ipad_er)
-        selected = ipad_er_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_er_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_er_power = length(selected ∩ correct_position) / k
         ipad_er_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -607,7 +619,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         ipad_gr_t = @elapsed ipad_gr = ipad(X, r_method = :gr, m = m)
         ipad_gr_ko_filter = fit_lasso(y, ipad_gr)
-        selected = ipad_gr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_gr_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_gr_power = length(selected ∩ correct_position) / k
         ipad_gr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -615,7 +627,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         ipad_ve_t = @elapsed ipad_ve = ipad(X, r_method = :ve, m = m)
         ipad_ve_ko_filter = fit_lasso(y, ipad_ve)
-        selected = ipad_ve_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(ipad_ve_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         ipad_ve_power = length(selected ∩ correct_position) / k
         ipad_ve_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -623,7 +635,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         me_t = @elapsed me = modelX_gaussian_knockoffs(X, :maxent, m = m)
         me_ko_filter = fit_lasso(y, me)
-        selected = me_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(me_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         me_power = length(selected ∩ correct_position) / k
         me_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -631,7 +643,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         mvr_t = @elapsed mvr = modelX_gaussian_knockoffs(X, :mvr, m = m)
         mvr_ko_filter = fit_lasso(y, mvr)
-        selected = mvr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(mvr_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         mvr_power = length(selected ∩ correct_position) / k
         mvr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -639,7 +651,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
-        selected = sdp_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
+        selected = select_variables(sdp_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
         sdp_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -703,6 +715,7 @@ end
 
 nsims = 10
 result = compare_ipad3(nsims);
+
 ```
 
     ipad ER: power = 0.54, FDR = 0.5645161290322581, rank = 1, time = 0.036
@@ -790,6 +803,7 @@ result = compare_ipad3(nsims);
 
 ```julia
 @show result;
+
 ```
 
     result = 6×4 DataFrame
@@ -804,6 +818,7 @@ result = compare_ipad3(nsims);
        6 │ SDP        0.346  0.110874   23.0262
 
 
-Summary (when $X$ is simulated based on real data)
-+ IPAD methods have extremely inflated FDR (target = 10%)
+Summary (when $X$ is simulated from real-data covariance)
++ PCA/IPAD methods have extremely inflated FDR (target = 10%)
 + model-X Knockoffs control FDR
+

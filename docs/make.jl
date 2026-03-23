@@ -15,7 +15,7 @@ makedocs(
         "KnockoffScreen Knockoffs" => "man/knockoffscreen/knockoffscreen.md",
         "Ghost Knockoffs" => "man/ghost_knockoffs.md",
         "HMM Knockoffs" => "man/hmm/hmm.md",
-        "IPAD Knockoffs" => "man/ipad.md",
+        "PCA Knockoffs" => "man/pca.md",
         "Calling from R/Python" => "man/JuliaCall.md",
         "API" => "man/api.md",
     ]
