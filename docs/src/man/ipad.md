@@ -77,7 +77,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         ipad_er_t = @elapsed ipad_er = ipad(X, r_method = :er, m = m)
         ipad_er_ko_filter = fit_lasso(y, ipad_er)
-        selected = ipad_er_ko_filter.selected[3]
+        selected = ipad_er_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_er_power = length(selected ∩ correct_position) / k
         ipad_er_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -85,7 +85,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         ipad_gr_t = @elapsed ipad_gr = ipad(X, r_method = :gr, m = m)
         ipad_gr_ko_filter = fit_lasso(y, ipad_gr)
-        selected = ipad_gr_ko_filter.selected[3]
+        selected = ipad_gr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_gr_power = length(selected ∩ correct_position) / k
         ipad_gr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -93,7 +93,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         ipad_ve_t = @elapsed ipad_ve = ipad(X, r_method = :ve, m = m)
         ipad_ve_ko_filter = fit_lasso(y, ipad_ve)
-        selected = ipad_ve_ko_filter.selected[3]
+        selected = ipad_ve_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_ve_power = length(selected ∩ correct_position) / k
         ipad_ve_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -101,7 +101,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         me_t = @elapsed me = modelX_gaussian_knockoffs(X, :maxent, m = m)
         me_ko_filter = fit_lasso(y, me)
-        selected = me_ko_filter.selected[3]
+        selected = me_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         me_power = length(selected ∩ correct_position) / k
         me_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -109,7 +109,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         mvr_t = @elapsed mvr = modelX_gaussian_knockoffs(X, :mvr, m = m)
         mvr_ko_filter = fit_lasso(y, mvr)
-        selected = mvr_ko_filter.selected[3]
+        selected = mvr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         mvr_power = length(selected ∩ correct_position) / k
         mvr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -117,7 +117,7 @@ function compare_ipad(nsims)
         Random.seed!(seed)
         sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
-        selected = sdp_ko_filter.selected[3]
+        selected = sdp_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
         sdp_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -334,7 +334,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         ipad_er_t = @elapsed ipad_er = ipad(X, r_method = :er, m = m)
         ipad_er_ko_filter = fit_lasso(y, ipad_er)
-        selected = ipad_er_ko_filter.selected[3]
+        selected = ipad_er_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_er_power = length(selected ∩ correct_position) / k
         ipad_er_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -342,7 +342,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         ipad_gr_t = @elapsed ipad_gr = ipad(X, r_method = :gr, m = m)
         ipad_gr_ko_filter = fit_lasso(y, ipad_gr)
-        selected = ipad_gr_ko_filter.selected[3]
+        selected = ipad_gr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_gr_power = length(selected ∩ correct_position) / k
         ipad_gr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -350,7 +350,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         ipad_ve_t = @elapsed ipad_ve = ipad(X, r_method = :ve, m = m)
         ipad_ve_ko_filter = fit_lasso(y, ipad_ve)
-        selected = ipad_ve_ko_filter.selected[3]
+        selected = ipad_ve_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_ve_power = length(selected ∩ correct_position) / k
         ipad_ve_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -358,7 +358,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         me_t = @elapsed me = modelX_gaussian_knockoffs(X, :maxent, μ, Σ, m = m)
         me_ko_filter = fit_lasso(y, me)
-        selected = me_ko_filter.selected[3]
+        selected = me_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         me_power = length(selected ∩ correct_position) / k
         me_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -366,7 +366,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         mvr_t = @elapsed mvr = modelX_gaussian_knockoffs(X, :mvr, μ, Σ,m = m)
         mvr_ko_filter = fit_lasso(y, mvr)
-        selected = mvr_ko_filter.selected[3]
+        selected = mvr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         mvr_power = length(selected ∩ correct_position) / k
         mvr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -374,7 +374,7 @@ function compare_ipad2(nsims)
         Random.seed!(seed)
         sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
-        selected = sdp_ko_filter.selected[3]
+        selected = sdp_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
         sdp_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -599,7 +599,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         ipad_er_t = @elapsed ipad_er = ipad(X, r_method = :er, m = m)
         ipad_er_ko_filter = fit_lasso(y, ipad_er)
-        selected = ipad_er_ko_filter.selected[3]
+        selected = ipad_er_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_er_power = length(selected ∩ correct_position) / k
         ipad_er_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -607,7 +607,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         ipad_gr_t = @elapsed ipad_gr = ipad(X, r_method = :gr, m = m)
         ipad_gr_ko_filter = fit_lasso(y, ipad_gr)
-        selected = ipad_gr_ko_filter.selected[3]
+        selected = ipad_gr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_gr_power = length(selected ∩ correct_position) / k
         ipad_gr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -615,7 +615,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         ipad_ve_t = @elapsed ipad_ve = ipad(X, r_method = :ve, m = m)
         ipad_ve_ko_filter = fit_lasso(y, ipad_ve)
-        selected = ipad_ve_ko_filter.selected[3]
+        selected = ipad_ve_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         ipad_ve_power = length(selected ∩ correct_position) / k
         ipad_ve_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -623,7 +623,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         me_t = @elapsed me = modelX_gaussian_knockoffs(X, :maxent, m = m)
         me_ko_filter = fit_lasso(y, me)
-        selected = me_ko_filter.selected[3]
+        selected = me_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         me_power = length(selected ∩ correct_position) / k
         me_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -631,7 +631,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         mvr_t = @elapsed mvr = modelX_gaussian_knockoffs(X, :mvr, m = m)
         mvr_ko_filter = fit_lasso(y, mvr)
-        selected = mvr_ko_filter.selected[3]
+        selected = mvr_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         mvr_power = length(selected ∩ correct_position) / k
         mvr_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 
@@ -639,7 +639,7 @@ function compare_ipad3(nsims)
         Random.seed!(seed)
         sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
-        selected = sdp_ko_filter.selected[3]
+        selected = sdp_ko_filter.selected[3]  # variables selected at fdr_target[3] = 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
         sdp_fdr = length(setdiff(selected, correct_position)) / max(length(selected), 1)
 

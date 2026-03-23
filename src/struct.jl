@@ -107,11 +107,8 @@ A `KnockoffFilter` is essentially a `Knockoff` that has gone through a feature
 selection procedure, such as the Lasso. It stores, among other things, the final
 estimated parameters `beta` after applying the knockoff-filter procedure.
 
-The `debiased` variable is a boolean
-indicating whether estimated effect size have been debiased with Lasso. The
-`W` vector stores the feature importance statistic that satisfies the flip coin 
-property. `tau` is the knockoff threshold, which controls the empirical FDR at 
-level `q`
+The `W` vector stores the feature importance statistic and `qvalues` stores the
+minimum target FDR at which each statistic is selected.
 """
 abstract type KnockoffFilter end
 
@@ -119,16 +116,15 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
     y :: Vector{T} # n × 1 response vector
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
-    # merged_ko :: Knockoff # A MergedKnockoff struct
     m :: Int # number of knockoffs per feature generated
-    betas :: Vector{Vector{T}} # betas[i] is the p × 1 vector of effect sizes corresponding to fdr level fdr_target[i]
-    a0 :: Vector{T}   # intercepts for each model in betas
-    selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
+    beta :: Vector{T} # full lasso coefficients before q-value thresholding
+    a0 :: T   # intercept for the full lasso model
     W :: Vector{T} # length p vector of feature importance
-    taus :: Vector{T} # threshold for significance. For fdr fdr_target[i], tau[i] is threshold, and all W ≥ tau[i] is selected
-    fdr_target :: Vector{T} # target FDR level for each taus and betas
+    qvalues :: Vector{Float64} # knockoff q-values
+    stat_groups :: Union{Nothing, Vector{Int}} # group labels corresponding to W/qvalues entries
     d :: UnivariateDistribution # distribution of y
     debias :: Union{Nothing, Symbol} # how betas and a0 have been debiased (`nothing` for not debiased)
+    stringent :: Bool # group debiasing behavior
 end
 
 struct MarginalKnockoffFilter{T} <: KnockoffFilter
@@ -136,11 +132,8 @@ struct MarginalKnockoffFilter{T} <: KnockoffFilter
     X :: Matrix{T} # n × p matrix of original features
     ko :: Knockoff # A knockoff struct
     W :: Vector{T} # length p vector of feature importance
-    taus :: Vector{T} # threshold for significance. For fdr fdr_target[i], tau[i] is threshold, and all W ≥ tau[i] is selected
+    qvalues :: Vector{Float64} # knockoff q-values
     m :: Int # number of knockoffs per feature generated
-    # T0 :: Vector{T} # marginal correlations y'*X
-    # Tk :: Vector{Vector{T}} # marginal correlations [[y'*Xko1], [y'*Xko2], ..., [y'*Xkom]]
-    selected :: Vector{Vector{Int}} # selected[i] includes all variables selected based on target FDR level fdr_target[i]
-    fdr_target :: Vector{T} # target FDR level for each taus and betas
+    stat_groups :: Union{Nothing, Vector{Int}} # group labels corresponding to W/qvalues entries
     d :: UnivariateDistribution # distribution of y
 end

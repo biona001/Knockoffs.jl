@@ -227,6 +227,91 @@ end
     @test all(τ .== [0.4, 0.2, 0.0, 0.5, 0.4, 0.2])
 end
 
+@testset "multiple knockoff q-values" begin
+    Random.seed!(2026)
+    p = 60
+    m = 3
+    T0 = randn(p)
+    Tk = [randn(p) for _ in 1:m]
+    κ, τ, W = MK_statistics(T0, Tk)
+    qvalues = get_knockoff_qvalue(κ, τ, m)
+
+    @test length(qvalues) == p
+    @test all((0 .<= qvalues) .& (qvalues .<= 1))
+
+    for fdr in [0.01, 0.05, 0.1, 0.2, 0.4]
+        tau_hat = mk_threshold(τ, κ, m, fdr)
+        standard_selected = findall(x -> x ≥ tau_hat, W)
+        qvalue_selected = findall(x -> x ≤ fdr, qvalues)
+        @test standard_selected == qvalue_selected
+    end
+end
+
+@testset "q-value selection matches standard selection on simulated data" begin
+    Random.seed!(2026)
+    n = 220
+    p = 80
+    m = 3
+    ρ = 0.35
+    Σ = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    μ = zeros(p)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+
+    β = zeros(p)
+    signal_idx = sample(1:p, 12, replace=false)
+    β[signal_idx] .= rand([-1.5, -1.0, 1.0, 1.5], 12)
+    y = X * β + 0.8 .* randn(n)
+
+    ko = modelX_gaussian_knockoffs(X, :equi, μ, Σ, m=m)
+    fdrs = [0.02, 0.05, 0.1, 0.2, 0.3]
+    marginal_filter = fit_marginal(y, ko)
+    @test length(marginal_filter.qvalues) == p
+
+    # Recompute threshold-based selections from (κ, τ, W)
+    y_std = zscore(y, mean(y), std(y))
+    X_std = zscore(X, mean(X, dims=1), std(X, dims=1))
+    Xko_std = zscore(ko.Xko, mean(ko.Xko, dims=1), std(ko.Xko, dims=1))
+    T0 = abs2.(X_std' * y_std) ./ n
+    Tk = [abs2.(Transpose(@view(Xko_std[:, (k-1)*p+1:k*p])) * y_std) ./ n for k in 1:m]
+    κ, τ, W = MK_statistics(T0, Tk)
+    qvalues = get_knockoff_qvalue(κ, τ, m)
+
+    for (i, fdr) in enumerate(fdrs)
+        tau_hat = mk_threshold(τ, κ, m, fdr)
+        standard_selected = findall(x -> x ≥ tau_hat, W)
+        qvalue_selected = findall(x -> x ≤ fdr, qvalues)
+        @test standard_selected == qvalue_selected
+        @test select_variables(marginal_filter, fdr) == qvalue_selected
+    end
+end
+
+@testset "select_groups returns group labels and member indices" begin
+    Random.seed!(2027)
+    n = 180
+    p = 70
+    Σ = Matrix(SymmetricToeplitz(0.3.^(0:(p-1))))
+    μ = zeros(p)
+    X = rand(MvNormal(μ, Σ), n)' |> Matrix
+    zscore!(X, mean(X, dims=1), std(X, dims=1))
+    groups = hc_partition_groups(X, cutoff=0.5)
+
+    β = zeros(p)
+    β[sample(1:p, 10, replace=false)] .= rand([-1.0, 1.0], 10)
+    y = X * β + 0.7 .* randn(n)
+
+    ko_filter = fit_lasso(y, X, μ, Σ, method=:equi, groups=groups, m=1)
+    q = 0.2
+    selected_stats = select_variables(ko_filter, q)
+    selected_groups, selected_group_vars = select_groups(ko_filter, q)
+    expected_groups = isnothing(ko_filter.stat_groups) ? selected_stats :
+        ko_filter.stat_groups[selected_stats]
+    @test selected_groups == expected_groups
+    @test length(selected_groups) == length(selected_group_vars)
+    for (g, vars) in zip(selected_groups, selected_group_vars)
+        @test all(==(g), @view(ko_filter.ko.groups[vars]))
+    end
+end
+
 # from https://github.com/msesia/snpknock/blob/master/tests/testthat/test_knockoffs.R
 @testset "Markov chain knockoffs have the right correlation structure" begin
     p = 20 # Number of states in markov chain
@@ -310,11 +395,11 @@ end
     @time me_filter = fit_lasso(y, Xko_maxent, debias=nothing)
 
     sdp_power, mvr_power, me_power = Float64[], Float64[], Float64[]
-    for i in eachindex(sdp_filter.fdr_target)
-        # extract beta for current fdr
-        betasdp = sdp_filter.betas[i]
-        betamvr = mvr_filter.betas[i]
-        betame = me_filter.betas[i]
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        # extract beta for current q-value threshold
+        betasdp, _ = selected_coefficients(sdp_filter, q; debias=nothing)
+        betamvr, _ = selected_coefficients(mvr_filter, q; debias=nothing)
+        betame, _ = selected_coefficients(me_filter, q; debias=nothing)
         
         # compute power and false discovery proportion
         push!(sdp_power, length(findall(!iszero, betasdp) ∩ correct_position) / k)
@@ -396,8 +481,10 @@ end
     @time yesdebias = fit_lasso(y, Xko, debias=:ls)
 
     # check that debiased result have same support as not debiasing
-    for i in eachindex(nodebias.fdr_target)
-        @test issubset(findall(!iszero, yesdebias.betas[i]), findall(!iszero, nodebias.betas[i]))
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        βn, _ = selected_coefficients(nodebias, q; debias=nothing)
+        βd, _ = selected_coefficients(yesdebias, q; debias=:ls)
+        @test issubset(findall(!iszero, βd), findall(!iszero, βn))
     end
 end
 
@@ -445,25 +532,25 @@ end
 
     # debias with least squares
     ko = fit_lasso(y, X, debias=:ls);
-    @test length(ko.betas) == length(ko.a0)
-    for i in 1:length(ko.betas)
-        @show norm(ko.betas[i] - b) # second best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ko, q; debias=:ls)
+        @show norm(β̂ - b) # second best
     end
     # idx = findall(!iszero, b)
     # [ko.betas[5][idx] b[idx]]
     
     # debias with lasso
     ko = fit_lasso(y, X, debias=:lasso);
-    @test length(ko.betas) == length(ko.a0)
-    for i in 1:length(ko.betas)
-        @show norm(ko.betas[i] - b) # best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ko, q; debias=:lasso)
+        @show norm(β̂ - b) # best
     end
 
     # no debias
     ko = fit_lasso(y, X, debias=nothing);
-    @test length(ko.betas) == length(ko.a0)
-    for i in 1:length(ko.betas)
-        @show norm(ko.betas[i] - b) # worst
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ko, q; debias=nothing)
+        @show norm(β̂ - b) # worst
     end
 end
 
@@ -482,23 +569,23 @@ end
 
     # debias with least squares
     ls_ko = fit_lasso(y, X, d = Binomial(), debias=:ls)
-    @test length(ls_ko.betas) == length(ls_ko.a0)
-    for i in 1:length(ls_ko.betas)
-        @show norm(ls_ko.betas[i] - b) # best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(ls_ko, q; debias=:ls)
+        @show norm(β̂ - b) # best
     end
     
     # debias with lasso
     lasso_ko = fit_lasso(y, X, d = Binomial(), debias=:lasso)
-    @test length(lasso_ko.betas) == length(lasso_ko.a0)
-    for i in 1:length(lasso_ko.betas)
-        @show norm(lasso_ko.betas[i] - b) # second best
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(lasso_ko, q; debias=:lasso)
+        @show norm(β̂ - b) # second best
     end
 
     # no debias
     nodebias_ko = fit_lasso(y, X, d = Binomial(), debias=nothing)
-    @test length(nodebias_ko.betas) == length(nodebias_ko.a0)
-    for i in 1:length(nodebias_ko.betas)
-        @show norm(nodebias_ko.betas[i] - b) # worst
+    for q in [0.01, 0.05, 0.1, 0.25, 0.5]
+        β̂, _ = selected_coefficients(nodebias_ko, q; debias=nothing)
+        @show norm(β̂ - b) # worst
     end
 
     # visually compare estimated effect sizes (least squares > nodebias > lasso)
@@ -522,22 +609,22 @@ end
 
     # generate knockoffs and predict with debiased beta for each target FDR
     ko = fit_lasso(y, X, debias=:ls, filter_method=:knockoff)
-    ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.betas)
+    ŷs = Knockoffs.predict(ko, Xtest, [0.01, 0.05, 0.1, 0.25, 0.5], debias=:ls)
+    for i in eachindex(ŷs)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
 
     ko = fit_lasso(y, X, debias=:lasso, filter_method=:knockoff)
-    ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.betas)
+    ŷs = Knockoffs.predict(ko, Xtest, [0.01, 0.05, 0.1, 0.25, 0.5], debias=:lasso)
+    for i in eachindex(ŷs)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end
 
     ko = fit_lasso(y, X, debias=nothing, filter_method=:knockoff)
-    ŷs = Knockoffs.predict(ko, Xtest)
-    for i in 1:length(ko.betas)
+    ŷs = Knockoffs.predict(ko, Xtest, [0.01, 0.05, 0.1, 0.25, 0.5], debias=nothing)
+    for i in eachindex(ŷs)
         # println("R2 = $(R2(ŷs[i], ytest))")
         @test R2(ŷs[i], ytest) > 0.5
     end

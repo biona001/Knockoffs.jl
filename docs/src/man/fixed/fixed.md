@@ -231,6 +231,13 @@ struct LassoKnockoffFilter{T} <: KnockoffFilter
 end
 ```
 
+For instance, to get selected variables at 10% FDR (i.e. `fdr_target[3] = 0.1`):
+```julia
+knockoff_filter.selected[3]  # indices of selected variables at 10% FDR
+knockoff_filter.taus[3]      # knockoff threshold used to achieve 10% FDR
+knockoff_filter.betas[3]     # estimated effect sizes at 10% FDR
+```
+
 Given these information, we can e.g. visualize power and FDR trade-off:
 
 
