@@ -74,6 +74,17 @@ using ToeplitzMatrices
             @test dot(X[:, i], Xko[:, j]) ≈ dot(X[:, i], X[:, j])
         end
     end
+
+    # centering is keyword-controlled and preserves the fixed-X Gram conditions
+    n = 31
+    p = 10
+    X = randn(n, p) .+ randn(1, p)
+    centered = fixed_knockoffs(X, :equi; center=true)
+    @test all(isapprox.(vec(sum(centered.X; dims=1)), 0, atol=1e-10))
+    @test all(isapprox.(vec(sum(abs2, centered.X; dims=1)), 1, atol=1e-10))
+    @test all(isapprox.(centered.X' * centered.X, centered.Sigma, atol=1e-8))
+    @test all(isapprox.(centered.Xko' * centered.Xko, centered.Sigma, atol=1e-8))
+    @test all(isapprox.(centered.X' * centered.Xko, centered.Sigma - Diagonal(centered.s), atol=1e-8))
 end
 
 @testset "model X Guassian Knockoffs" begin

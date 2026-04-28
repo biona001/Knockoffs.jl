@@ -434,19 +434,23 @@ end
 """
     normalize_col!(X::AbstractVecOrMat, [center=false])
 
-Normalize each column of `X` so they sum to 1. 
+Normalize each column of `X` to have unit Euclidean norm, optionally after centering.
 """
 function normalize_col!(X::AbstractVecOrMat; center::Bool=false)
     @inbounds for x in eachcol(X)
         μi = center ? mean(x) : zero(eltype(X))
-        xnorm = norm(x)
         @simd for i in eachindex(x)
-            x[i] = (x[i] - μi) / xnorm
+            x[i] -= μi
+        end
+        xnorm = norm(x)
+        iszero(xnorm) && error("normalize_col!: cannot normalize a zero-norm column.")
+        @simd for i in eachindex(x)
+            x[i] /= xnorm
         end
     end
     return X
 end
-normalize_col(X) = normalize_col!(copy(X))
+normalize_col(X; center::Bool=false) = normalize_col!(copy(X), center=center)
 
 function sample_DMC(q, Q; n=1)
     p = size(Q, 3)
