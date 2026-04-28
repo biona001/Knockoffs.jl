@@ -28,7 +28,7 @@ computing its knockoff.
 2. "Powerful knockoffs via minimizing reconstructability" by Spector, Asher, and Lucas Janson (2020)
 3. "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function fixed_knockoffs(X::Matrix{T}, method::Symbol; center::Bool=false, kwargs...) where T <: AbstractFloat
+function fixed_knockoffs(X::Matrix{T}, method::Union{Symbol, AbstractString}; center::Bool=false, kwargs...) where T <: AbstractFloat
     n, p = size(X)
     n ≥ 2p || error("fixed_knockoffs: currently only works for n ≥ 2p case! sorry!")
     # use column-normalized X 
@@ -52,5 +52,5 @@ function fixed_knockoffs(X::Matrix{T}, method::Symbol; center::Bool=false, kwarg
     C = Diagonal(sqrt.(γ)) * P'
     # compute knockoffs
     X̃ = X * (I - Σinv*D) + Ũ * C
-    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), method, 1)
+    return GaussianKnockoff(X, X̃, s, Symmetric(Σ), Symbol(method), 1)
 end
