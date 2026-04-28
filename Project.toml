@@ -1,6 +1,6 @@
 name = "Knockoffs"
 uuid = "878bf26d-0c49-448a-9df5-b057c815d613"
-version = "3.0.0"
+version = "3.1.0"
 authors = ["Benjamin Chu <benchu99@hotmail.com> and contributors"]
 
 [deps]
