@@ -16,6 +16,8 @@ computing its knockoff.
     * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
 + `center`: Whether to center the columns of `X` before normalizing, defaults to `false`.
+    When `center=true` and `n ≥ 2p + 1`, the knockoff columns are also constructed
+    to be centered.
 + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
     [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
 
@@ -43,8 +45,15 @@ function fixed_knockoffs(X::Matrix{T}, method::Union{Symbol, AbstractString}; ce
     # end
     # compute s vector using the specified method
     s = solve_s(Symmetric(Σ), method; kwargs...)
-    # compute Ũ such that Ũ'X = 0
-    Ũ = @view(U[:, p+1:2p])
+    # compute Ũ such that Ũ'X = 0. If X was centered and there is enough
+    # dimension, also enforce Ũ'1 = 0 so the knockoffs are centered.
+    if center && n ≥ 2p + 1
+        intercept = fill(inv(sqrt(T(n))), n)
+        U_centered = svd([X intercept], full=true).U
+        Ũ = @view(U_centered[:, p+2:2p+1])
+    else
+        Ũ = @view(U[:, p+1:2p])
+    end
     # compute C such that C'C = 2D - D*inv(Σ)*D via eigendecomposition (cholesky not stable)
     D = Diagonal(s)
     γ, P = eigen(2D - D*Σinv*D)
