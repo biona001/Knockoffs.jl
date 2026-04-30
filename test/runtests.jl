@@ -81,10 +81,21 @@ using ToeplitzMatrices
     X = randn(n, p) .+ randn(1, p)
     centered = fixed_knockoffs(X, :equi; center=true)
     @test all(isapprox.(vec(sum(centered.X; dims=1)), 0, atol=1e-10))
+    @test all(isapprox.(vec(sum(centered.Xko; dims=1)), 0, atol=1e-10))
     @test all(isapprox.(vec(sum(abs2, centered.X; dims=1)), 1, atol=1e-10))
     @test all(isapprox.(centered.X' * centered.X, centered.Sigma, atol=1e-8))
     @test all(isapprox.(centered.Xko' * centered.Xko, centered.Sigma, atol=1e-8))
     @test all(isapprox.(centered.X' * centered.Xko, centered.Sigma - Diagonal(centered.s), atol=1e-8))
+
+    # When n = 2p, the centered nullspace has dimension p - 1, so the
+    # knockoff basis cannot generally also be constrained to be centered.
+    n = 20
+    p = 10
+    X = randn(n, p) .+ randn(1, p)
+    centered_boundary = fixed_knockoffs(X, :equi; center=true)
+    @test all(isapprox.(vec(sum(centered_boundary.X; dims=1)), 0, atol=1e-10))
+    @test all(isapprox.(centered_boundary.Xko' * centered_boundary.Xko, centered_boundary.Sigma, atol=1e-8))
+    @test all(isapprox.(centered_boundary.X' * centered_boundary.Xko, centered_boundary.Sigma - Diagonal(centered_boundary.s), atol=1e-8))
 end
 
 @testset "model X Guassian Knockoffs" begin
