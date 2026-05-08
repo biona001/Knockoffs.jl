@@ -41,7 +41,7 @@ export
     solve_s_group,
     solve_s_graphical_group,
     # specific solvers
-    solve_equi, solve_max_entropy, solve_sdp_ccd, solve_SDP, solve_sdp_ccd, solve_MVR,
+    solve_equi, solve_max_entropy, solve_max_entropy_parallel, solve_sdp_ccd, solve_SDP, solve_sdp_ccd, solve_MVR,
     solve_group_equi, solve_group_max_entropy_hybrid, 
     solve_group_mvr_hybrid, solve_group_sdp_hybrid, 
     # utilities for running knockoff filter
@@ -101,7 +101,7 @@ include("experimental/hmm_wrapper.jl")
 include("experimental/hmm.jl")
 include("experimental/dmc.jl")
 
-const SINGLE_KNOCKOFFS = [:mvr, :maxent, :equi, :sdp, :sdp_ccd]
+const SINGLE_KNOCKOFFS = [:mvr, :maxent, :maxent_fast, :equi, :sdp, :sdp_ccd]
 const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_block, :sdp_full, :mvr, :mvr_block, :maxent, :maxent_block]
 
 # test data directory

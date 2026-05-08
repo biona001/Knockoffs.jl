@@ -9,6 +9,7 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:maxent_fast` for experimental parallel maximum entropy knockoffs
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_ccd` fast SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
@@ -40,6 +41,8 @@ function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwar
         s = solve_MVR(Σcor; m=m, kwargs...)
     elseif method == :maxent
         s = solve_max_entropy(Σcor; m=m, kwargs...)
+    elseif method == :maxent_fast
+        s = solve_max_entropy_parallel(Σcor; m=m, kwargs...)
     elseif method == :sdp_ccd
         s = solve_sdp_ccd(Σcor; m=m, kwargs...)
     else
@@ -275,6 +278,160 @@ function solve_max_entropy(
             flush(stdout)
         end
         max_delta < tol && break 
+    end
+    return s
+end
+
+function _max_entropy_delta!(
+    x::AbstractVector{T},
+    ỹ::AbstractVector{T},
+    Σ::AbstractMatrix{T},
+    L,
+    s::AbstractVector{T},
+    j::Int,
+    γ,
+    λmin
+    ) where T
+    p = length(s)
+    @inbounds @simd for i in 1:p
+        ỹ[i] = γ * Σ[i, j]
+    end
+    ỹ[j] = zero(T)
+    ldiv!(x, UpperTriangular(L.factors)', ỹ)
+    x_l2sum = sum(abs2, x)
+    ζ = γ * Σ[j, j] - s[j]
+    c = (ζ * x_l2sum) / (ζ + x_l2sum)
+    sj_new = (γ * Σ[j, j] - c) / 2
+
+    fill!(x, zero(T))
+    x[j] = one(T)
+    ldiv!(ỹ, UpperTriangular(L.factors)', x)
+    ub = 1 / sum(abs2, ỹ) - λmin
+    δ = sj_new - s[j]
+    δ > ub && (δ = ub)
+    δ < -s[j] && (δ = -s[j])
+    return δ
+end
+
+"""
+    solve_max_entropy_parallel(Σ::AbstractMatrix; kwargs...)
+
+Experimental parallel/batched version of [`solve_max_entropy`](@ref).
+Users should call [`solve_s`](@ref) with `method=:maxent_fast` instead of
+this function.
+
+The usual maximum entropy coordinate descent updates one coordinate and then
+immediately mutates the shared Cholesky factor. This variant computes and
+applies batches of coordinates that are separated by at least `min_spacing`.
+When `parallel_cholesky_updates=true`, the rank-1 Cholesky updates in each batch
+are applied concurrently to the same factorization. This is intentionally
+experimental and assumes the updates are sufficiently localized that the writes
+do not materially overlap.
+
+# Keyword arguments
++ `nworkers`: maximum number of coordinates proposed concurrently. Defaults to
+  `min(4, Threads.nthreads())`.
++ `min_spacing`: minimum distance between coordinates in a proposal batch.
+  Defaults to `min(500, cld(p, nworkers))`.
++ `shuffle_offsets`: randomize the order of spaced coordinate groups each sweep.
++ `rng`: random number generator used when `shuffle_offsets=true`.
++ `parallel_cholesky_updates`: apply well-spaced rank-1 updates to `L`
+  concurrently. Set to `false` for the conservative proposal-parallel variant.
+"""
+function solve_max_entropy_parallel(
+    Σ::AbstractMatrix{T};
+    niter::Int = 100,
+    tol=1e-6,
+    λmin=1e-6,
+    m::Number = 1,
+    s_init = solve_equi(Σ, m=m),
+    robust::Bool = false,
+    verbose::Bool = false,
+    nworkers::Int = min(4, Threads.nthreads()),
+    min_spacing::Union{Nothing, Int} = nothing,
+    shuffle_offsets::Bool = true,
+    rng::AbstractRNG = Random.default_rng(),
+    parallel_cholesky_updates::Bool = true
+    ) where T
+    p = size(Σ, 1)
+    nworkers = max(1, min(nworkers, Threads.nthreads(), p))
+    spacing = isnothing(min_spacing) ? min(500, max(1, cld(p, nworkers))) : min_spacing
+    spacing < 1 && error("min_spacing must be positive but was $spacing")
+    spacing = min(spacing, p)
+
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    s = copy(s_init)
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
+    γ = (m+1) / m
+
+    xwork = [zeros(T, p) for _ in 1:nworkers]
+    ywork = [zeros(T, p) for _ in 1:nworkers]
+    offsets = collect(1:spacing)
+    deltas = zeros(T, nworkers)
+    coords = Vector{Int}(undef, nworkers)
+    update_vector = zeros(T, p)
+    update_work = [zeros(T, p) for _ in 1:nworkers]
+
+    @inbounds for l in 1:niter
+        max_delta = zero(T)
+        shuffle_offsets && shuffle!(rng, offsets)
+        for offset in offsets
+            coord_range = offset:spacing:p
+            for batch_start in firstindex(coord_range):nworkers:lastindex(coord_range)
+                batch_stop = min(batch_start + nworkers - 1, lastindex(coord_range))
+                nbatch = batch_stop - batch_start + 1
+                for b in 1:nbatch
+                    coords[b] = coord_range[batch_start + b - 1]
+                end
+
+                Threads.@threads for b in 1:nbatch
+                    deltas[b] = _max_entropy_delta!(
+                        xwork[b],
+                        ywork[b],
+                        Σ,
+                        L,
+                        s,
+                        coords[b],
+                        γ,
+                        λmin
+                    )
+                end
+
+                if parallel_cholesky_updates && nbatch > 1
+                    Threads.@threads for b in 1:nbatch
+                        j = coords[b]
+                        δ = deltas[b]
+                        abs(δ) < 1e-15 && continue
+                        s[j] += δ
+                        v = update_work[b]
+                        fill!(v, zero(T))
+                        v[j] = sqrt(abs(δ))
+                        δ > 0 ? choldowndate!(L, v) : cholupdate!(L, v)
+                    end
+                    for b in 1:nbatch
+                        δ = abs(deltas[b])
+                        δ > max_delta && (max_delta = δ)
+                    end
+                else
+                    for b in 1:nbatch
+                        j = coords[b]
+                        δ = deltas[b]
+                        abs(δ) < 1e-15 && continue
+                        s[j] += δ
+                        fill!(update_vector, zero(T))
+                        update_vector[j] = sqrt(abs(δ))
+                        δ > 0 ? choldowndate!(L, update_vector) : cholupdate!(L, update_vector)
+                        abs(δ) > max_delta && (max_delta = abs(δ))
+                    end
+                end
+            end
+        end
+        if verbose
+            println("Iter $l: δ = $max_delta")
+            flush(stdout)
+        end
+        max_delta < tol && break
     end
     return s
 end

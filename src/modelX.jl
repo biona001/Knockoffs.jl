@@ -11,6 +11,7 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:maxent_fast` for experimental parallel maximum entropy knockoffs
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
     * `:sdp_ccd` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)

@@ -21,3 +21,5 @@ Manifest.toml
 .R*
 *.html
 *.Rmd
+
+linear_cholesky_updates/*

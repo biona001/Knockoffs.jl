@@ -137,6 +137,24 @@ end
     @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
 end
 
+@testset "parallel max entropy solver" begin
+    Random.seed!(2022)
+    p = 60
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+    s = solve_s(Symmetric(Sigma), :maxent_fast;
+        niter=3, min_spacing=20, shuffle_offsets=false)
+
+    @test all(s .≥ 0)
+    @test all(1 .≥ s)
+    λmin = eigmin(2Sigma - Diagonal(s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+
+    s_string = solve_s(Symmetric(Sigma), "maxent_fast";
+        niter=3, min_spacing=20, shuffle_offsets=false)
+    @test s ≈ s_string
+end
+
 @testset "model X 2nd order Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
 
