@@ -8,11 +8,13 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
 + `Σ`: A covariance matrix (one must wrap `Symmetric(Σ)` explicitly)
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:mvr_fast` for experimental parallel MVR knockoffs
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
     * `:maxent_fast` for experimental parallel maximum entropy knockoffs
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
-    * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
-    * `:sdp_ccd` fast SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
+    * `:sdp` for SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
+    * `:sdp_fast` for experimental parallel SDP coordinate descent knockoffs
+    * `:sdp_ccd` for backwards-compatible serial SDP coordinate descent
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
@@ -35,16 +37,18 @@ function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwar
     # solve optimization problem
     if method == :equi
         s = solve_equi(Σcor; m=m)
-    elseif method == :sdp
-        s = solve_SDP(Σcor; m=m)
     elseif method == :mvr
         s = solve_MVR(Σcor; m=m, kwargs...)
+    elseif method == :mvr_fast
+        s = solve_MVR_parallel(Σcor; m=m, kwargs...)
     elseif method == :maxent
         s = solve_max_entropy(Σcor; m=m, kwargs...)
     elseif method == :maxent_fast
         s = solve_max_entropy_parallel(Σcor; m=m, kwargs...)
-    elseif method == :sdp_ccd
+    elseif method == :sdp || method == :sdp_ccd
         s = solve_sdp_ccd(Σcor; m=m, kwargs...)
+    elseif method == :sdp_fast
+        s = solve_sdp_fast(Σcor; m=m, kwargs...)
     else
         error("Method must be one of $SINGLE_KNOCKOFFS but was $method")
     end
@@ -54,37 +58,21 @@ function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwar
 end
 
 """
-    solve_SDP(Σ::AbstractMatrix)
+    solve_SDP(Σ::AbstractMatrix; kwargs...)
 
-Solves the SDP problem for fixed-X and model-X knockoffs given correlation matrix Σ. 
-Users should call `solve_s` instead of this function. 
+Solves the SDP problem for fixed-X and model-X knockoffs using coordinate
+descent. Users should call `solve_s(Σ, :sdp)` instead of this function.
 
-The optimization problem is stated in equation 3.13 of
-https://arxiv.org/pdf/1610.02351.pdf
-
-# Arguments
-+ `Σ`: A correlation matrix (diagonals all equal to 1)
-+ `m`: Number of knockoffs to generate, defaults to 1
-+ `optm`: SDP solver. Defaults to `Hypatia.Optimizer(verbose=false)`. This can
-    be any solver that supports the JuMP interface. For example, use 
-    `SDPT3.Optimizer` in SDPT3.jl package (which is a MATLAB dependency)
-    for the best performance. 
+This used to call a JuMP/Hypatia interior-point solver. It now aliases
+[`solve_sdp_ccd`](@ref), so the package no longer depends on Hypatia for
+single-knockoff SDP construction.
 """
 function solve_SDP(
-    Σ::AbstractMatrix; # correlation matrix
-    m::Number = 1, # number of multiple knockoffs to generate
-    optm=Hypatia.Optimizer(verbose=false) # Any solver compatible with JuMP
+    Σ::AbstractMatrix;
+    m::Number = 1,
+    kwargs...
     )
-    # Build model via JuMP
-    p = size(Σ, 1)
-    model = Model(() -> optm)
-    @variable(model, 0 ≤ s[i = 1:p] ≤ 1)
-    @objective(model, Max, sum(s))
-    @constraint(model, Symmetric((m+1)/m*Σ - diagm(s[1:p])) in PSDCone())
-    # Solve optimization problem
-    JuMP.optimize!(model)
-    # Retrieve solution
-    return clamp!(JuMP.value.(s), 0, 1)
+    return solve_sdp_ccd(Σ; m=m, kwargs...)
 end
 
 # this uses Convex.jl
@@ -172,6 +160,141 @@ function solve_MVR(
             flush(stdout)
         end
         # declare convergence if changes in s are all smaller than tol
+        max_delta < tol && break
+    end
+    return s
+end
+
+function _mvr_delta!(
+    vn::AbstractVector{T},
+    ej::AbstractVector{T},
+    vd::AbstractVector{T},
+    storage::AbstractVector{T},
+    L,
+    s::AbstractVector{T},
+    j::Int,
+    m,
+    λmin
+    ) where T
+    fill!(ej, zero(T))
+    ej[j] = one(T)
+    forward_backward!(vn, L, ej, storage)
+    cn = -sum(abs2, vn)
+    ldiv!(vd, UpperTriangular(L.factors)', ej)
+    cd = sum(abs2, vd)
+    δ = solve_quadratic(cn, cd, s[j], m)
+    ub = 1 / cd - λmin
+    δ > ub && (δ = ub)
+    δ < -s[j] && (δ = -s[j])
+    return δ
+end
+
+"""
+    solve_MVR_parallel(Σ::AbstractMatrix; kwargs...)
+
+Experimental batched/parallel version of [`solve_MVR`](@ref). Users should call
+[`solve_s`](@ref) with `method=:mvr_fast`.
+
+Coordinates in a batch are separated by at least `min_spacing`. Proposals are
+computed from a frozen Cholesky factor, then, when
+`parallel_cholesky_updates=true`, their rank-1 Cholesky updates are applied
+concurrently to the same factorization.
+"""
+function solve_MVR_parallel(
+    Σ::AbstractMatrix{T};
+    niter::Int = 100,
+    tol=1e-6,
+    λmin=1e-6,
+    m::Number = 1,
+    s_init = solve_equi(Σ, m=m),
+    robust::Bool = false,
+    verbose::Bool = false,
+    nworkers::Int = min(4, Threads.nthreads()),
+    min_spacing::Union{Nothing, Int} = nothing,
+    shuffle_offsets::Bool = true,
+    rng::AbstractRNG = Random.default_rng(),
+    parallel_cholesky_updates::Bool = true
+    ) where T
+    p = size(Σ, 1)
+    nworkers = max(1, min(nworkers, Threads.nthreads(), p))
+    spacing = isnothing(min_spacing) ? min(500, max(1, cld(p, nworkers))) : min_spacing
+    spacing < 1 && error("min_spacing must be positive but was $spacing")
+    spacing = min(spacing, p)
+
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    s = copy(s_init)
+    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
+
+    vnwork = [zeros(T, p) for _ in 1:nworkers]
+    ejwork = [zeros(T, p) for _ in 1:nworkers]
+    vdwork = [zeros(T, p) for _ in 1:nworkers]
+    storagework = [zeros(T, p) for _ in 1:nworkers]
+    update_work = [zeros(T, p) for _ in 1:nworkers]
+    update_vector = zeros(T, p)
+    offsets = collect(1:spacing)
+    deltas = zeros(T, nworkers)
+    coords = Vector{Int}(undef, nworkers)
+
+    @inbounds for l in 1:niter
+        max_delta = zero(T)
+        shuffle_offsets && shuffle!(rng, offsets)
+        for offset in offsets
+            coord_range = offset:spacing:p
+            for batch_start in firstindex(coord_range):nworkers:lastindex(coord_range)
+                batch_stop = min(batch_start + nworkers - 1, lastindex(coord_range))
+                nbatch = batch_stop - batch_start + 1
+                for b in 1:nbatch
+                    coords[b] = coord_range[batch_start + b - 1]
+                end
+
+                Threads.@threads for b in 1:nbatch
+                    deltas[b] = _mvr_delta!(
+                        vnwork[b],
+                        ejwork[b],
+                        vdwork[b],
+                        storagework[b],
+                        L,
+                        s,
+                        coords[b],
+                        m,
+                        λmin
+                    )
+                end
+
+                if parallel_cholesky_updates && nbatch > 1
+                    Threads.@threads for b in 1:nbatch
+                        j = coords[b]
+                        δ = deltas[b]
+                        abs(δ) < 1e-15 && continue
+                        s[j] += δ
+                        v = update_work[b]
+                        fill!(v, zero(T))
+                        v[j] = sqrt(abs(δ))
+                        δ > 0 ? choldowndate!(L, v) : cholupdate!(L, v)
+                    end
+                    for b in 1:nbatch
+                        δ = abs(deltas[b])
+                        δ > max_delta && (max_delta = δ)
+                    end
+                else
+                    for b in 1:nbatch
+                        j = coords[b]
+                        δ = deltas[b]
+                        abs(δ) < 1e-15 && continue
+                        s[j] += δ
+                        fill!(update_vector, zero(T))
+                        update_vector[j] = sqrt(abs(δ))
+                        δ > 0 ? choldowndate!(L, update_vector) : cholupdate!(L, update_vector)
+                        abs(δ) > max_delta && (max_delta = abs(δ))
+                    end
+                end
+            end
+        end
+        if verbose
+            println("Iter $l: δ = $max_delta")
+            flush(stdout)
+        end
         max_delta < tol && break
     end
     return s
@@ -493,6 +616,134 @@ function solve_sdp_ccd(
             δ > 0 ? cholupdate!(L, x) : choldowndate!(L, x)
         end
         # check convergence 
+        λ *= μ
+        λ < tol && break
+    end
+    return s
+end
+
+function _sdp_ccd_delta!(
+    x::AbstractVector{T},
+    ỹ::AbstractVector{T},
+    Σ::AbstractMatrix{T},
+    L,
+    s::AbstractVector{T},
+    j::Int,
+    γ,
+    λ
+    ) where T
+    p = length(s)
+    @inbounds @simd for i in 1:p
+        ỹ[i] = γ * Σ[i, j]
+    end
+    ỹ[j] = zero(T)
+    ldiv!(x, UpperTriangular(L.factors)', ỹ)
+    x_l2sum = sum(abs2, x)
+    ζ = γ * Σ[j, j] - s[j]
+    c = (ζ * x_l2sum) / (ζ + x_l2sum)
+    sj_new = clamp(γ * Σ[j, j] - c - λ, zero(T), one(T))
+    return sj_new - s[j]
+end
+
+"""
+    solve_sdp_fast(Σ::AbstractMatrix; kwargs...)
+
+Experimental parallel version of [`solve_sdp_ccd`](@ref). Users should call
+[`solve_s`](@ref) with `method=:sdp_fast`.
+
+Coordinates in each batch are separated by at least `min_spacing`. If
+`parallel_cholesky_updates=true`, the rank-1 Cholesky updates for that batch
+are applied concurrently to the same factorization.
+"""
+function solve_sdp_fast(
+    Σ::AbstractMatrix{T};
+    λ::T = 0.5,
+    μ::T = 0.8,
+    niter::Int = 100,
+    m::Number = 1,
+    tol=1e-6,
+    robust::Bool = false,
+    verbose::Bool = false,
+    nworkers::Int = min(4, Threads.nthreads()),
+    min_spacing::Union{Nothing, Int} = nothing,
+    shuffle_offsets::Bool = true,
+    rng::AbstractRNG = Random.default_rng(),
+    parallel_cholesky_updates::Bool = true
+    ) where T
+    0 ≤ μ ≤ 1 || error("Decay parameter μ must be in [0, 1] but was $μ")
+    0 < λ || error("Barrier coefficient λ must be > 0 but was $λ")
+    p = size(Σ, 1)
+    nworkers = max(1, min(nworkers, Threads.nthreads(), p))
+    spacing = isnothing(min_spacing) ? min(500, max(1, cld(p, nworkers))) : min_spacing
+    spacing < 1 && error("min_spacing must be positive but was $spacing")
+    spacing = min(spacing, p)
+
+    cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
+    choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
+    s = zeros(T, p)
+    L = cholesky(Symmetric((m+1)/m*Σ))
+    γ = (m+1) / m
+
+    xwork = [zeros(T, p) for _ in 1:nworkers]
+    ywork = [zeros(T, p) for _ in 1:nworkers]
+    update_work = [zeros(T, p) for _ in 1:nworkers]
+    update_vector = zeros(T, p)
+    offsets = collect(1:spacing)
+    deltas = zeros(T, nworkers)
+    coords = Vector{Int}(undef, nworkers)
+
+    @inbounds for l in 1:niter
+        if verbose
+            println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
+            flush(stdout)
+        end
+        shuffle_offsets && shuffle!(rng, offsets)
+        for offset in offsets
+            coord_range = offset:spacing:p
+            for batch_start in firstindex(coord_range):nworkers:lastindex(coord_range)
+                batch_stop = min(batch_start + nworkers - 1, lastindex(coord_range))
+                nbatch = batch_stop - batch_start + 1
+                for b in 1:nbatch
+                    coords[b] = coord_range[batch_start + b - 1]
+                end
+
+                Threads.@threads for b in 1:nbatch
+                    deltas[b] = _sdp_ccd_delta!(
+                        xwork[b],
+                        ywork[b],
+                        Σ,
+                        L,
+                        s,
+                        coords[b],
+                        γ,
+                        λ
+                    )
+                end
+
+                if parallel_cholesky_updates && nbatch > 1
+                    Threads.@threads for b in 1:nbatch
+                        j = coords[b]
+                        δ = deltas[b]
+                        abs(δ) < 1e-15 && continue
+                        s[j] += δ
+                        v = update_work[b]
+                        fill!(v, zero(T))
+                        v[j] = sqrt(abs(δ))
+                        δ > 0 ? choldowndate!(L, v) : cholupdate!(L, v)
+                    end
+                else
+                    for b in 1:nbatch
+                        j = coords[b]
+                        δ = deltas[b]
+                        abs(δ) < 1e-15 && continue
+                        s[j] += δ
+                        fill!(update_vector, zero(T))
+                        update_vector[j] = sqrt(abs(δ))
+                        δ > 0 ? choldowndate!(L, update_vector) : cholupdate!(L, update_vector)
+                    end
+                end
+            end
+        end
         λ *= μ
         λ < tol && break
     end

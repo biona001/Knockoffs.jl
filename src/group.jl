@@ -494,6 +494,11 @@ function solve_group_equi(
     return S, [γ], obj
 end
 
+function _require_jump_optimizer(optm)
+    isnothing(optm) || return optm
+    error("This JuMP-based group SDP routine requires an explicit `optm` keyword. Hypatia is no longer a Knockoffs dependency; load a JuMP-compatible solver separately and pass, for example, `optm=Hypatia.Optimizer(...)`.")
+end
+
 """
 Solves the SDP group knockoff problem using analogy to the equi-correlated
 group knockoffs. Basically, the idea is to optimize a vector `γ` where `γ[j]` 
@@ -506,9 +511,11 @@ function solve_group_SDP_subopt(
     Σ::AbstractMatrix, 
     groups::Vector{Int}; 
     m::Number = 1,
-    verbose=false
+    verbose=false,
+    optm=nothing
     )
-    model = Model(() -> Hypatia.Optimizer(verbose=verbose))
+    optm = _require_jump_optimizer(optm)
+    model = Model(() -> optm)
     # model = Model(() -> SCS.Optimizer())
     Σblocks = block_diagonalize(Σ, groups)
     n = nblocks(Σblocks)
@@ -533,9 +540,11 @@ function solve_group_SDP_subopt_correct(
     Σ::AbstractMatrix, 
     groups::Vector{Int}; 
     m::Number = 1,
-    verbose=false
+    verbose=false,
+    optm=nothing
     )
-    model = Model(() -> Hypatia.Optimizer(verbose=verbose))
+    optm = _require_jump_optimizer(optm)
+    model = Model(() -> optm)
     Σblocks = block_diagonalize(Σ, groups)
     n = nblocks(Σblocks)
     block_sizes = size.(Σblocks.blocks, 1)
@@ -586,8 +595,7 @@ Solves a single block of the fully general group SDP problem. The objective is
 function solve_group_SDP_single_block(
     Σ11::AbstractMatrix,
     ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
-    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
+    optm=nothing # Any solver compatible with JuMP
     )
     # quick return for singleton groups
     if size(ub) == (1, 1)
@@ -598,6 +606,7 @@ function solve_group_SDP_single_block(
         end
     end
     # Build model via JuMP
+    optm = _require_jump_optimizer(optm)
     p = size(Σ11, 1)
     model = Model(() -> optm)
     @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
@@ -621,11 +630,11 @@ function solve_group_maxent_single_block(
     Σ11::AbstractMatrix,
     ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
     m::Number; # number of knockoffs to generate
-    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
-    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
+    optm=nothing # Any solver compatible with JuMP
     )
     # todo: quick return for singleton groups
     # Build model via JuMP
+    optm = _require_jump_optimizer(optm)
     p = size(Σ11, 1)
     model = Model(() -> optm)
     @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
@@ -655,10 +664,10 @@ function solve_group_MVR_single_block(
     A21::AbstractMatrix,
     D22inv::AbstractMatrix,
     m::Number; # number of knockoffs to generate
-    optm=Hypatia.Optimizer(verbose=false, iter_limit=100) # Any solver compatible with JuMP
-    # optm=Hypatia.Optimizer(verbose=false, iter_limit=100, tol_rel_opt=1e-4, tol_abs_opt=1e-4) # Any solver compatible with JuMP
+    optm=nothing # Any solver compatible with JuMP
     )
     # Build model via JuMP
+    optm = _require_jump_optimizer(optm)
     p = size(Σ11, 1)
     q = size(D22inv, 1)
     model = Model(() -> optm)
@@ -800,8 +809,9 @@ function solve_group_SDP_full(
     Σ::AbstractMatrix, 
     groups::Vector{Int}; 
     m::Number = 1,
-    optm=Hypatia.Optimizer(verbose=false), # Any solver compatible with JuMP
+    optm=nothing, # Any solver compatible with JuMP
     )
+    optm = _require_jump_optimizer(optm)
     model = Model(() -> optm)
     T = eltype(Σ)
     p = size(Σ, 1)

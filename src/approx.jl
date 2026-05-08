@@ -10,10 +10,13 @@ specify the `window_ranges` argument to construct blocks of different sizes.
 + `X`: A `n × p` numeric matrix or `SnpArray`. Each row is a sample, and each column is covariate.
 + `method`: Can be one of the following
     * `:mvr` for minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:mvr_fast` for experimental parallel MVR knockoffs
     * `:maxent` for maximum entropy knockoffs (alg 2 in ref 2)
+    * `:maxent_fast` for experimental parallel maximum entropy knockoffs
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
-    * `:sdp` for SDP knockoffs (eq 2.4 in ref 1)
-    * `:sdp_fast` for SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
+    * `:sdp` for SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
+    * `:sdp_fast` for experimental parallel SDP coordinate descent knockoffs
+    * `:sdp_ccd` for backwards-compatible serial SDP coordinate descent
 + `m`: Number of knockoff copies per variable to generate, defaults to 1. 
 + `windowsize`: Number of covariates to be included in a block. Each block consists of
     adjacent variables. The last block could contain less than `windowsize` variables. 

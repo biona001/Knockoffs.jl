@@ -11,10 +11,13 @@ computing its knockoff.
 # Optional inputs
 + `method`: Can be one of the following
     * `:mvr`: Minimum variance-based reconstructability knockoffs (alg 1 in ref 2)
+    * `:mvr_fast`: Experimental parallel MVR knockoffs
     * `:maxent`: Maximum entropy knockoffs (alg 2 in ref 2)
+    * `:maxent_fast`: Experimental parallel maximum entropy knockoffs
     * `:equi`: Equi-distant knockoffs (eq 2.3 in ref 1), 
-    * `:sdp`: SDP knockoffs (eq 2.4 in ref 1)
-    * `:sdp_fast`: SDP knockoffs via coordiate descent (alg 2.2 in ref 3)
+    * `:sdp`: SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
+    * `:sdp_fast`: Experimental parallel SDP coordinate descent knockoffs
+    * `:sdp_ccd`: Backwards-compatible serial SDP coordinate descent
 + `center`: Whether to center the columns of `X` before normalizing, defaults to `false`.
     When `center=true` and `n ≥ 2p + 1`, the knockoff columns are also constructed
     to be centered.

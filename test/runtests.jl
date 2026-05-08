@@ -155,6 +155,25 @@ end
     @test s ≈ s_string
 end
 
+@testset "parallel MVR and SDP solvers" begin
+    Random.seed!(2022)
+    p = 60
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+
+    for method in [:mvr_fast, :sdp_fast]
+        s = solve_s(Symmetric(Sigma), method;
+            niter=3, min_spacing=20, nworkers=4, shuffle_offsets=false)
+        @test all(s .≥ 0)
+        @test all(1 .≥ s)
+        λmin = eigmin(2Sigma - Diagonal(s))
+        @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+    end
+
+    @test solve_s(Symmetric(Sigma), :sdp; niter=3) ≈
+        solve_s(Symmetric(Sigma), :sdp_ccd; niter=3)
+end
+
 @testset "model X 2nd order Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
 
@@ -453,7 +472,7 @@ end
     @test all(me_power .≥ sdp_power)
 end
 
-@testset "SDP vs SDP fast" begin
+@testset "SDP CCD aliases" begin
     seed = 2022
 
     # simulate X
@@ -466,8 +485,11 @@ end
     X = rand(MvNormal(mu, Sigma), n)' |> Matrix
 
     @time Xko_sdp = modelX_gaussian_knockoffs(X, :sdp, mu, Sigma);
-    @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_ccd, mu, Sigma)
+    @time Xko_sdp_ccd = modelX_gaussian_knockoffs(X, :sdp_ccd, mu, Sigma)
+    @time Xko_sdp_fast = modelX_gaussian_knockoffs(X, :sdp_fast, mu, Sigma,
+        nworkers=4, min_spacing=100, shuffle_offsets=false)
 
+    @test Xko_sdp.s ≈ Xko_sdp_ccd.s
     @test all(isapprox.(Xko_sdp.s, Xko_sdp_fast.s, atol=0.05))
 end
 
