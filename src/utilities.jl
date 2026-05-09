@@ -13,13 +13,12 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     * `:maxent_fast` for experimental parallel maximum entropy knockoffs
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
-    * `:sdp_fast` for experimental parallel SDP coordinate descent knockoffs
-    * `:sdp_ccd` for backwards-compatible serial SDP coordinate descent
+    * `:sdp_parallel` for experimental parallel SDP coordinate descent knockoffs
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
     For a list of available options, see [`solve_MVR`](@ref),
-    [`solve_max_entropy`](@ref), [`solve_sdp_ccd`](@ref), [`solve_SDP`](@ref), or
+    [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), [`solve_sdp_parallel`](@ref), or
     [`solve_equi`](@ref)
 
 # Reference
@@ -45,10 +44,10 @@ function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwar
         s = solve_max_entropy(Σcor; m=m, kwargs...)
     elseif method == :maxent_fast
         s = solve_max_entropy_parallel(Σcor; m=m, kwargs...)
-    elseif method == :sdp || method == :sdp_ccd
-        s = solve_sdp_ccd(Σcor; m=m, kwargs...)
-    elseif method == :sdp_fast
-        s = solve_sdp_fast(Σcor; m=m, kwargs...)
+    elseif method == :sdp
+        s = solve_SDP(Σcor; m=m, kwargs...)
+    elseif method == :sdp_parallel # change function name to solve_sdp_parallel but option name should be sdp_parallel
+        s = solve_sdp_parallel(Σcor; m=m, kwargs...)
     else
         error("Method must be one of $SINGLE_KNOCKOFFS but was $method")
     end
@@ -57,35 +56,7 @@ function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwar
     return s
 end
 
-"""
-    solve_SDP(Σ::AbstractMatrix; kwargs...)
-
-Solves the SDP problem for fixed-X and model-X knockoffs using coordinate
-descent. Users should call `solve_s(Σ, :sdp)` instead of this function.
-
-This used to call a JuMP/Hypatia interior-point solver. It now aliases
-[`solve_sdp_ccd`](@ref), so the package no longer depends on Hypatia for
-single-knockoff SDP construction.
-"""
-function solve_SDP(
-    Σ::AbstractMatrix;
-    m::Number = 1,
-    kwargs...
-    )
-    return solve_sdp_ccd(Σ; m=m, kwargs...)
-end
-
 # this uses Convex.jl
-# function solve_SDP(Σ::AbstractMatrix)
-#     svar = Variable(size(Σ, 1), Convex.Positive())
-#     add_constraint!(svar, svar ≤ 1)
-#     constraint = 2*Symmetric(Σ) - diagm(svar) in :SDP
-#     problem = maximize(sum(svar), constraint)
-#     solve!(problem, Hypatia.Optimizer; silent_solver=true)
-#     s = clamp.(evaluate(svar), 0, 1) # make sure s_j ∈ (0, 1)
-#     return s
-# end
-
 """
     solve_equi(Σ::AbstractMatrix)
 
@@ -560,7 +531,7 @@ function solve_max_entropy_parallel(
 end
 
 """
-    solve_sdp_ccd(Σ::AbstractMatrix)
+    solve_SDP(Σ::AbstractMatrix)
 
 Solves the SDP problem for fixed-X and model-X knockoffs using coordinate descent, 
 given correlation matrix Σ. Users should call `solve_s` instead of this function. 
@@ -568,7 +539,7 @@ given correlation matrix Σ. Users should call `solve_s` instead of this functio
 # Reference
 Algorithm 2.2 from "FANOK: Knockoffs in Linear Time" by Askari et al. (2020).
 """
-function solve_sdp_ccd(
+function solve_SDP(
     Σ::AbstractMatrix{T};
     λ::T = 0.5, # barrier coefficient
     μ::T = 0.8, # decay parameter
@@ -646,16 +617,16 @@ function _sdp_ccd_delta!(
 end
 
 """
-    solve_sdp_fast(Σ::AbstractMatrix; kwargs...)
+    solve_sdp_parallel(Σ::AbstractMatrix; kwargs...)
 
-Experimental parallel version of [`solve_sdp_ccd`](@ref). Users should call
-[`solve_s`](@ref) with `method=:sdp_fast`.
+Experimental parallel version of [`solve_SDP`](@ref). Users should call
+[`solve_s`](@ref) with `method=:sdp_parallel`.
 
 Coordinates in each batch are separated by at least `min_spacing`. If
 `parallel_cholesky_updates=true`, the rank-1 Cholesky updates for that batch
 are applied concurrently to the same factorization.
 """
-function solve_sdp_fast(
+function solve_sdp_parallel(
     Σ::AbstractMatrix{T};
     λ::T = 0.5,
     μ::T = 0.8,
@@ -1034,26 +1005,4 @@ function lowrankdowndate_turbo!(C::Cholesky{T}, v::AbstractVector) where T <: Ab
         end
     end
     return C
-end
-
-"""
-    check_model_solution(model; verbose=false)
-
-After solving a JuMP model, checks if the solution is accurate. 
-"""
-function check_model_solution(model; verbose=false)
-    success = true
-    if termination_status(model) == OPTIMAL
-        verbose && println("Solution is optimal")
-    elseif termination_status(model) == LOCALLY_SOLVED
-        verbose && println("Solution is locally optimal")
-    elseif termination_status(model) == ALMOST_OPTIMAL
-        verbose && println("Solution is almost optimal")
-    elseif termination_status(model) == TIME_LIMIT && has_values(model)
-        verbose && println("Solution is suboptimal due to a time limit, but a primal solution is available")
-    else
-        success = false
-        verbose && println("The model was not solved correctly.")
-    end
-    return success
 end

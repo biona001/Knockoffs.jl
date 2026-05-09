@@ -2,14 +2,12 @@ module Knockoffs
 
 using LinearAlgebra
 using Statistics
-using JuMP
 using SnpArrays
 using DelimitedFiles
 using ProgressMeter
 using Distributions
 using CSV
 using DataFrames
-using ElasticArrays
 using Random
 using PositiveFactorizations
 using CovarianceEstimation
@@ -19,12 +17,9 @@ using BlockDiagonals
 using Roots: fzero
 using Downloads
 using GLM
-using Reexport
 using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
-
-@reexport using GLM
 
 export 
     # functions that generate knockoffs
@@ -41,7 +36,7 @@ export
     solve_s_graphical_group,
     # specific solvers
     solve_equi, solve_max_entropy, solve_max_entropy_parallel,
-    solve_sdp_ccd, solve_sdp_fast, solve_SDP, solve_MVR, solve_MVR_parallel,
+    solve_SDP, solve_sdp_parallel, solve_MVR, solve_MVR_parallel,
     solve_group_equi, solve_group_max_entropy_hybrid, 
     solve_group_mvr_hybrid, solve_group_sdp_hybrid, 
     # utilities for running knockoff filter
@@ -101,8 +96,8 @@ include("experimental/hmm_wrapper.jl")
 include("experimental/hmm.jl")
 include("experimental/dmc.jl")
 
-const SINGLE_KNOCKOFFS = [:mvr, :mvr_fast, :maxent, :maxent_fast, :equi, :sdp, :sdp_fast, :sdp_ccd]
-const GROUP_KNOCKOFFS = [:equi, :sdp_subopt, :sdp, :sdp_block, :sdp_full, :mvr, :mvr_block, :maxent, :maxent_block]
+const SINGLE_KNOCKOFFS = [:mvr, :mvr_fast, :maxent, :maxent_fast, :equi, :sdp, :sdp_parallel]
+const GROUP_KNOCKOFFS = [:equi, :sdp, :mvr, :maxent]
 
 # test data directory
 datadir(parts...) = joinpath(@__DIR__, "..", "data", parts...)

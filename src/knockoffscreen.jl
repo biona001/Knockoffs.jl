@@ -5,7 +5,7 @@ struct KnockoffScreen
     x::SnpArray
     windowsize::Int
     β̂::Vector{Float64}         # Intercept is always last column
-    X::ElasticArray{Float64}   # Original genotypes come first, then knockoff genotypes, then column of 1s (intercept)
+    X::Matrix{Float64}         # Original genotypes come first, then knockoff genotypes, then column of 1s (intercept)
     Xj::Vector{Float64}        # The `j`th SNP, treated as the response
     X̂j::Vector{Float64}        # Intermediate variable needed for computing X̃j
     ϵ ::Vector{Float64}        # Intermediate variable needed for computing X̃j
@@ -14,8 +14,8 @@ end
 function KnockoffScreen(x::SnpArray, windowsize::Int)
     n = size(x, 1)
     β̂ = zeros(windowsize)
-    X = ElasticArray{Float64}(undef, n, 0)
-    X̂j, ϵ, X̃j = zeros(n), zeros(n), zeros(n)
+    X = Matrix{Float64}(undef, n, 0)
+    Xj, X̂j, ϵ, X̃j = zeros(n), zeros(n), zeros(n), zeros(n)
     return KnockoffScreen(x, windowsize, β̂, X, Xj, X̂j, ϵ, X̃j)
 end
 
@@ -45,7 +45,6 @@ Generates knockoffs `X̃ⱼ` by on regressing `Xⱼ` on SNPs knockoffs within a 
 + He, Zihuai, Yann Le Guen, Linxi Liu, Justin Lee, Shiyang Ma, Andrew C. Yang, Xiaoxia Liu et al. "Genome-wide analysis of common and rare variants via multiple knockoffs at biobank scale, with an application to Alzheimer disease genetics." The American Journal of Human Genetics 108, no. 12 (2021): 2336-2353.
 
 # TODO
-+ Use `ElasticArrays.jl` to avoid reallocating design matrix in each loop
 + Write iterator interface to avoid allocating and storing all knockoffs at once
 """
 function full_knockoffscreen(x::SnpArray; windowsize::Int=100)
@@ -105,19 +104,3 @@ end
 
 full_knockoffscreen(plinkfile::AbstractString; windowsize::Int=100) = 
     full_knockoffscreen(SnpData(plinkfile).snparray, windowsize=windowsize)
-
-# function full_knockoffscreen(x::SnpArray, windowsize::Int=100)
-#     n, p = size(x)
-#     ks = KnockoffScreen(x, windowsize)
-#     X̃ = zeros(n, p)
-#     # first `windowsize` knockoffs
-#     ElasticArrays.resize!(ks.X, n, windowsize)
-#     SnpArrays.copyto!(ks.X, @view(x[:, 2:windowsize]), center=true, scale=true, impute=true)
-#     fill!(@view(ks.X[:, end]), 1)
-#     SnpArrays.copyto!(ks.Xj, @view(x[:, 1]), center=true, scale=true, impute=true)
-#     for j in 2:windowsize
-#         ElasticArrays.resize!(ks.X, n, windowsize + j - 1)
-#         SnpArrays.copyto!(ks.X, @view(x[:, 1:j-1]), center=true, scale=true, impute=true)
-#         SnpArrays.copyto!(ks.X, @view(x[:, j:windowsize+j-1]), center=true, scale=true, impute=true)
-#     end
-# end

@@ -16,7 +16,6 @@ specify the `window_ranges` argument to construct blocks of different sizes.
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
     * `:sdp_fast` for experimental parallel SDP coordinate descent knockoffs
-    * `:sdp_ccd` for backwards-compatible serial SDP coordinate descent
 + `m`: Number of knockoff copies per variable to generate, defaults to 1. 
 + `windowsize`: Number of covariates to be included in a block. Each block consists of
     adjacent variables. The last block could contain less than `windowsize` variables. 
@@ -24,7 +23,8 @@ specify the `window_ranges` argument to construct blocks of different sizes.
 + `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`.
     See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
-    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
+    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and
+    [`solve_sdp_fast`](@ref)
 
 # Multithreading (todo)
 To enable multiple threads, simply start Julia with >1 threads and this routine

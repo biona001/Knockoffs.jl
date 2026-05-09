@@ -120,7 +120,7 @@ function compare_ipad(nsims)
 
         # SDP (ccd) knockoffs
         Random.seed!(seed)
-        sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, m = m)
+        sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
         selected = select_variables(sdp_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
@@ -381,7 +381,7 @@ function compare_ipad2(nsims)
 
         # SDP (ccd) knockoffs
         Random.seed!(seed)
-        sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, μ, Σ, m = m)
+        sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp, μ, Σ, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
         selected = select_variables(sdp_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k
@@ -649,7 +649,7 @@ function compare_ipad3(nsims)
 
         # SDP (ccd) knockoffs
         Random.seed!(seed)
-        sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp_ccd, m = m)
+        sdp_t = @elapsed sdp = modelX_gaussian_knockoffs(X, :sdp, m = m)
         sdp_ko_filter = fit_lasso(y, sdp)
         selected = select_variables(sdp_ko_filter, 0.1)  # variables selected at q-value <= 0.1 (10% FDR)
         sdp_power = length(selected ∩ correct_position) / k

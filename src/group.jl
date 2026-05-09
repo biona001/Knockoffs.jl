@@ -64,10 +64,6 @@ optimization problem. See reference paper and Knockoffs.jl docs for more details
         `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
     * `:sdp`: Fully general SDP group knockoffs based on coodinate descent
-    * `:sdp_block`: Fully general SDP group knockoffs where each block is solved exactly 
-        using an interior point solver. 
-    * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
-        generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
 + `groups`: Vector of group membership
 + `μ`: A length `p` vector storing the true column means of `X`
 + `Σ`: A `p × p` covariance matrix for columns of `X`
@@ -319,10 +315,6 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
         `Dai R, Barber R. The knockoff filter for FDR control in group-sparse and multitask regression. 
         International conference on machine learning 2016 Jun 11 (pp. 1851-1859). PMLR.`
     * `:sdp`: Fully general SDP group knockoffs based on coodinate descent
-    * `:sdp_subopt`: Chooses each block `S_{i} = γ_i * Σ_{ii}`. This slightly 
-        generalizes the equi-correlated group knockoff idea proposed in Dai and Barber 2016.
-    * `:sdp_block`: Fully general SDP group knockoffs where each block is solved exactly 
-        using an interior point solver. 
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance, specify `tol = 0.001`.
@@ -332,9 +324,8 @@ satisfying `(m+1)/m*Σ - S ⪰ 0` where `m` is number of knockoffs per feature.
 
 # Output
 + `S`: A matrix solved so that `(m+1)/m*Σ - S ⪰ 0` and `S ⪰ 0`
-+ `γ`: A vector that is only non-empty for equi and suboptimal knockoff constructions. 
-    They correspond to values of γ where `S_{gg} = γΣ_{gg}`. So for equi, the
-    vector is length 1. For SDP, the vector has length equal to number of groups
++ `γ`: A vector that is only non-empty for equi-correlated knockoff constructions.
+    It stores the value of γ where `S_{gg} = γΣ_{gg}`.
 + `obj`: Final SDP/MVR/ME objective value given `S`. Equi-correlated group knockoffs
     and singleton (non-grouped knockoffs) returns 0 because they either no objective 
     value or it is not necessary to evaluate the objectives
@@ -377,10 +368,7 @@ function solve_s_group(
     end
     if length(unique(groups)) == length(groups)
         # solve ungroup knockoff problem (todo: delete kwargs unique to solve_s_group)
-        s = solve_s(Symmetric(Σcor), 
-            method == :sdp_subopt ? :sdp : method;
-            m=m, kwargs...
-        )
+        s = solve_s(Symmetric(Σcor), method; m=m, kwargs...)
         S = Diagonal(s) |> Matrix
         γs = T[]
         obj = zero(T)
@@ -388,18 +376,6 @@ function solve_s_group(
         # solve group knockoff optimization problem
         if method == :equi
             S, γs, obj = solve_group_equi(Σcor, group_permuted; m=m)
-        elseif method == :sdp_subopt
-            S, γs, obj = solve_group_SDP_subopt(Σcor, group_permuted; m=m)
-        elseif method == :sdp_subopt_correct
-            S, γs, obj = solve_group_SDP_subopt_correct(Σcor, group_permuted; m=m)
-        elseif method == :sdp_block
-            S, γs, obj = solve_group_block_update(Σcor, group_permuted, method; m=m, kwargs...)
-        elseif method == :mvr_block
-            S, γs, obj = solve_group_block_update(Σcor, group_permuted, method; m=m, kwargs...)
-        elseif method == :maxent_block
-            S, γs, obj = solve_group_block_update(Σcor, group_permuted, method; m=m, kwargs...)
-        elseif method == :sdp_full
-            S, γs, obj, _, _ = solve_group_SDP_full(Σcor, group_permuted; m=m)
         elseif method == :sdp
             S, γs, obj = solve_group_sdp_hybrid(Σcor, group_permuted; m=m, kwargs...)
         elseif method == :mvr
@@ -494,306 +470,6 @@ function solve_group_equi(
     return S, [γ], obj
 end
 
-function _require_jump_optimizer(optm)
-    isnothing(optm) || return optm
-    error("This JuMP-based group SDP routine requires an explicit `optm` keyword. Hypatia is no longer a Knockoffs dependency; load a JuMP-compatible solver separately and pass, for example, `optm=Hypatia.Optimizer(...)`.")
-end
-
-"""
-Solves the SDP group knockoff problem using analogy to the equi-correlated
-group knockoffs. Basically, the idea is to optimize a vector `γ` where `γ[j]` 
-multiplies Σ_jj. In the equi-correlated setting, all `γ[j]` is forced to be equal.
-
-Details can be found in
-Dai & Barber 2016, The knockoff filter for FDR control in group-sparse and multitask regression
-"""
-function solve_group_SDP_subopt(
-    Σ::AbstractMatrix, 
-    groups::Vector{Int}; 
-    m::Number = 1,
-    verbose=false,
-    optm=nothing
-    )
-    optm = _require_jump_optimizer(optm)
-    model = Model(() -> optm)
-    # model = Model(() -> SCS.Optimizer())
-    Σblocks = block_diagonalize(Σ, groups)
-    n = nblocks(Σblocks)
-    block_sizes = size.(Σblocks.blocks, 1)
-    @variable(model, 0 <= γ[1:n] <= 1)
-    blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
-    @objective(model, Max, block_sizes' * γ)
-    @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
-    JuMP.optimize!(model)
-    success = check_model_solution(model)
-    if !success
-        @warn "Optimization unsuccessful, solution may be inaccurate"
-    end
-    # return solution
-    γs = clamp!(JuMP.value.(γ), 0, 1)
-    S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = group_block_objective(Σ, S, groups, m, :sdp_subopt)
-    return S, γs, obj
-end
-
-function solve_group_SDP_subopt_correct(
-    Σ::AbstractMatrix, 
-    groups::Vector{Int}; 
-    m::Number = 1,
-    verbose=false,
-    optm=nothing
-    )
-    optm = _require_jump_optimizer(optm)
-    model = Model(() -> optm)
-    Σblocks = block_diagonalize(Σ, groups)
-    n = nblocks(Σblocks)
-    block_sizes = size.(Σblocks.blocks, 1)
-    @variable(model, γ[1:n])
-    blocks = BlockDiagonal([γ[i] * Σblocks.blocks[i] for i in 1:n]) |> Matrix
-    @constraint(model, Symmetric((m+1)/m*Σ - blocks) in PSDCone())
-    @constraint(model, Symmetric(blocks) in PSDCone())
-    # slack variables
-    @variable(model, U[1:sum(block_sizes.^2)])
-    # loop over each block
-    offset = 0 # allows indexing over blocks of S
-    Uidx = 1   # index of U if U were treated as a matrix, i.e index of U[i, j]
-    for g in 1:n
-        G = block_sizes[g] # g is group idx, G is size of group g
-        cur_idx = offset + 1:offset + G
-        for i in cur_idx, j in cur_idx
-            @constraint(model, Σ[i, j] - γ[g]*Σ[i, j] ≤ U[Uidx])
-            @constraint(model, -U[Uidx] ≤ Σ[i, j] - γ[g]*Σ[i, j])
-            Uidx += 1
-        end
-        offset += G
-    end
-    @objective(model, Min, sum(U))
-    JuMP.optimize!(model)
-    success = check_model_solution(model)
-    if !success
-        @warn "Optimization unsuccessful, solution may be inaccurate"
-    end
-    # return solution
-    γs = JuMP.value.(γ)
-    S = BlockDiagonal(γs .* Σblocks.blocks) |> Matrix
-    obj = group_block_objective(Σ, S, groups, m, :sdp)
-    return S, γs, obj
-end
-
-"""
-    solve_group_SDP_single_block(Σ11, ub)
-
-Solves a single block of the fully general group SDP problem. The objective is
-    min  sum_{i,j} |Σ[i,j] - S[i,j]|
-    s.t. 0 ⪯ S ⪯ A11 - [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-
-# Inputs
-+ `Σ11`: The block corresponding to the current group. Must be a correlation matrix. 
-+ `ub`: The matrix defined as A11 - [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-+ `optm`: Any solver compatible with JuMP.jl
-"""
-function solve_group_SDP_single_block(
-    Σ11::AbstractMatrix,
-    ub::AbstractMatrix; # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    optm=nothing # Any solver compatible with JuMP
-    )
-    # quick return for singleton groups
-    if size(ub) == (1, 1)
-        if Σ11[1] ≤ ub[1]
-            return Σ11, true
-        else
-            return ub .- 1e-6, true
-        end
-    end
-    # Build model via JuMP
-    optm = _require_jump_optimizer(optm)
-    p = size(Σ11, 1)
-    model = Model(() -> optm)
-    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
-    # slack variables to handle absolute value in obj 
-    @variable(model, U[1:p, 1:p], Symmetric)
-    for i in 1:p, j in i:p
-        @constraint(model, Σ11[i, j] - S[i, j] ≤ U[i, j])
-        @constraint(model, -U[i, j] ≤ Σ11[i, j] - S[i, j])
-    end
-    @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ11 - S)))
-    # SDP constraints
-    @constraint(model, S in PSDCone())
-    @constraint(model, ub - S in PSDCone())
-    # solve and return
-    JuMP.optimize!(model)
-    success = check_model_solution(model)
-    return JuMP.value.(S), success
-end
-
-function solve_group_maxent_single_block(
-    Σ11::AbstractMatrix,
-    ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    m::Number; # number of knockoffs to generate
-    optm=nothing # Any solver compatible with JuMP
-    )
-    # todo: quick return for singleton groups
-    # Build model via JuMP
-    optm = _require_jump_optimizer(optm)
-    p = size(Σ11, 1)
-    model = Model(() -> optm)
-    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
-    # SDP constraints
-    @constraint(model, S in PSDCone())
-    @constraint(model, ub - S in PSDCone())
-    # logdet objective needs to be handled by converting it to conic problem:
-    #     max log(det(x))
-    # is equivalent to
-    #     max t
-    #     s.t. t <= log(det(X))
-    # see: https://discourse.julialang.org/t/log-determinant-objective/23927/6
-    @variable(model, t)
-    @variable(model, u)
-    @constraint(model, [t; 1; vec(ub - S)] in MOI.LogDetConeSquare(p))
-    @constraint(model, [u; 1; vec(S)] in MOI.LogDetConeSquare(p))
-    @objective(model, Max, t + u)
-    # solve and return
-    JuMP.optimize!(model)
-    success = check_model_solution(model)
-    return JuMP.value.(S), success
-end
-
-function solve_group_MVR_single_block(
-    Σ11::AbstractMatrix,
-    ub::AbstractMatrix, # this is upper bound, equals [A12 A13]*inv(A22-S2 A32; A23 A33-S3)*[A21; A31]
-    A21::AbstractMatrix,
-    D22inv::AbstractMatrix,
-    m::Number; # number of knockoffs to generate
-    optm=nothing # Any solver compatible with JuMP
-    )
-    # Build model via JuMP
-    optm = _require_jump_optimizer(optm)
-    p = size(Σ11, 1)
-    q = size(D22inv, 1)
-    model = Model(() -> optm)
-    @variable(model, -1 ≤ S[1:p, 1:p] ≤ 1, Symmetric)
-    # SDP constraints
-    @constraint(model, S in PSDCone())
-    @constraint(model, ub - S in PSDCone())
-    # convert tr(inv(X)) terms into linear matrix inequalities using slack variable trick
-    # https://discourse.julialang.org/t/how-to-optimize-trace-of-matrix-inverse-with-jump-or-convex/94167/4
-    @variable(model, X[1:p, 1:p])
-    @variable(model, Y[1:p, 1:p])
-    @variable(model, Z[1:q]) # force Z to be diagonal matrix rather than q by q matrix
-    @constraint(model, [X I; I S] in PSDCone())
-    @constraint(model, [Y I; I ub-S] in PSDCone())
-    C = D22inv * A21
-    @constraint(model, [Diagonal(Z) C; Transpose(C) ub-S] in PSDCone())
-    # objective
-    @objective(model, Min, m^2*tr(X) + tr(Y) + sum(Z))
-    # solve and return
-    JuMP.optimize!(model)
-    # success = check_model_solution(model)
-    success = eigmin(JuMP.value.(S)) ≥ 0 ? true : false
-    return JuMP.value.(S), success
-end
-
-"""
-# Todo
-+ somehow avoid reallocating ub every iteration
-+ When solving each individual block,
-    - warmstart
-    - avoid reallocating S1_new
-    - allocate vector of models
-    - use loose convergence criteria
-+ For singleton groups, don't use JuMP and directly update
-+ Currently all objective values are computed based on SDP case. 
-    Need to display objective values for ME/MVR objective
-"""
-function solve_group_block_update(
-    Σ::AbstractMatrix{T}, 
-    groups::Vector{Int},
-    method::Union{Symbol, String};
-    ϵ::T = 1e-8, # small constant added to the matrix inverse in the constraint to enforce full rank
-    m::Number = 1,
-    tol=0.01, # converges when changes in s are all smaller than tol
-    niter = 100, # max number of cyclic block updates
-    verbose::Bool = false,
-    ) where T
-    method ∈ [:sdp_block, :maxent_block, :mvr_block] ||
-        error("Expected method to be :sdp_block, :maxent_block, or :mvr_block")
-    p = size(Σ, 1)
-    unique_groups = unique(groups)
-    blocks = length(unique_groups)
-    group_sizes = [count(x -> x == g, groups) for g in unique_groups]
-    perm = collect(1:p)
-    # initialize S/A/D matrices
-    S, _, _ = initialize_S(Σ, groups, m, method)
-    A = (m+1)/m * Σ
-    D = A - S
-    # compute initial objective value
-    obj = group_block_objective(Σ, S, groups, m, method)
-    verbose && println("Init obj = $obj, with $blocks unique blocks to optimze")
-    # begin block updates
-    for l in 1:niter
-        offset = 0
-        max_delta = zero(eltype(Σ))
-        for b in 1:blocks
-            g = group_sizes[b]
-            # permute current block into upper left corner
-            cur_idx = offset + 1:offset + g
-            @inbounds @simd for i in 1:offset
-                perm[g+i] = i
-            end
-            perm[1:g] .= cur_idx
-            S      .= @view(S[perm, perm])
-            A.data .= @view(A.data[perm, perm])
-            D      .= @view(D[perm, perm])
-            Σ.data .= @view(Σ.data[perm, perm])
-            # update constraints
-            S11 = @view(S[1:g, 1:g])
-            Σ11 = @view(Σ[1:g, 1:g])
-            A11 = @view(A[1:g, 1:g])
-            D12 = @view(D[1:g, g + 1:end])
-            D21 = @view(D[g + 1:end, 1:g])
-            D22 = @view(D[g + 1:end, g + 1:end])
-            D22inv = inv(D22 + ϵ*I)
-            ub = Symmetric(A11 - D12 * D22inv * D21)
-            # solve SDP/MVR/ME problem for current block
-            if method == :sdp_block
-                S11_new, opt_success = solve_group_SDP_single_block(Σ11, ub)
-            elseif method == :maxent_block
-                S11_new, opt_success = solve_group_maxent_single_block(Σ11, ub, m)
-            elseif method == :mvr_block
-                S11_new, opt_success = solve_group_MVR_single_block(
-                    Σ11, ub, D21, D22inv, m)
-            end
-            # only update if optimization was successful
-            if opt_success
-                # find max difference between previous block S
-                for i in eachindex(S11_new)
-                    if abs(S11_new[i] - S11[i]) > max_delta
-                        max_delta = abs(S11_new[i] - S11[i])
-                    end
-                end
-                # update relevant blocks
-                S11 .= S11_new
-                D[1:g, 1:g] .= A11 .- S11_new
-            end
-            # repermute columns/rows of S back
-            iperm = invperm(perm)
-            S      .= @view(S[iperm, iperm])
-            A.data .= @view(A.data[iperm, iperm])
-            D      .= @view(D[iperm, iperm])
-            Σ.data .= @view(Σ.data[iperm, iperm])
-            sort!(perm)
-            offset += g
-        end
-        if verbose
-            obj = group_block_objective(Σ, S, groups, m, method)
-            println("Iter $l: obj = $obj, δ = $max_delta")
-            flush(stdout)
-        end
-        max_delta < tol && break 
-    end
-    return S, T[], obj
-end
-
 function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMatrix{T}) where T
     p = size(Σg, 1)
     size(Σg) == size(Sg) || error("group_sdp_objective_single_block: Expected size of Σg and Sg to be equal")
@@ -802,49 +478,6 @@ function group_sdp_objective_single_block(Σg::AbstractMatrix{T}, Sg::AbstractMa
         obj += abs(Σg[i, j] - Sg[i, j])
     end
     return obj
-end
-
-# this code solves every variable in S simultaneously, i.e. not fixing any block 
-function solve_group_SDP_full(
-    Σ::AbstractMatrix, 
-    groups::Vector{Int}; 
-    m::Number = 1,
-    optm=nothing, # Any solver compatible with JuMP
-    )
-    optm = _require_jump_optimizer(optm)
-    model = Model(() -> optm)
-    T = eltype(Σ)
-    p = size(Σ, 1)
-    group_sizes = [count(x -> x == g, groups) for g in unique(groups)]
-    # in full SDP, every non-zero entry in S (group-block diagonal matrix) can vary
-    @variable(model, S[1:p, 1:p], Symmetric)
-    # fix everything
-    for j in 1:p, i in j:p
-        fix(S[i, j], zero(T))
-    end
-    # free pertinent variables
-    idx = 0
-    for g in group_sizes
-        for j in 1:g, i in j:g
-            unfix(S[i + idx, j + idx])
-            set_lower_bound(S[i + idx, j + idx], zero(T))
-            set_upper_bound(S[i + idx, j + idx], one(T))
-        end
-        idx += g
-    end
-    @constraint(model, Symmetric((m+1)/m * Σ - S) in PSDCone())
-    @constraint(model, Symmetric(S) in PSDCone())
-    # slack variables to handle absolute value in obj 
-    @variable(model, U[1:p, 1:p], Symmetric)
-    for i in 1:p, j in i:p
-        @constraint(model, Σ[i, j] - S[i, j] ≤ U[i, j])
-        @constraint(model, -U[i, j] ≤ Σ[i, j] - S[i, j])
-    end
-    @objective(model, Min, sum(U)) # equivalent to @objective(model, Min, sum(abs.(Σ - S)))
-    JuMP.optimize!(model)
-    check_model_solution(model)
-    obj = group_block_objective(Σ, S, groups, m, method)
-    return JuMP.value.(S), T[], obj
 end
 
 """

@@ -16,7 +16,6 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
     * `:sdp_fast` for experimental parallel SDP coordinate descent knockoffs
-    * `:sdp_ccd` for backwards-compatible serial SDP coordinate descent
 + `μ`: A `p × 1` vector of column mean of `X`, defaults to column mean
 + `Σ`: A `p × p` matrix of covariance of `X`, defaults to a shrinkage estimator
     specified by `covariance_approximator`. 
@@ -24,7 +23,8 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
 + `covariance_approximator`: A covariance estimator, defaults to `LinearShrinkage(DiagonalUnequalVariance(), :lw)`
     which tends to give good empirical performance when p>n. See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
-    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
+    [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and
+    [`solve_sdp_fast`](@ref)
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled

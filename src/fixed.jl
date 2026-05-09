@@ -17,12 +17,11 @@ computing its knockoff.
     * `:equi`: Equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp`: SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
     * `:sdp_fast`: Experimental parallel SDP coordinate descent knockoffs
-    * `:sdp_ccd`: Backwards-compatible serial SDP coordinate descent
 + `center`: Whether to center the columns of `X` before normalizing, defaults to `false`.
     When `center=true` and `n ≥ 2p + 1`, the knockoff columns are also constructed
     to be centered.
 + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
-    [`solve_max_entropy`](@ref), and [`solve_sdp_ccd`](@ref)
+    [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and [`solve_sdp_fast`](@ref)
 
 # Output
 + `GaussianKnockoff`: A struct containing the original (column-normalized) `X`
