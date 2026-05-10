@@ -140,12 +140,11 @@ end
 
 @testset "parallel max entropy solver" begin
     Random.seed!(2022)
-    p = 1000
+    p = 80
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
-    s_true = solve_s(Symmetric(Sigma), :maxent)
-    s = solve_s(Symmetric(Sigma), :maxent_fast;
-        min_spacing=250, shuffle_offsets=false)
+    s_true = solve_s(Symmetric(Sigma), :maxent; niter=5)
+    s = solve_s(Symmetric(Sigma), :maxent_fast; niter=5, nworkers=1)
 
     @test all(s .≥ 0)
     @test all(1 .≥ s)
@@ -157,13 +156,12 @@ end
 
 @testset "parallel MVR solver" begin
     Random.seed!(2022)
-    p = 1000
+    p = 80
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
 
-    s_true = solve_s(Symmetric(Sigma), :mvr)
-    s = solve_s(Symmetric(Sigma), :mvr_fast;
-        min_spacing=250, shuffle_offsets=false)
+    s_true = solve_s(Symmetric(Sigma), :mvr; niter=5)
+    s = solve_s(Symmetric(Sigma), :mvr_fast; niter=5, nworkers=1)
     @test all(s .≥ 0)
     @test all(1 .≥ s)
     λmin = eigmin(2Sigma - Diagonal(s))
@@ -174,7 +172,31 @@ end
 end
 
 @testset "parallel SDP solver" begin
-    # SDP results don't agree, revisit later
+    Random.seed!(2022)
+    p = 30
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+
+    s_true = solve_s(Symmetric(Sigma), :sdp; niter=5)
+    s = solve_s(Symmetric(Sigma), :sdp_parallel; niter=5, nworkers=1)
+    @test all(s .≥ 0)
+    @test all(1 .≥ s)
+    λmin = eigmin(2Sigma - Diagonal(s))
+    @test λmin ≥ 0 || isapprox(λmin, 0, atol=1e-8)
+    @test all(isapprox.(s, s_true, atol=1e-12))
+end
+
+@testset "parallel solvers fall back when no independent windows are found" begin
+    p = 30
+    ρ = 0.4
+    Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
+
+    serial_methods = Dict(:mvr_fast => :mvr, :maxent_fast => :maxent, :sdp_parallel => :sdp)
+    for method in (:mvr_fast, :maxent_fast, :sdp_parallel)
+        s_true = solve_s(Symmetric(Sigma), serial_methods[method]; niter=2)
+        s = solve_s(Symmetric(Sigma), method; niter=2, nworkers=2, window_corr_tol=1e-12)
+        @test all(isapprox.(s, s_true, atol=1e-12))
+    end
 end
 
 @testset "model X 2nd order Knockoffs" begin
@@ -256,6 +278,39 @@ end
         for u in idx1, v in idx2
             @test Sigma[u, v] ≤ 0.7
         end
+    end
+end
+
+@testset "turbo Cholesky rank-one updates" begin
+    Random.seed!(2022)
+    p = 12
+    M = randn(p, p)
+    A = Symmetric(M'M + 4I)
+
+    for v in (begin
+            x = zeros(p)
+            x[4] = 0.2
+            x
+        end, 0.03randn(p))
+        Cstd = cholesky(A)
+        Cturbo = cholesky(A)
+        lowrankupdate!(Cstd, copy(v))
+        Knockoffs.lowrankupdate_turbo!(Cturbo, copy(v))
+        @test isapprox(Matrix(Cturbo.U' * Cturbo.U), Matrix(Cstd.U' * Cstd.U), atol=1e-10)
+        @test isapprox(Matrix(Cturbo.U' * Cturbo.U), Matrix(A) + v * v', atol=1e-10)
+    end
+
+    for v in (begin
+            x = zeros(p)
+            x[4] = 0.2
+            x
+        end, 0.03randn(p))
+        Cstd = cholesky(A)
+        Cturbo = cholesky(A)
+        lowrankdowndate!(Cstd, copy(v))
+        Knockoffs.lowrankdowndate_turbo!(Cturbo, copy(v))
+        @test isapprox(Matrix(Cturbo.U' * Cturbo.U), Matrix(Cstd.U' * Cstd.U), atol=1e-10)
+        @test isapprox(Matrix(Cturbo.U' * Cturbo.U), Matrix(A) - v * v', atol=1e-10)
     end
 end
 

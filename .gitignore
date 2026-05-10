@@ -22,4 +22,12 @@ Manifest.toml
 *.html
 *.Rmd
 
-linear_cholesky_updates/*
+# manuscript
+linear_cholesky_updates/*.tex
+linear_cholesky_updates/*.sty
+linear_cholesky_updates/*.bib
+linear_cholesky_updates/*.aux
+linear_cholesky_updates/*.bib
+linear_cholesky_updates/*.pdf
+linear_cholesky_updates/*.log
+linear_cholesky_updates/figures
