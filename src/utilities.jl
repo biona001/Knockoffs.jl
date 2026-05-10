@@ -274,6 +274,20 @@ function _cut_is_spaced(cut::Int, cuts::Vector{Int}, p::Int, min_window_size::In
     return true
 end
 
+function _parallel_window_parameters(
+    p::Int,
+    nworkers::Int,
+    boundary_band::Union{Nothing, Int},
+    min_window_size::Union{Nothing, Int}
+    )
+    nwindows = max(1, min(nworkers, p))
+    isnothing(boundary_band) && (boundary_band = max(1, min(p - 1, cld(p, 4nwindows))))
+    boundary_band = max(1, min(boundary_band, p - 1))
+    isnothing(min_window_size) && (min_window_size = max(1, cld(p, 4nwindows)))
+    min_window_size = max(1, min(min_window_size, p))
+    return boundary_band, min_window_size
+end
+
 function _parallel_windows(
     Σ::AbstractMatrix,
     nworkers::Int;
@@ -286,10 +300,8 @@ function _parallel_windows(
     p == 1 && return [1:1]
 
     nwindows = max(1, min(nworkers, p))
-    isnothing(boundary_band) && (boundary_band = max(1, min(p - 1, cld(p, 4nwindows))))
-    boundary_band = max(1, min(boundary_band, p - 1))
-    isnothing(min_window_size) && (min_window_size = max(1, cld(p, 4nwindows)))
-    min_window_size = max(1, min(min_window_size, p))
+    boundary_band, min_window_size =
+        _parallel_window_parameters(p, nwindows, boundary_band, min_window_size)
 
     scores = _window_boundary_scores(Σ, boundary_band)
     boundary_order = sortperm(scores)
@@ -327,6 +339,8 @@ function _parallel_setup(
     inverse_order = invperm(order)
     Σordered = Matrix(Σ[order, order])
     sordered = collect(s_init[order])
+    boundary_band, min_window_size =
+        _parallel_window_parameters(p, nworkers, boundary_band, min_window_size)
     windows = _parallel_windows(
         Σordered,
         nworkers,
@@ -334,7 +348,59 @@ function _parallel_setup(
         min_window_size=min_window_size,
         window_corr_tol=window_corr_tol
     )
-    return Σordered, sordered, order, inverse_order, windows, nworkers
+    return Σordered, sordered, order, inverse_order, windows, nworkers, boundary_band, min_window_size
+end
+
+function _print_parallel_setup_report(
+    order::AbstractVector{Int},
+    windows::AbstractVector{<:UnitRange{Int}},
+    nworkers::Int,
+    feature_order,
+    boundary_band::Int,
+    min_window_size::Int,
+    window_corr_tol
+    )
+    p = length(order)
+    reordered = any(order[j] != j for j in 1:p)
+    ordering_source = isnothing(feature_order) ? "automatic nearest-correlation ordering" : "user-supplied feature_order"
+    ordering_result = reordered ? "features were reordered" : "original feature order was kept"
+
+    println("Adaptive window-parallel setup:")
+    println("  Feature ordering: $ordering_source; $ordering_result.")
+    println("  Approximately independent windows: $(length(windows))")
+    println("  Julia threads available: $(Threads.nthreads())")
+    println("  Worker threads used: $nworkers")
+    println("  Boundary band: $boundary_band")
+    println("  Minimum window size: $min_window_size")
+    println("  Window correlation tolerance: $window_corr_tol")
+    if isempty(windows)
+        println("  Window ranges: none")
+    else
+        ranges = join(("$(first(w)):$(last(w))" for w in windows), ", ")
+        sizes = join((string(length(w)) for w in windows), ", ")
+        println("  Window ranges in ordered coordinates: $ranges")
+        println("  Window sizes: $sizes")
+    end
+    flush(stdout)
+end
+
+function _print_parallel_serial_fallback(solver_name::AbstractString, nworkers::Int)
+    println("$solver_name: using the serial solver because only $nworkers worker thread is available.")
+    println("  Julia threads available: $(Threads.nthreads())")
+    flush(stdout)
+end
+
+function _print_parallel_single_window_fallback(solver_name::AbstractString)
+    println("$solver_name: only one approximately independent window was found; using the serial solver.")
+    flush(stdout)
+end
+
+function _print_parallel_factor_check(err, factor_check_tol)
+    println("Post-optimization Cholesky check: passed.")
+    println("  Verified L'L - lambda_min*I ≈ ((m + 1) / m)Σ - S.")
+    println("  Relative residual: $err")
+    println("  Tolerance: $factor_check_tol")
+    flush(stdout)
 end
 
 function _assert_parallel_cholesky_factor(
@@ -356,7 +422,7 @@ function _assert_parallel_cholesky_factor(
     abs_error = norm(residual, Inf)
     rel_error = abs_error / max(one(abs_error), norm(target, Inf))
     if !(isfinite(rel_error) && rel_error ≤ factor_check_tol)
-        error("Parallel Cholesky updates failed the post-optimization consistency check: relative error $rel_error exceeds tolerance $factor_check_tol.")
+        error("Post-optimization Cholesky check failed: L'L - lambda_min*I was not close to ((m + 1) / m)Σ - S. Relative error $rel_error exceeds tolerance $factor_check_tol.")
     end
     return rel_error
 end
@@ -395,6 +461,7 @@ function solve_MVR_parallel(
     p = size(Σ, 1)
     nworkers = max(1, min(nworkers, Threads.nthreads(), p))
     if nworkers == 1
+        verbose && _print_parallel_serial_fallback("solve_MVR_parallel", nworkers)
         return solve_MVR(
             Σ;
             niter=niter,
@@ -407,7 +474,7 @@ function solve_MVR_parallel(
     end
 
     Σinput = Σ
-    Σ, s, _, inverse_order, windows, nworkers = _parallel_setup(
+    Σ, s, order, inverse_order, windows, nworkers, boundary_band, min_window_size = _parallel_setup(
         Σ,
         s_init,
         nworkers,
@@ -417,7 +484,17 @@ function solve_MVR_parallel(
         min_window_size=min_window_size,
         window_corr_tol=window_corr_tol
     )
+    verbose && _print_parallel_setup_report(
+        order,
+        windows,
+        nworkers,
+        feature_order,
+        boundary_band,
+        min_window_size,
+        window_corr_tol
+    )
     if length(windows) == 1
+        verbose && _print_parallel_single_window_fallback("solve_MVR_parallel")
         return solve_MVR(
             Σinput;
             niter=niter,
@@ -476,7 +553,7 @@ function solve_MVR_parallel(
     end
     if factor_check
         err = _assert_parallel_cholesky_factor(L, Σ, s, (m+1)/m, λmin, factor_check_tol=factor_check_tol)
-        verbose && println("Parallel Cholesky consistency relative error = $err")
+        verbose && _print_parallel_factor_check(err, factor_check_tol)
     end
     return s[inverse_order]
 end
@@ -659,6 +736,7 @@ function solve_max_entropy_parallel(
     p = size(Σ, 1)
     nworkers = max(1, min(nworkers, Threads.nthreads(), p))
     if nworkers == 1
+        verbose && _print_parallel_serial_fallback("solve_max_entropy_parallel", nworkers)
         return solve_max_entropy(
             Σ;
             niter=niter,
@@ -671,7 +749,7 @@ function solve_max_entropy_parallel(
     end
 
     Σinput = Σ
-    Σ, s, _, inverse_order, windows, nworkers = _parallel_setup(
+    Σ, s, order, inverse_order, windows, nworkers, boundary_band, min_window_size = _parallel_setup(
         Σ,
         s_init,
         nworkers,
@@ -681,7 +759,17 @@ function solve_max_entropy_parallel(
         min_window_size=min_window_size,
         window_corr_tol=window_corr_tol
     )
+    verbose && _print_parallel_setup_report(
+        order,
+        windows,
+        nworkers,
+        feature_order,
+        boundary_band,
+        min_window_size,
+        window_corr_tol
+    )
     if length(windows) == 1
+        verbose && _print_parallel_single_window_fallback("solve_max_entropy_parallel")
         return solve_max_entropy(
             Σinput;
             niter=niter,
@@ -738,7 +826,7 @@ function solve_max_entropy_parallel(
     end
     if factor_check
         err = _assert_parallel_cholesky_factor(L, Σ, s, γ, λmin, factor_check_tol=factor_check_tol)
-        verbose && println("Parallel Cholesky consistency relative error = $err")
+        verbose && _print_parallel_factor_check(err, factor_check_tol)
     end
     return s[inverse_order]
 end
@@ -862,6 +950,7 @@ function solve_sdp_parallel(
     p = size(Σ, 1)
     nworkers = max(1, min(nworkers, Threads.nthreads(), p))
     if nworkers == 1
+        verbose && _print_parallel_serial_fallback("solve_sdp_parallel", nworkers)
         return solve_SDP(
             Σ;
             λ=λ,
@@ -875,7 +964,7 @@ function solve_sdp_parallel(
 
     Σinput = Σ
     s_init = zeros(T, p)
-    Σ, s, _, inverse_order, windows, nworkers = _parallel_setup(
+    Σ, s, order, inverse_order, windows, nworkers, boundary_band, min_window_size = _parallel_setup(
         Σ,
         s_init,
         nworkers,
@@ -885,7 +974,17 @@ function solve_sdp_parallel(
         min_window_size=min_window_size,
         window_corr_tol=window_corr_tol
     )
+    verbose && _print_parallel_setup_report(
+        order,
+        windows,
+        nworkers,
+        feature_order,
+        boundary_band,
+        min_window_size,
+        window_corr_tol
+    )
     if length(windows) == 1
+        verbose && _print_parallel_single_window_fallback("solve_sdp_parallel")
         return solve_SDP(
             Σinput;
             λ=λ,
@@ -938,7 +1037,7 @@ function solve_sdp_parallel(
     end
     if factor_check
         err = _assert_parallel_cholesky_factor(L, Σ, s, γ, zero(T), factor_check_tol=factor_check_tol)
-        verbose && println("Parallel Cholesky consistency relative error = $err")
+        verbose && _print_parallel_factor_check(err, factor_check_tol)
     end
     return s[inverse_order]
 end
