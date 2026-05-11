@@ -16,7 +16,7 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     * `:sdp_parallel` for adaptive window-parallel SDP coordinate descent knockoffs
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
-    less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.001`.
+    less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.01`.
     For a list of available options, see [`solve_MVR`](@ref),
     [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), [`solve_sdp_parallel`](@ref), or
     [`solve_equi`](@ref)
@@ -72,6 +72,22 @@ function solve_equi(
     return fill(sj, size(Σ, 1))
 end
 
+function _sdp_objective(Σ::AbstractMatrix, s::AbstractVector)
+    return sum(abs.(diag(Σ) .- s))
+end
+
+function _maxent_objective(L::Cholesky, s::AbstractVector, m::Number)
+    all(>(0), s) || return -Inf
+    return logdet(L) + m * sum(log, s)
+end
+
+function _mvr_objective(L::Cholesky{T}, s::AbstractVector, m::Number) where T
+    all(>(0), s) || return Inf
+    storage = Matrix{T}(I, size(L, 1), size(L, 2))
+    ldiv!(UpperTriangular(L.factors), storage)
+    return sum(abs2, storage) + m^2 * sum(inv, s)
+end
+
 """
     solve_MVR(Σ::AbstractMatrix)
 
@@ -86,7 +102,7 @@ https://arxiv.org/pdf/2011.14625.pdf
 function solve_MVR(
     Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol
+    tol=1e-3, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Number = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m) ./ 2, # initialize away from the equicorrelated boundary
@@ -101,10 +117,13 @@ function solve_MVR(
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
+    obj = verbose ? _mvr_objective(L, s, m) : zero(T)
+    verbose && println("MVR initial obj = $obj")
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         for j in 1:p
             fill!(ej, 0)
             ej[j] = 1
@@ -121,6 +140,9 @@ function solve_MVR(
             δj > ub && (δj = ub)
             δj < -s[j] && (δj = -s[j])
             abs(δj) < 1e-15 && continue
+            if verbose
+                obj_new += δj * (-cn) / (1 - δj * cd) + m^2 * (inv(s[j] + δj) - inv(s[j]))
+            end
             s[j] += δj
             # rank 1 update to cholesky factor
             ej[j] = sqrt(abs(δj))
@@ -129,9 +151,10 @@ function solve_MVR(
             abs(δj) > max_delta && (max_delta = abs(δj))
         end
         if verbose
-            println("Iter $l: δ = $max_delta")
+            println("Iter $l: obj = $obj_new, δ = $max_delta")
             flush(stdout)
         end
+        obj = obj_new
         # declare convergence if changes in s are all smaller than tol
         max_delta < tol && break
     end
@@ -446,7 +469,7 @@ not accurate enough.
 function solve_MVR_parallel(
     Σ::AbstractMatrix{T};
     niter::Int = 100,
-    tol=1e-6,
+    tol=1e-3,
     λmin=1e-6,
     m::Number = 1,
     s_init = solve_equi(Σ, m=m) ./ 2,
@@ -510,6 +533,8 @@ function solve_MVR_parallel(
 
     p = size(Σ, 1)
     L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
+    obj = verbose ? _mvr_objective(L, s, m) : zero(T)
+    verbose && println("MVR initial obj = $obj")
 
     nthread_buffers = Threads.maxthreadid()
     vnwork = [zeros(T, p) for _ in 1:nthread_buffers]
@@ -548,7 +573,8 @@ function solve_MVR_parallel(
         end
         max_delta = maximum(max_deltas)
         if verbose
-            println("Iter $l: δ = $max_delta, windows = $(length(windows))")
+            obj = _mvr_objective(L, s, m)
+            println("Iter $l: obj = $obj, δ = $max_delta, windows = $(length(windows))")
             flush(stdout)
         end
         max_delta < tol && break
@@ -622,7 +648,7 @@ where `ζ = 2Σ_{jj} - s_j`.
 function solve_max_entropy(
     Σ::AbstractMatrix{T}; # correlation matrix
     niter::Int = 100,
-    tol=1e-6, # converges when changes in s are all smaller than tol
+    tol=1e-3, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Number = 1, # number of knockoffs per variable
     s_init = solve_equi(Σ, m=m) ./ 2, # initialize away from the equicorrelated boundary
@@ -637,10 +663,13 @@ function solve_max_entropy(
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
     L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
+    obj = verbose ? _maxent_objective(L, s, m) : zero(T)
+    verbose && println("Maxent initial obj = $obj")
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
         max_delta = zero(T)
+        obj_new = obj
         for j in 1:p
             @simd for i in 1:p
                 ỹ[i] = (m+1)/m * Σ[i, j]
@@ -663,6 +692,7 @@ function solve_max_entropy(
             δ > ub && (δ = ub)
             δ < -s[j] && (δ = -s[j])
             abs(δ) < 1e-15 && continue
+            verbose && (obj_new += log(1 - δ * sum(abs2, ỹ)) + m * log1p(δ / s[j]))
             # update s
             s[j] += δ
             # rank 1 update to cholesky factor
@@ -674,9 +704,10 @@ function solve_max_entropy(
         end
         # declare convergence if changes in s are all smaller than tol
         if verbose
-            println("Iter $l: δ = $max_delta")
+            println("Iter $l: obj = $obj_new, δ = $max_delta")
             flush(stdout)
         end
+        obj = obj_new
         max_delta < tol && break 
     end
     return s
@@ -738,7 +769,7 @@ that the maintained factor still represents the target knockoff matrix.
 function solve_max_entropy_parallel(
     Σ::AbstractMatrix{T};
     niter::Int = 100,
-    tol=1e-6,
+    tol=1e-3,
     λmin=1e-6,
     m::Number = 1,
     s_init = solve_equi(Σ, m=m) ./ 2,
@@ -803,6 +834,8 @@ function solve_max_entropy_parallel(
     p = size(Σ, 1)
     L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
     γ = (m+1) / m
+    obj = verbose ? _maxent_objective(L, s, m) : zero(T)
+    verbose && println("Maxent initial obj = $obj")
 
     nthread_buffers = Threads.maxthreadid()
     xwork = [zeros(T, p) for _ in 1:nthread_buffers]
@@ -838,7 +871,8 @@ function solve_max_entropy_parallel(
         end
         max_delta = maximum(max_deltas)
         if verbose
-            println("Iter $l: δ = $max_delta, windows = $(length(windows))")
+            obj = _maxent_objective(L, s, m)
+            println("Iter $l: obj = $obj, δ = $max_delta, windows = $(length(windows))")
             flush(stdout)
         end
         max_delta < tol && break
@@ -865,7 +899,7 @@ function solve_SDP(
     μ::T = 0.8, # decay parameter
     niter::Int = 100,
     m::Number = 1, # number of knockoffs per variable
-    tol=1e-6, # converges when lambda < tol?
+    tol=1e-3, # converges when lambda < tol?
     λmin=1e-6, # minimum eigenvalue margin for (m+1)/m Σ - Diagonal(s)
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
@@ -880,13 +914,12 @@ function solve_SDP(
     downdate_margin = sqrt(eps(T))
     s = zeros(T, p)
     L = cholesky(Symmetric(Matrix((m+1)/m*Σ), :U))
+    obj = verbose ? _sdp_objective(Σ, s) : zero(T)
+    verbose && println("SDP initial obj = $obj")
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
-        if verbose
-            println("Iter $l: λ = $λ, sum(s) = $(sum(s))")
-            flush(stdout)
-        end
+        obj_new = obj
         for j in 1:p
             @simd for i in 1:p
                 ỹ[i] = (m+1)/m * Σ[i, j]
@@ -910,6 +943,7 @@ function solve_SDP(
             end
             δ < -s[j] && (δ = -s[j])
             abs(δ) < 1e-15 && continue
+            verbose && (obj_new += abs(Σ[j, j] - s[j] - δ) - abs(Σ[j, j] - s[j]))
             s[j] += δ
             # rank 1 update to cholesky factor
             fill!(x, 0)
@@ -917,6 +951,11 @@ function solve_SDP(
             δ > 0 ? choldowndate!(L, x) : cholupdate!(L, x)
         end
         # check convergence 
+        obj = obj_new
+        if verbose
+            println("Iter $l: λ = $λ, obj = $obj, sum(s) = $(sum(s))")
+            flush(stdout)
+        end
         λ *= μ
         λ < tol && break
     end
@@ -973,7 +1012,7 @@ function solve_sdp_parallel(
     μ::T = 0.8,
     niter::Int = 100,
     m::Number = 1,
-    tol=1e-6,
+    tol=1e-3,
     λmin=1e-6,
     verbose::Bool = false,
     nworkers::Int = Threads.nthreads(),
@@ -1042,6 +1081,8 @@ function solve_sdp_parallel(
 
     L = cholesky(Symmetric(Matrix((m+1)/m*Σ), :U))
     γ = (m+1) / m
+    obj = verbose ? _sdp_objective(Σ, s) : zero(T)
+    verbose && println("SDP initial obj = $obj")
 
     nthread_buffers = Threads.maxthreadid()
     xwork = [zeros(T, p) for _ in 1:nthread_buffers]
@@ -1049,10 +1090,6 @@ function solve_sdp_parallel(
     update_work = [zeros(T, p) for _ in 1:nthread_buffers]
 
     @inbounds for l in 1:niter
-        if verbose
-            println("Iter $l: λ = $λ, sum(s) = $(sum(s)), windows = $(length(windows))")
-            flush(stdout)
-        end
         Threads.@threads for widx in eachindex(windows)
             tid = Threads.threadid()
             for j in windows[widx]
@@ -1074,6 +1111,11 @@ function solve_sdp_parallel(
                 v[j] = sqrt(abs(δ))
                 δ > 0 ? lowrankdowndate_turbo!(L, v) : lowrankupdate_turbo!(L, v)
             end
+        end
+        verbose && (obj = _sdp_objective(Σ, s))
+        if verbose
+            println("Iter $l: λ = $λ, obj = $obj, sum(s) = $(sum(s)), windows = $(length(windows))")
+            flush(stdout)
         end
         λ *= μ
         λ < tol && break
