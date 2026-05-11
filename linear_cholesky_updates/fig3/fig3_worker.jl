@@ -13,7 +13,7 @@ using Statistics
 include(joinpath(@__DIR__, "config.jl"))
 
 const OUTDIR = joinpath(@__DIR__, "results")
-const P = parse(Int, get(ENV, "FIG3_P", "1000"))
+const P = parse(Int, get(ENV, "FIG3_P", "5000"))
 const N = parse(Int, get(ENV, "FIG3_N", "800"))
 const K = parse(Int, get(ENV, "FIG3_K", "50"))
 const FIG3_REPS = parse(Int, get(ENV, "FIG3_REPS", "50"))

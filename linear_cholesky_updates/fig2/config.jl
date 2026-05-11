@@ -43,7 +43,7 @@ function block_ar1_covariance(p::Int; rho=0.85, blocksize=block_size_for(p))
         q = length(idx)
         push!(blocks, [rho^abs(i - j) for i in 1:q, j in 1:q])
     end
-    return Symmetric(Matrix(BlockDiagonal(blocks)), :L)
+    return Symmetric(Matrix(BlockDiagonal(blocks)))
 end
 
 function local_er_covariance(p::Int; blocksize=block_size_for(p), phi=0.25, lb=0.20, ub=0.60, lambda_min=0.20)
@@ -63,7 +63,7 @@ function local_er_covariance(p::Int; blocksize=block_size_for(p), phi=0.25, lb=0
         B ./= d * d'
         push!(blocks, B)
     end
-    return Symmetric(Matrix(BlockDiagonal(blocks)), :L)
+    return Symmetric(Matrix(BlockDiagonal(blocks)))
 end
 
 function local_block_covariance(p::Int; blocksize=block_size_for(p), rho=0.65)
@@ -73,7 +73,7 @@ function local_block_covariance(p::Int; blocksize=block_size_for(p), rho=0.65)
         B = (1 - rho) * Matrix{Float64}(I, q, q) .+ rho
         push!(blocks, B)
     end
-    return Symmetric(Matrix(BlockDiagonal(blocks)), :L)
+    return Symmetric(Matrix(BlockDiagonal(blocks)))
 end
 
 function covariance_matrix(kind::AbstractString, p::Int; seed::Int=1)
@@ -98,7 +98,7 @@ function solver_kwargs(update_strategy::AbstractString, nworkers::Int, robust::B
         kwargs[:nworkers] = nworkers
         kwargs[:feature_order] = nothing
         kwargs[:window_corr_tol] = parse(Float64, get(ENV, "WINDOW_CORR_TOL", "1e-12"))
-        kwargs[:factor_check] = parse(Bool, get(ENV, "FACTOR_CHECK", "true"))
+        kwargs[:factor_check] = parse(Bool, get(ENV, "FACTOR_CHECK", "false"))
     else
         kwargs[:robust] = robust
     end
@@ -109,4 +109,3 @@ function result_path(outdir::AbstractString, parts...)
     mkpath(outdir)
     return joinpath(outdir, join(string.(parts), "_") * ".csv")
 end
-

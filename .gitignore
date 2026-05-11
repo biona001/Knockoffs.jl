@@ -31,3 +31,5 @@ linear_cholesky_updates/*.bib
 linear_cholesky_updates/*.pdf
 linear_cholesky_updates/*.log
 linear_cholesky_updates/figures
+*.csv
+*.out

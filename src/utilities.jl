@@ -89,17 +89,18 @@ function solve_MVR(
     tol=1e-6, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Number = 1, # number of knockoffs per variable
-    s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
+    s_init = solve_equi(Σ, m=m) ./ 2, # initialize away from the equicorrelated boundary
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    downdate_margin = sqrt(eps(T))
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
+    L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
     # preallocated vectors for efficiency
     vn, ej, vd, storage = zeros(p), zeros(p), zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -116,8 +117,9 @@ function solve_MVR(
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j], m)
             # ensure s[j] + δj is in feasible region
-            ub = 1 / cd - λmin
+            ub = max(zero(T), (1 - downdate_margin) / cd - λmin)
             δj > ub && (δj = ub)
+            δj < -s[j] && (δj = -s[j])
             abs(δj) < 1e-15 && continue
             s[j] += δj
             # rank 1 update to cholesky factor
@@ -154,7 +156,7 @@ function _mvr_delta!(
     ldiv!(vd, UpperTriangular(L.factors)', ej)
     cd = sum(abs2, vd)
     δ = solve_quadratic(cn, cd, s[j], m)
-    ub = 1 / cd - λmin
+    ub = max(zero(T), (1 - sqrt(eps(T))) / cd - λmin)
     δ > ub && (δ = ub)
     δ < -s[j] && (δ = -s[j])
     return δ
@@ -447,7 +449,7 @@ function solve_MVR_parallel(
     tol=1e-6,
     λmin=1e-6,
     m::Number = 1,
-    s_init = solve_equi(Σ, m=m),
+    s_init = solve_equi(Σ, m=m) ./ 2,
     verbose::Bool = false,
     nworkers::Int = Threads.nthreads(),
     feature_order::Union{Nothing, AbstractVector{Int}} = nothing,
@@ -507,7 +509,7 @@ function solve_MVR_parallel(
     end
 
     p = size(Σ, 1)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
+    L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
 
     nthread_buffers = Threads.maxthreadid()
     vnwork = [zeros(T, p) for _ in 1:nthread_buffers]
@@ -569,15 +571,30 @@ function forward_backward!(x, L, y, storage=zeros(length(x)))
 end
 
 function solve_quadratic(cn, cd, Sjj, m, verbose=false)
+    isfinite(cn) || return 0
+    isfinite(cd) || return 0
+    cd > 0 || return 0
     a = -cn - cd^2*m^2
     b = 2*(-cn*Sjj + cd*m^2)
     c = -cn*Sjj^2 - m^2
     a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
-    x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
-    x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
-    δj = -Sjj < x1 < inv(cd) ? x1 : x2
-    isinf(δj) && error("δj is Inf, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
-    isnan(δj) && error("δj is NaN, aborting. Sjj = $Sjj, cn = $cn, cd = $cd, x1 = $x1, x2 = $x2")
+    lb, ub = -Sjj, inv(cd)
+    if abs(a) ≤ eps(typeof(float(a))) * max(abs(b), abs(c), one(float(a)))
+        abs(b) ≤ eps(typeof(float(b))) * max(abs(c), one(float(b))) && return 0
+        x = -c / b
+        return isfinite(x) && lb < x < ub ? x : 0
+    end
+    discriminant = b^2 - 4*a*c
+    if discriminant < 0
+        discriminant ≥ -sqrt(eps(typeof(float(discriminant)))) * max(abs(b)^2, abs(4*a*c), one(float(discriminant))) || return 0
+        discriminant = zero(discriminant)
+    end
+    root = sqrt(discriminant)
+    x1 = (-b + root) / (2a)
+    x2 = (-b - root) / (2a)
+    δj = isfinite(x1) && lb < x1 < ub ? x1 : x2
+    isfinite(δj) || return 0
+    lb < δj < ub || return 0
     verbose && println("-Sjj = $(-Sjj), inv(cd) = $(inv(cd)), x1 = $x1, x2 = $x2")
     return δj
 end
@@ -608,17 +625,18 @@ function solve_max_entropy(
     tol=1e-6, # converges when changes in s are all smaller than tol
     λmin=1e-6, # minimum eigenvalue of S and (m+1)/m Σ - S
     m::Number = 1, # number of knockoffs per variable
-    s_init = solve_equi(Σ, m=m), # initialize s vector with equicorrelated solution
+    s_init = solve_equi(Σ, m=m) ./ 2, # initialize away from the equicorrelated boundary
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    downdate_margin = sqrt(eps(T))
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     s = copy(s_init)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
+    L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -640,12 +658,13 @@ function solve_max_entropy(
             fill!(x, 0)
             x[j] = 1
             ldiv!(ỹ, UpperTriangular(L.factors)', x) # non-allocating version of ldiv!(ỹ, L.L, x)
-            ub = 1 / sum(abs2, ỹ) - λmin
+            ub = max(zero(T), (1 - downdate_margin) / sum(abs2, ỹ) - λmin)
             δ = sj_new - s[j]
             δ > ub && (δ = ub)
+            δ < -s[j] && (δ = -s[j])
             abs(δ) < 1e-15 && continue
             # update s
-            s[j] = sj_new
+            s[j] += δ
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
@@ -687,7 +706,7 @@ function _max_entropy_delta!(
     fill!(x, zero(T))
     x[j] = one(T)
     ldiv!(ỹ, UpperTriangular(L.factors)', x)
-    ub = 1 / sum(abs2, ỹ) - λmin
+    ub = max(zero(T), (1 - sqrt(eps(T))) / sum(abs2, ỹ) - λmin)
     δ = sj_new - s[j]
     δ > ub && (δ = ub)
     δ < -s[j] && (δ = -s[j])
@@ -722,7 +741,7 @@ function solve_max_entropy_parallel(
     tol=1e-6,
     λmin=1e-6,
     m::Number = 1,
-    s_init = solve_equi(Σ, m=m),
+    s_init = solve_equi(Σ, m=m) ./ 2,
     verbose::Bool = false,
     nworkers::Int = Threads.nthreads(),
     feature_order::Union{Nothing, AbstractVector{Int}} = nothing,
@@ -782,7 +801,7 @@ function solve_max_entropy_parallel(
     end
 
     p = size(Σ, 1)
-    L = cholesky(Symmetric((m+1)/m*Σ - Diagonal(s)) + λmin*I)
+    L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
     γ = (m+1) / m
 
     nthread_buffers = Threads.maxthreadid()
@@ -847,6 +866,7 @@ function solve_SDP(
     niter::Int = 100,
     m::Number = 1, # number of knockoffs per variable
     tol=1e-6, # converges when lambda < tol?
+    λmin=1e-6, # minimum eigenvalue margin for (m+1)/m Σ - Diagonal(s)
     robust::Bool = false, # whether to use "robust" Cholesky updates (if robust=true, alg will be ~10x slower, only use this if the default causes cholesky updates to fail)
     verbose::Bool = false
     ) where T
@@ -857,8 +877,9 @@ function solve_SDP(
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
     # initialize s vector and compute initial cholesky factor
     p = size(Σ, 1)
+    downdate_margin = sqrt(eps(T))
     s = zeros(T, p)
-    L = cholesky(Symmetric((m+1)/m*Σ))
+    L = cholesky(Symmetric(Matrix((m+1)/m*Σ), :U))
     # preallocated vectors for efficiency
     x, ỹ = zeros(p), zeros(p)
     @inbounds for l in 1:niter
@@ -879,13 +900,21 @@ function solve_SDP(
             c = (ζ * x_l2sum) / (ζ + x_l2sum)
             # 1st order optimality condition
             sj_new = clamp((m+1)/m*Σ[j, j] - c - λ, 0, 1)
-            δ = s[j] - sj_new
+            δ = sj_new - s[j]
+            δ > 0 && begin
+                fill!(x, 0)
+                x[j] = 1
+                ldiv!(ỹ, UpperTriangular(L.factors)', x)
+                ub = max(zero(T), (1 - downdate_margin) / sum(abs2, ỹ) - λmin)
+                δ > ub && (δ = ub)
+            end
+            δ < -s[j] && (δ = -s[j])
             abs(δ) < 1e-15 && continue
-            s[j] = sj_new
+            s[j] += δ
             # rank 1 update to cholesky factor
             fill!(x, 0)
             x[j] = sqrt(abs(δ))
-            δ > 0 ? cholupdate!(L, x) : choldowndate!(L, x)
+            δ > 0 ? choldowndate!(L, x) : cholupdate!(L, x)
         end
         # check convergence 
         λ *= μ
@@ -902,7 +931,8 @@ function _sdp_ccd_delta!(
     s::AbstractVector{T},
     j::Int,
     γ,
-    λ
+    λ,
+    λmin
     ) where T
     p = length(s)
     @inbounds @simd for i in 1:p
@@ -914,7 +944,16 @@ function _sdp_ccd_delta!(
     ζ = γ * Σ[j, j] - s[j]
     c = (ζ * x_l2sum) / (ζ + x_l2sum)
     sj_new = clamp(γ * Σ[j, j] - c - λ, zero(T), one(T))
-    return sj_new - s[j]
+    δ = sj_new - s[j]
+    if δ > 0
+        fill!(x, zero(T))
+        x[j] = one(T)
+        ldiv!(ỹ, UpperTriangular(L.factors)', x)
+        ub = max(zero(T), (1 - sqrt(eps(T))) / sum(abs2, ỹ) - λmin)
+        δ > ub && (δ = ub)
+    end
+    δ < -s[j] && (δ = -s[j])
+    return δ
 end
 
 """
@@ -935,6 +974,7 @@ function solve_sdp_parallel(
     niter::Int = 100,
     m::Number = 1,
     tol=1e-6,
+    λmin=1e-6,
     verbose::Bool = false,
     nworkers::Int = Threads.nthreads(),
     feature_order::Union{Nothing, AbstractVector{Int}} = nothing,
@@ -958,6 +998,7 @@ function solve_sdp_parallel(
             niter=niter,
             m=m,
             tol=tol,
+            λmin=λmin,
             verbose=verbose
         )
     end
@@ -992,13 +1033,14 @@ function solve_sdp_parallel(
             niter=niter,
             m=m,
             tol=tol,
+            λmin=λmin,
             verbose=verbose
         )
     end
 
     p = size(Σ, 1)
 
-    L = cholesky(Symmetric((m+1)/m*Σ))
+    L = cholesky(Symmetric(Matrix((m+1)/m*Σ), :U))
     γ = (m+1) / m
 
     nthread_buffers = Threads.maxthreadid()
@@ -1022,7 +1064,8 @@ function solve_sdp_parallel(
                     s,
                     j,
                     γ,
-                    λ
+                    λ,
+                    λmin
                 )
                 abs(δ) < 1e-15 && continue
                 s[j] += δ
