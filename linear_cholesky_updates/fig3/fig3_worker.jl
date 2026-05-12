@@ -10,6 +10,8 @@ using LinearAlgebra
 using Random
 using Statistics
 
+BLAS.set_num_threads(1)
+
 include(joinpath(@__DIR__, "config.jl"))
 
 const OUTDIR = joinpath(@__DIR__, "results")

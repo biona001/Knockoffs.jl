@@ -4,6 +4,9 @@ using CSV
 using DataFrames
 using Dates
 using Knockoffs
+using LinearAlgebra
+
+BLAS.set_num_threads(1)
 
 include(joinpath(@__DIR__, "config.jl"))
 
