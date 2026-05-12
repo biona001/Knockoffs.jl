@@ -17,7 +17,7 @@ using BlockDiagonals
 using Roots: fzero
 using Downloads
 using GLM
-using LoopVectorization: @turbo # speeding up cholesky updates in utilities.jl
+using LoopVectorization: @turbo # speeding up cholesky updates
 using Optim: optimize, Brent # for group knockoffs
 using Clustering: hclust, cutree
 
@@ -84,6 +84,8 @@ include("fixed.jl")
 include("modelX.jl")
 include("threshold.jl")
 include("utilities.jl")
+include("cholesky_updates.jl")
+include("solvers.jl")
 include("knockoffscreen.jl")
 include("fit_lasso.jl")
 include("approx.jl")
