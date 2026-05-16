@@ -21,7 +21,7 @@ computing its knockoff.
     When `center=true` and `n ≥ 2p + 1`, the knockoff columns are also constructed
     to be centered.
 + `kwargs...`: Possible optional inputs to `method`, see [`solve_MVR`](@ref), 
-    [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and [`solve_sdp_fast`](@ref)
+    [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and [`solve_sdp_parallel`](@ref)
 
 # Output
 + `GaussianKnockoff`: A struct containing the original (column-normalized) `X`

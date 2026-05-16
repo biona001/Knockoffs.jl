@@ -13,7 +13,7 @@ covariance matrix but it must be wrapped in the `Symmetric` keyword.
     * `:maxent_fast` for adaptive window-parallel maximum entropy knockoffs
     * `:equi` for equi-distant knockoffs (eq 2.3 in ref 1), 
     * `:sdp` for SDP knockoffs via coordinate descent (alg 2.2 in ref 3)
-    * `:sdp_parallel` for adaptive window-parallel SDP coordinate descent knockoffs
+    * `:sdp_fast` for adaptive window-parallel SDP coordinate descent knockoffs
 + `m`: Number of knockoffs per variable, defaults to 1. 
 + `kwargs`: Extra arguments available for specific methods. For example, to use 
     less stringent convergence tolerance for MVR knockoffs, specify `tol = 0.01`.
@@ -46,7 +46,7 @@ function solve_s(Σ::Symmetric, method::Union{Symbol, String}; m::Number=1, kwar
         s = solve_max_entropy_parallel(Σcor; m=m, kwargs...)
     elseif method == :sdp
         s = solve_SDP(Σcor; m=m, kwargs...)
-    elseif method == :sdp_parallel # change function name to solve_sdp_parallel but option name should be sdp_parallel
+    elseif method == :sdp_fast
         s = solve_sdp_parallel(Σcor; m=m, kwargs...)
     else
         error("Method must be one of $SINGLE_KNOCKOFFS but was $method")
@@ -804,7 +804,7 @@ end
     solve_sdp_parallel(Σ::AbstractMatrix; kwargs...)
 
 Adaptive window-parallel version of [`solve_SDP`](@ref). Users should call
-[`solve_s`](@ref) with `method=:sdp_parallel`.
+[`solve_s`](@ref) with `method=:sdp_fast`.
 
 The solver reorders features using a nearest-correlation graph, partitions the
 reordered variables at weak cross-correlation boundaries, runs windows in

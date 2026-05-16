@@ -24,7 +24,7 @@ conditional multivariate normal distributions. The true mean `μ` and covariance
     which tends to give good empirical performance when p>n. See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and
-    [`solve_sdp_fast`](@ref)
+    [`solve_sdp_parallel`](@ref)
 
 # Reference: 
 1. "Panning for Gold: Model-X Knockoffs for High-dimensional Controlled

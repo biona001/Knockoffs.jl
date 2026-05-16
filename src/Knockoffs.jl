@@ -98,7 +98,7 @@ include("experimental/hmm_wrapper.jl")
 include("experimental/hmm.jl")
 include("experimental/dmc.jl")
 
-const SINGLE_KNOCKOFFS = [:mvr, :mvr_fast, :maxent, :maxent_fast, :equi, :sdp, :sdp_parallel]
+const SINGLE_KNOCKOFFS = [:mvr, :mvr_fast, :maxent, :maxent_fast, :equi, :sdp, :sdp_fast]
 const GROUP_KNOCKOFFS = [:equi, :sdp, :mvr, :maxent]
 
 # test data directory

@@ -26,7 +26,7 @@ Generate Ghost knockoffs given a list of z-scores (GWAS summary statistic).
     CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and
-    [`solve_sdp_fast`](@ref)
+    [`solve_sdp_parallel`](@ref)
 
 # optional inputs
 + `m`: Number of knockoffs

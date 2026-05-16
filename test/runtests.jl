@@ -205,7 +205,7 @@ end
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
 
     s_true = solve_s(Symmetric(Sigma), :sdp; niter=5)
-    s = solve_s(Symmetric(Sigma), :sdp_parallel; niter=5, nworkers=1)
+    s = solve_s(Symmetric(Sigma), :sdp_fast; niter=5, nworkers=1)
     @test all(s .≥ 0)
     @test all(1 .≥ s)
     λmin = eigmin(2Sigma - Diagonal(s))
@@ -218,8 +218,8 @@ end
     ρ = 0.4
     Sigma = Matrix(SymmetricToeplitz(ρ.^(0:(p-1))))
 
-    serial_methods = Dict(:mvr_fast => :mvr, :maxent_fast => :maxent, :sdp_parallel => :sdp)
-    for method in (:mvr_fast, :maxent_fast, :sdp_parallel)
+    serial_methods = Dict(:mvr_fast => :mvr, :maxent_fast => :maxent, :sdp_fast => :sdp)
+    for method in (:mvr_fast, :maxent_fast, :sdp_fast)
         s_true = solve_s(Symmetric(Sigma), serial_methods[method]; niter=2)
         s = solve_s(Symmetric(Sigma), method; niter=2, nworkers=2, window_corr_tol=1e-12)
         @test all(isapprox.(s, s_true, atol=1e-12))

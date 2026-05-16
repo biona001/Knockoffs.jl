@@ -20,7 +20,7 @@ function time_solvers(p; ρ = 0.4, tol=1e-6)
     GC.gc();GC.gc();GC.gc();
     t4 = @elapsed Knockoffs.solve_max_entropy(Σ, tol=tol)
     GC.gc();GC.gc();GC.gc();
-    t5 = p > 2000 ? NaN : @elapsed Knockoffs.solve_sdp_fast(Σ, tol=tol)
+    t5 = p > 2000 ? NaN : @elapsed Knockoffs.solve_sdp_parallel(Σ, tol=tol)
     GC.gc();GC.gc();GC.gc();
 
     return t1, t2, t3, t4, t5

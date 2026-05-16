@@ -24,7 +24,7 @@ specify the `window_ranges` argument to construct blocks of different sizes.
     See CovarianceEstimation.jl for more options.
 + `kwargs...`: Possible optional inputs to solvers specified in `method`, see 
     [`solve_MVR`](@ref), [`solve_max_entropy`](@ref), [`solve_SDP`](@ref), and
-    [`solve_sdp_fast`](@ref)
+    [`solve_sdp_parallel`](@ref)
 
 # Multithreading (todo)
 To enable multiple threads, simply start Julia with >1 threads and this routine
