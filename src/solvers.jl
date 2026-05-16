@@ -185,6 +185,52 @@ function _mvr_delta!(
     return δ
 end
 
+function _check_local_window_options(buffer_size::Int, local_window_mode::Symbol)
+    buffer_size ≥ 0 || error("buffer_size must be nonnegative but was $buffer_size.")
+    local_window_mode in (:block, :buffered) ||
+        error("local_window_mode must be :block or :buffered but was $local_window_mode.")
+    local_window_mode == :block && buffer_size > 0 &&
+        error("buffer_size must be 0 when local_window_mode=:block.")
+    return nothing
+end
+
+function _buffered_window(window::UnitRange{Int}, p::Int, buffer_size::Int, local_window_mode::Symbol)
+    local_window_mode == :block && return window
+    buffer_size == 0 && return window
+    return max(1, first(window) - buffer_size):min(p, last(window) + buffer_size)
+end
+
+function _interior_indices(window::UnitRange{Int}, buffered_window::UnitRange{Int})
+    offset = first(window) - first(buffered_window)
+    return (offset + 1):(offset + length(window))
+end
+
+function _solve_mvr_window!(
+    s::AbstractVector{T},
+    Σ::AbstractMatrix{T},
+    window::UnitRange{Int};
+    niter::Int,
+    tol,
+    λmin,
+    m::Number,
+    buffer_size::Int,
+    local_window_mode::Symbol
+    ) where T
+    buffered_window = _buffered_window(window, size(Σ, 1), buffer_size, local_window_mode)
+    Σw = @view Σ[buffered_window, buffered_window]
+    sw = solve_MVR(
+        Σw;
+        niter=niter,
+        tol=tol,
+        λmin=λmin,
+        m=m,
+        s_init=collect(@view(s[buffered_window])),
+        verbose=false
+    )
+    copyto!(@view(s[window]), @view(sw[_interior_indices(window, buffered_window)]))
+    return nothing
+end
+
 function _print_parallel_serial_fallback(solver_name::AbstractString, nworkers::Int)
     println("$solver_name: using the serial solver because only $nworkers worker thread is available.")
     println("  Julia threads available: $(Threads.nthreads())")
@@ -264,12 +310,11 @@ Adaptive window-parallel version of [`solve_MVR`](@ref). Users should call
 [`solve_s`](@ref) with `method=:mvr_fast`.
 
 The solver first reorders features using a nearest-correlation graph, partitions
-the reordered variables at weak cross-correlation boundaries, and runs one
-serial coordinate-descent sweep per window in parallel. The returned vector is
-always sorted back to the input feature order. After optimization, the solver
-checks that the maintained factor satisfies
-`L' * L - λmin*I ≈ (m+1)/m*Σ - Diagonal(s)` and errors if the approximation is
-not accurate enough.
+the reordered variables at weak cross-correlation boundaries, and solves each
+window with an independent Cholesky factor. The returned vector is always sorted
+back to the input feature order. After optimization, the solver checks that a
+global factorization of `(m+1)/m*Σ - Diagonal(s) + λmin*I` succeeds and matches
+the target matrix.
 """
 function solve_MVR_parallel(
     Σ::AbstractMatrix{T};
@@ -285,9 +330,12 @@ function solve_MVR_parallel(
     boundary_band::Union{Nothing, Int} = nothing,
     min_window_size::Union{Nothing, Int} = nothing,
     window_corr_tol = 1e-3,
+    buffer_size::Int = 0,
+    local_window_mode::Symbol = :buffered,
     factor_check::Bool = true,
     factor_check_tol = 1e-4
     ) where T
+    _check_local_window_options(buffer_size, local_window_mode)
     p = size(Σ, 1)
     nworkers = max(1, min(nworkers, Threads.nthreads(), p))
     if nworkers == 1
@@ -336,55 +384,22 @@ function solve_MVR_parallel(
         )
     end
 
-    p = size(Σ, 1)
-    L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
-    obj = verbose ? _mvr_objective(L, s, m) : zero(T)
-    verbose && println("MVR initial obj = $obj")
-
-    nthread_buffers = Threads.maxthreadid()
-    vnwork = [zeros(T, p) for _ in 1:nthread_buffers]
-    ejwork = [zeros(T, p) for _ in 1:nthread_buffers]
-    vdwork = [zeros(T, p) for _ in 1:nthread_buffers]
-    storagework = [zeros(T, p) for _ in 1:nthread_buffers]
-    update_work = [zeros(T, p) for _ in 1:nthread_buffers]
-    max_deltas = zeros(T, nthread_buffers)
-
-    @inbounds for l in 1:niter
-        fill!(max_deltas, zero(T))
-        Threads.@threads for widx in eachindex(windows)
-            tid = Threads.threadid()
-            local_max_delta = zero(T)
-            for j in windows[widx]
-                δ = _mvr_delta!(
-                    vnwork[tid],
-                    ejwork[tid],
-                    vdwork[tid],
-                    storagework[tid],
-                    L,
-                    s,
-                    j,
-                    m,
-                    λmin
-                )
-                abs(δ) < 1e-15 && continue
-                s[j] += δ
-                v = update_work[tid]
-                fill!(v, zero(T))
-                v[j] = sqrt(abs(δ))
-                δ > 0 ? lowrankdowndate_turbo!(L, v) : lowrankupdate_turbo!(L, v)
-                abs(δ) > local_max_delta && (local_max_delta = abs(δ))
-            end
-            max_deltas[tid] = max(max_deltas[tid], local_max_delta)
-        end
-        max_delta = maximum(max_deltas)
-        if verbose
-            obj = _mvr_objective(L, s, m)
-            println("Iter $l: obj = $obj, δ = $max_delta, windows = $(length(windows))")
-            flush(stdout)
-        end
-        max_delta < tol && break
+    Threads.@threads for widx in eachindex(windows)
+        _solve_mvr_window!(
+            s,
+            Σ,
+            windows[widx];
+            niter=niter,
+            tol=tol,
+            λmin=λmin,
+            m=m,
+            buffer_size=buffer_size,
+            local_window_mode=local_window_mode
+        )
     end
     if factor_check
+        γ = (m+1) / m
+        L = cholesky(Symmetric(Matrix(γ*Σ - Diagonal(s) + λmin*I), :U))
         err = _assert_parallel_cholesky_factor(L, Σ, s, (m+1)/m, λmin, factor_check_tol=factor_check_tol)
         verbose && _print_parallel_factor_check(err, factor_check_tol)
     end
@@ -553,6 +568,32 @@ function _max_entropy_delta!(
     return δ
 end
 
+function _solve_max_entropy_window!(
+    s::AbstractVector{T},
+    Σ::AbstractMatrix{T},
+    window::UnitRange{Int};
+    niter::Int,
+    tol,
+    λmin,
+    m::Number,
+    buffer_size::Int,
+    local_window_mode::Symbol
+    ) where T
+    buffered_window = _buffered_window(window, size(Σ, 1), buffer_size, local_window_mode)
+    Σw = @view Σ[buffered_window, buffered_window]
+    sw = solve_max_entropy(
+        Σw;
+        niter=niter,
+        tol=tol,
+        λmin=λmin,
+        m=m,
+        s_init=collect(@view(s[buffered_window])),
+        verbose=false
+    )
+    copyto!(@view(s[window]), @view(sw[_interior_indices(window, buffered_window)]))
+    return nothing
+end
+
 """
     solve_max_entropy_parallel(Σ::AbstractMatrix; kwargs...)
 
@@ -561,10 +602,9 @@ Users should call [`solve_s`](@ref) with `method=:maxent_fast` instead of
 this function.
 
 The solver reorders features using a nearest-correlation graph, partitions the
-reordered variables at weak cross-correlation boundaries, and runs one serial
-coordinate-descent sweep per window in parallel. The returned vector is sorted
-back to the input feature order. A post-optimization consistency check verifies
-that the maintained factor still represents the target knockoff matrix.
+reordered variables at weak cross-correlation boundaries, and solves each
+window with an independent Cholesky factor. The returned vector is sorted back
+to the input feature order.
 
 # Keyword arguments
 + `nworkers`: maximum number of coordinates proposed concurrently. Defaults to
@@ -572,8 +612,13 @@ that the maintained factor still represents the target knockoff matrix.
 + `feature_order`: optional permutation to use instead of automatic ordering.
 + `order_neighbors`: number of nearest-correlation neighbors used to build the
   automatic feature ordering graph.
++ `buffer_size`: number of ordered variables to add on each side of each local
+  solve. Only the original interior window entries are copied back.
++ `local_window_mode`: `:buffered` uses `buffer_size`; `:block` enforces the
+  zero-buffer block-local approximation.
 + `factor_check_tol`: relative tolerance for the final Cholesky consistency
-  check.
+  check. This check is meaningful when the selected windows are effectively
+  block diagonal in the reordered covariance.
 """
 function solve_max_entropy_parallel(
     Σ::AbstractMatrix{T};
@@ -589,9 +634,12 @@ function solve_max_entropy_parallel(
     boundary_band::Union{Nothing, Int} = nothing,
     min_window_size::Union{Nothing, Int} = nothing,
     window_corr_tol = 1e-3,
+    buffer_size::Int = 0,
+    local_window_mode::Symbol = :buffered,
     factor_check::Bool = true,
     factor_check_tol = 1e-4
     ) where T
+    _check_local_window_options(buffer_size, local_window_mode)
     p = size(Σ, 1)
     nworkers = max(1, min(nworkers, Threads.nthreads(), p))
     if nworkers == 1
@@ -640,53 +688,22 @@ function solve_max_entropy_parallel(
         )
     end
 
-    p = size(Σ, 1)
-    L = cholesky(Symmetric(Matrix((m+1)/m*Σ - Diagonal(s) + λmin*I), :U))
-    γ = (m+1) / m
-    obj = verbose ? _maxent_objective(L, s, m) : zero(T)
-    verbose && println("Maxent initial obj = $obj")
-
-    nthread_buffers = Threads.maxthreadid()
-    xwork = [zeros(T, p) for _ in 1:nthread_buffers]
-    ywork = [zeros(T, p) for _ in 1:nthread_buffers]
-    update_work = [zeros(T, p) for _ in 1:nthread_buffers]
-    max_deltas = zeros(T, nthread_buffers)
-
-    @inbounds for l in 1:niter
-        fill!(max_deltas, zero(T))
-        Threads.@threads for widx in eachindex(windows)
-            tid = Threads.threadid()
-            local_max_delta = zero(T)
-            for j in windows[widx]
-                δ = _max_entropy_delta!(
-                    xwork[tid],
-                    ywork[tid],
-                    Σ,
-                    L,
-                    s,
-                    j,
-                    γ,
-                    λmin
-                )
-                abs(δ) < 1e-15 && continue
-                s[j] += δ
-                v = update_work[tid]
-                fill!(v, zero(T))
-                v[j] = sqrt(abs(δ))
-                δ > 0 ? lowrankdowndate_turbo!(L, v) : lowrankupdate_turbo!(L, v)
-                abs(δ) > local_max_delta && (local_max_delta = abs(δ))
-            end
-            max_deltas[tid] = max(max_deltas[tid], local_max_delta)
-        end
-        max_delta = maximum(max_deltas)
-        if verbose
-            obj = _maxent_objective(L, s, m)
-            println("Iter $l: obj = $obj, δ = $max_delta, windows = $(length(windows))")
-            flush(stdout)
-        end
-        max_delta < tol && break
+    Threads.@threads for widx in eachindex(windows)
+        _solve_max_entropy_window!(
+            s,
+            Σ,
+            windows[widx];
+            niter=niter,
+            tol=tol,
+            λmin=λmin,
+            m=m,
+            buffer_size=buffer_size,
+            local_window_mode=local_window_mode
+        )
     end
     if factor_check
+        γ = (m+1) / m
+        L = cholesky(Symmetric(Matrix(γ*Σ - Diagonal(s) + λmin*I), :U))
         err = _assert_parallel_cholesky_factor(L, Σ, s, γ, λmin, factor_check_tol=factor_check_tol)
         verbose && _print_parallel_factor_check(err, factor_check_tol)
     end
@@ -800,6 +817,35 @@ function _sdp_ccd_delta!(
     return δ
 end
 
+function _solve_sdp_window!(
+    s::AbstractVector{T},
+    Σ::AbstractMatrix{T},
+    window::UnitRange{Int};
+    λ,
+    μ,
+    niter::Int,
+    tol,
+    λmin,
+    m::Number,
+    buffer_size::Int,
+    local_window_mode::Symbol
+    ) where T
+    buffered_window = _buffered_window(window, size(Σ, 1), buffer_size, local_window_mode)
+    Σw = @view Σ[buffered_window, buffered_window]
+    sw = solve_SDP(
+        Σw;
+        λ=λ,
+        μ=μ,
+        niter=niter,
+        m=m,
+        tol=tol,
+        λmin=λmin,
+        verbose=false
+    )
+    copyto!(@view(s[window]), @view(sw[_interior_indices(window, buffered_window)]))
+    return nothing
+end
+
 """
     solve_sdp_parallel(Σ::AbstractMatrix; kwargs...)
 
@@ -807,9 +853,10 @@ Adaptive window-parallel version of [`solve_SDP`](@ref). Users should call
 [`solve_s`](@ref) with `method=:sdp_fast`.
 
 The solver reorders features using a nearest-correlation graph, partitions the
-reordered variables at weak cross-correlation boundaries, runs windows in
-parallel, and sorts the optimized vector back to the input order. It errors if
-the final factorization fails the Cholesky consistency check.
+reordered variables at weak cross-correlation boundaries, solves each window
+with an independent Cholesky factor, and sorts the optimized vector back to the
+input order. It errors if the final global factorization fails the Cholesky
+consistency check.
 """
 function solve_sdp_parallel(
     Σ::AbstractMatrix{T};
@@ -826,9 +873,12 @@ function solve_sdp_parallel(
     boundary_band::Union{Nothing, Int} = nothing,
     min_window_size::Union{Nothing, Int} = nothing,
     window_corr_tol = 1e-3,
+    buffer_size::Int = 0,
+    local_window_mode::Symbol = :buffered,
     factor_check::Bool = true,
     factor_check_tol = 1e-4
     ) where T
+    _check_local_window_options(buffer_size, local_window_mode)
     0 ≤ μ ≤ 1 || error("Decay parameter μ must be in [0, 1] but was $μ")
     0 < λ || error("Barrier coefficient λ must be > 0 but was $λ")
     p = size(Σ, 1)
@@ -882,50 +932,24 @@ function solve_sdp_parallel(
         )
     end
 
-    p = size(Σ, 1)
-
-    L = cholesky(Symmetric(Matrix((m+1)/m*Σ), :U))
-    γ = (m+1) / m
-    obj = verbose ? _sdp_objective(Σ, s) : zero(T)
-    verbose && println("SDP initial obj = $obj")
-
-    nthread_buffers = Threads.maxthreadid()
-    xwork = [zeros(T, p) for _ in 1:nthread_buffers]
-    ywork = [zeros(T, p) for _ in 1:nthread_buffers]
-    update_work = [zeros(T, p) for _ in 1:nthread_buffers]
-
-    @inbounds for l in 1:niter
-        Threads.@threads for widx in eachindex(windows)
-            tid = Threads.threadid()
-            for j in windows[widx]
-                δ = _sdp_ccd_delta!(
-                    xwork[tid],
-                    ywork[tid],
-                    Σ,
-                    L,
-                    s,
-                    j,
-                    γ,
-                    λ,
-                    λmin
-                )
-                abs(δ) < 1e-15 && continue
-                s[j] += δ
-                v = update_work[tid]
-                fill!(v, zero(T))
-                v[j] = sqrt(abs(δ))
-                δ > 0 ? lowrankdowndate_turbo!(L, v) : lowrankupdate_turbo!(L, v)
-            end
-        end
-        verbose && (obj = _sdp_objective(Σ, s))
-        if verbose
-            println("Iter $l: λ = $λ, obj = $obj, sum(s) = $(sum(s)), windows = $(length(windows))")
-            flush(stdout)
-        end
-        λ *= μ
-        λ < tol && break
+    Threads.@threads for widx in eachindex(windows)
+        _solve_sdp_window!(
+            s,
+            Σ,
+            windows[widx];
+            λ=λ,
+            μ=μ,
+            niter=niter,
+            tol=tol,
+            λmin=λmin,
+            m=m,
+            buffer_size=buffer_size,
+            local_window_mode=local_window_mode
+        )
     end
     if factor_check
+        γ = (m+1) / m
+        L = cholesky(Symmetric(Matrix(γ*Σ - Diagonal(s)), :U))
         err = _assert_parallel_cholesky_factor(L, Σ, s, γ, zero(T), factor_check_tol=factor_check_tol)
         verbose && _print_parallel_factor_check(err, factor_check_tol)
     end

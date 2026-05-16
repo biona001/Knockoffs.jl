@@ -226,6 +226,57 @@ end
     end
 end
 
+@testset "buffered local max entropy windows" begin
+    p = 48
+    Sigma = Matrix{Float64}(I, p, p)
+    for block in (1:24, 25:48)
+        for j in block, i in block
+            Sigma[i, j] = 0.5^abs(i - j)
+        end
+    end
+
+    s_block = solve_s(
+        Symmetric(Sigma),
+        :maxent_fast;
+        niter=3,
+        nworkers=2,
+        feature_order=collect(1:p),
+        window_corr_tol=0.0,
+        buffer_size=0,
+        local_window_mode=:block,
+    )
+    s_zero_buffer = solve_s(
+        Symmetric(Sigma),
+        :maxent_fast;
+        niter=3,
+        nworkers=2,
+        feature_order=collect(1:p),
+        window_corr_tol=0.0,
+        buffer_size=0,
+    )
+    s_buffered = solve_s(
+        Symmetric(Sigma),
+        :maxent_fast;
+        niter=3,
+        nworkers=2,
+        feature_order=collect(1:p),
+        window_corr_tol=0.0,
+        buffer_size=4,
+    )
+
+    @test all(isapprox.(s_zero_buffer, s_block, atol=1e-12))
+    @test all(s_buffered .≥ 0)
+    @test eigmin(2Sigma - Diagonal(s_buffered)) ≥ -1e-8
+    @test_throws ErrorException solve_s(
+        Symmetric(Sigma),
+        :maxent_fast;
+        niter=1,
+        nworkers=2,
+        buffer_size=1,
+        local_window_mode=:block,
+    )
+end
+
 @testset "model X 2nd order Knockoffs" begin
     # example from https://github.com/msesia/knockoff-filter/blob/master/R/knockoff/R/create_gaussian.R
 
