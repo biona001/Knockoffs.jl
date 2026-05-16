@@ -128,10 +128,10 @@ function solve_MVR(
             fill!(ej, 0)
             ej[j] = 1
             # compute cn and cd as detailed in eq 72
-            forward_backward!(vn, L, ej, storage) # solves L*L'*vn = ej for vn via forward-backward substitution
+            _forward_backward_basis!(vn, L, j, storage)
             cn = -sum(abs2, vn)
             # find vd as the solution to L*vd = ej
-            ldiv!(vd, UpperTriangular(L.factors)', ej) # non-allocating version of ldiv!(vd, L.L, ej)
+            _ldiv_upper_transpose_basis!(vd, L, j)
             cd = sum(abs2, vd)
             # solve quadratic optimality condition in eq 71
             δj = solve_quadratic(cn, cd, s[j], m)
@@ -174,9 +174,9 @@ function _mvr_delta!(
     ) where T
     fill!(ej, zero(T))
     ej[j] = one(T)
-    forward_backward!(vn, L, ej, storage)
+    _forward_backward_basis!(vn, L, j, storage)
     cn = -sum(abs2, vn)
-    ldiv!(vd, UpperTriangular(L.factors)', ej)
+    _ldiv_upper_transpose_basis!(vd, L, j)
     cd = sum(abs2, vd)
     δ = solve_quadratic(cn, cd, s[j], m)
     ub = max(zero(T), (1 - sqrt(eps(T))) / cd - λmin)
@@ -226,6 +226,35 @@ function _assert_parallel_cholesky_factor(
         error("Post-optimization Cholesky check failed: L'L - lambda_min*I was not close to ((m + 1) / m)Σ - S. Relative error $rel_error exceeds tolerance $factor_check_tol.")
     end
     return rel_error
+end
+
+"""
+Specialized `ldiv!` for `UpperTriangular(C.factors)' * y = e_j`.
+"""
+function _ldiv_upper_transpose_basis!(
+    y::AbstractVector{T},
+    C::Cholesky{T},
+    j::Int
+    ) where T <: AbstractFloat
+    U = C.factors
+    n = size(U, 1)
+    1 ≤ j ≤ n || throw(BoundsError(y, j))
+    length(y) == n || throw(DimensionMismatch("output vector must have length $n."))
+
+    @inbounds begin
+        for i in 1:(j - 1)
+            y[i] = zero(T)
+        end
+        y[j] = inv(U[j, j])
+        for i in (j + 1):n
+            s = zero(T)
+            @simd for k in j:(i - 1)
+                s += U[k, i] * y[k]
+            end
+            y[i] = -s / U[i, i]
+        end
+    end
+    return y
 end
 
 """
@@ -372,6 +401,14 @@ function forward_backward!(x, L, y, storage=zeros(length(x)))
     ldiv!(x, UpperTriangular(L.factors), storage) # non-allocating version of ldiv!(x, L.U, storage)
 end
 
+"""
+Specialized forward/backward solve for `C.factors' * C.factors * x = e_j`.
+"""
+function _forward_backward_basis!(x, L, j::Int, storage)
+    _ldiv_upper_transpose_basis!(storage, L, j)
+    ldiv!(x, UpperTriangular(L.factors), storage)
+end
+
 function solve_quadratic(cn, cd, Sjj, m, verbose=false)
     isfinite(cn) || return 0
     isfinite(cd) || return 0
@@ -460,9 +497,7 @@ function solve_max_entropy(
             # solve optimality condition in eq 75 of spector et al 2020
             sj_new = ((m+1)/m * Σ[j, j] - c) / 2
             # ensure new s[j] is in feasible region
-            fill!(x, 0)
-            x[j] = 1
-            ldiv!(ỹ, UpperTriangular(L.factors)', x) # non-allocating version of ldiv!(ỹ, L.L, x)
+            _ldiv_upper_transpose_basis!(ỹ, L, j)
             ub = max(zero(T), (1 - downdate_margin) / sum(abs2, ỹ) - λmin)
             δ = sj_new - s[j]
             δ > ub && (δ = ub)
@@ -510,9 +545,7 @@ function _max_entropy_delta!(
     c = (ζ * x_l2sum) / (ζ + x_l2sum)
     sj_new = (γ * Σ[j, j] - c) / 2
 
-    fill!(x, zero(T))
-    x[j] = one(T)
-    ldiv!(ỹ, UpperTriangular(L.factors)', x)
+    _ldiv_upper_transpose_basis!(ỹ, L, j)
     ub = max(zero(T), (1 - sqrt(eps(T))) / sum(abs2, ỹ) - λmin)
     δ = sj_new - s[j]
     δ > ub && (δ = ub)
@@ -711,9 +744,7 @@ function solve_SDP(
             sj_new = clamp((m+1)/m*Σ[j, j] - c - λ, 0, 1)
             δ = sj_new - s[j]
             δ > 0 && begin
-                fill!(x, 0)
-                x[j] = 1
-                ldiv!(ỹ, UpperTriangular(L.factors)', x)
+                _ldiv_upper_transpose_basis!(ỹ, L, j)
                 ub = max(zero(T), (1 - downdate_margin) / sum(abs2, ỹ) - λmin)
                 δ > ub && (δ = ub)
             end
@@ -761,9 +792,7 @@ function _sdp_ccd_delta!(
     sj_new = clamp(γ * Σ[j, j] - c - λ, zero(T), one(T))
     δ = sj_new - s[j]
     if δ > 0
-        fill!(x, zero(T))
-        x[j] = one(T)
-        ldiv!(ỹ, UpperTriangular(L.factors)', x)
+        _ldiv_upper_transpose_basis!(ỹ, L, j)
         ub = max(zero(T), (1 - sqrt(eps(T))) / sum(abs2, ỹ) - λmin)
         δ > ub && (δ = ub)
     end
@@ -1487,8 +1516,8 @@ function _sdp_ccd_iter!(
                 # compute feasible region
                 fill!(ej, 0)
                 ej[j] = 1
-                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej)
-                t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
+                t2 += @elapsed _ldiv_upper_transpose_basis!(u, L, j)
+                t2 += @elapsed _ldiv_upper_transpose_basis!(v, C, j)
                 ub = 1 / sum(abs2, u) - ϵ
                 lb = -1 / sum(abs2, v) + ϵ
                 lb ≥ ub && continue
@@ -1517,11 +1546,11 @@ function _sdp_ccd_iter!(
                 ej[j], ei[i] = 1, 1
                 # compute aii, ajj, aij, bii, bjj, bij
                 t2 += @elapsed begin
-                    ldiv!(u, UpperTriangular(L.factors)', ei)
-                    ldiv!(v, UpperTriangular(L.factors)', ej)
+                    _ldiv_upper_transpose_basis!(u, L, i)
+                    _ldiv_upper_transpose_basis!(v, L, j)
                     aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
-                    ldiv!(u, UpperTriangular(C.factors)', ei)
-                    ldiv!(v, UpperTriangular(C.factors)', ej)
+                    _ldiv_upper_transpose_basis!(u, C, i)
+                    _ldiv_upper_transpose_basis!(v, C, j)
                     bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
                 end
                 # compute (mathematical) feasible region
@@ -1597,11 +1626,11 @@ function _mvr_ccd_iter!(
                 ej[j] = 1
                 # compute ajj, bjj, cjj, djj which defines the feasible region
                 t2 += @elapsed begin
-                    ldiv!(v, UpperTriangular(L.factors)', ej)
-                    ldiv!(u, UpperTriangular(C.factors)', ej)
+                    _ldiv_upper_transpose_basis!(v, L, j)
+                    _ldiv_upper_transpose_basis!(u, C, j)
                     ajj, bjj = dot(v, v), dot(u, u)
-                    forward_backward!(v, C, ej, storage)
-                    forward_backward!(u, L, ej, storage)
+                    _forward_backward_basis!(v, C, j, storage)
+                    _forward_backward_basis!(u, L, j, storage)
                     cjj, djj = dot(v, v), dot(u, u)
                 end
                 # compute δ that is within feasible region
@@ -1633,18 +1662,18 @@ function _mvr_ccd_iter!(
                 ej[j], ei[i] = 1, 1
                 # compute aii, ajj, aij, bii, bjj, bij
                 t2 += @elapsed begin
-                    ldiv!(u, UpperTriangular(L.factors)', ei)
-                    ldiv!(v, UpperTriangular(L.factors)', ej)
+                    _ldiv_upper_transpose_basis!(u, L, i)
+                    _ldiv_upper_transpose_basis!(v, L, j)
                     aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
-                    ldiv!(u, UpperTriangular(C.factors)', ei)
-                    ldiv!(v, UpperTriangular(C.factors)', ej)
+                    _ldiv_upper_transpose_basis!(u, C, i)
+                    _ldiv_upper_transpose_basis!(v, C, j)
                     bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
                     # compute cii, cjj, cij, dii, djj, dij
-                    forward_backward!(u, C, ei, storage)
-                    forward_backward!(v, C, ej, storage)
+                    _forward_backward_basis!(u, C, i, storage)
+                    _forward_backward_basis!(v, C, j, storage)
                     cij, cii, cjj = dot(u, v), dot(u, u), dot(v, v)
-                    forward_backward!(u, L, ei, storage)
-                    forward_backward!(v, L, ej, storage)
+                    _forward_backward_basis!(u, L, i, storage)
+                    _forward_backward_basis!(v, L, j, storage)
                     dij, dii, djj = dot(u, v), dot(u, u), dot(v, v)
                 end
                 # compute (mathematical) feasible region
@@ -1724,8 +1753,8 @@ function _maxent_ccd_iter!(
                 # compute new S[j, j]
                 fill!(ej, 0)
                 ej[j] = 1
-                t2 += @elapsed ldiv!(u, UpperTriangular(L.factors)', ej)
-                t2 += @elapsed ldiv!(v, UpperTriangular(C.factors)', ej)
+                t2 += @elapsed _ldiv_upper_transpose_basis!(u, L, j)
+                t2 += @elapsed _ldiv_upper_transpose_basis!(v, C, j)
                 ajj, bjj = dot(u, u), dot(v, v)
                 δ = (m*bjj-ajj) / ((m+1)*ajj*bjj)
                 # ensure feasibility
@@ -1756,11 +1785,11 @@ function _maxent_ccd_iter!(
                 ej[j], ei[i] = 1, 1
                 # compute aii, ajj, aij, bii, bjj, bij
                 t2 += @elapsed begin
-                    ldiv!(u, UpperTriangular(L.factors)', ei)
-                    ldiv!(v, UpperTriangular(L.factors)', ej)
+                    _ldiv_upper_transpose_basis!(u, L, i)
+                    _ldiv_upper_transpose_basis!(v, L, j)
                     aij, aii, ajj = dot(u, v), dot(u, u), dot(v, v)
-                    ldiv!(u, UpperTriangular(C.factors)', ei)
-                    ldiv!(v, UpperTriangular(C.factors)', ej)
+                    _ldiv_upper_transpose_basis!(u, C, i)
+                    _ldiv_upper_transpose_basis!(v, C, j)
                     bij, bii, bjj = dot(u, v), dot(u, u), dot(v, v)
                 end
                 # compute (mathematical) feasible region

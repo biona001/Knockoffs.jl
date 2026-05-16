@@ -9,6 +9,33 @@ using ToeplitzMatrices
 using GLM
 # using RCall # for comparing with Matteo's knockoffs
 
+@testset "basis triangular solve helpers" begin
+    Random.seed!(2026)
+    p = 12
+    A = randn(p, p)
+    C = cholesky(Symmetric(A'A + I))
+    U = UpperTriangular(C.factors)
+    rhs = zeros(p)
+    fast = zeros(p)
+    generic = zeros(p)
+    fb_fast = zeros(p)
+    fb_generic = zeros(p)
+    storage = zeros(p)
+
+    for j in 1:p
+        fill!(rhs, 0)
+        rhs[j] = 1
+
+        ldiv!(generic, U', rhs)
+        Knockoffs._ldiv_upper_transpose_basis!(fast, C, j)
+        @test fast ≈ generic
+
+        Knockoffs.forward_backward!(fb_generic, C, rhs, storage)
+        Knockoffs._forward_backward_basis!(fb_fast, C, j, storage)
+        @test fb_fast ≈ fb_generic
+    end
+end
+
 @testset "fixed knockoffs" begin
     Random.seed!(2021)
 
