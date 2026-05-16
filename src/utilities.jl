@@ -142,12 +142,23 @@ function _parallel_windows(
         _parallel_window_parameters(p, nwindows, boundary_band, min_window_size)
 
     scores = _window_boundary_scores(Σ, boundary_band)
-    boundary_order = sortperm(scores)
+    weak_boundaries = findall(<=(window_corr_tol), scores)
     cuts = Int[]
-    for b in boundary_order
+    for target in round.(Int, range(0, p; length=nwindows + 1))[2:end-1]
         length(cuts) == nwindows - 1 && break
-        scores[b] ≤ window_corr_tol || continue
-        _cut_is_spaced(b, cuts, p, min_window_size) && push!(cuts, b)
+        best_cut = 0
+        best_distance = typemax(Int)
+        best_score = typemax(eltype(scores))
+        for b in weak_boundaries
+            _cut_is_spaced(b, cuts, p, min_window_size) || continue
+            distance = abs(b - target)
+            if distance < best_distance || (distance == best_distance && scores[b] < best_score)
+                best_cut = b
+                best_distance = distance
+                best_score = scores[b]
+            end
+        end
+        best_cut > 0 && push!(cuts, best_cut)
     end
 
     sort!(cuts)
@@ -390,4 +401,3 @@ function simulate_block_covariance(
     cov2cor!(Σ, diag(Σ))
     return Σ
 end
-
