@@ -12,7 +12,10 @@ submit_one() {
     local strategy="$1"
     local cpus="$2"
     local mem="$3"
-    local ntasks=270
+    local covariances="${FIG2_COVARIANCE_STRUCTURES:-AR1,ER,block,stress}"
+    local ncov
+    ncov="$(awk -F',' '{print NF}' <<< "${covariances}")"
+    local ntasks=$((ncov * 6 * 3 * 5))
 
     mkdir -p "${JOBLOG_DIR}" "${RESULT_DIR}"
     echo "Submitting fig2-${strategy}: ${ntasks} tasks, ${cpus} CPU(s), ${mem} total memory"
@@ -26,18 +29,17 @@ submit_one() {
         --partition="owners,normal,candes,zihuai" \
         --chdir="${WORKDIR}" \
         --output="${JOBLOG_DIR}/fig2-${strategy}-%A_%a.out" \
-        --export="ALL,FIG2_UPDATE_STRATEGY=${strategy},WORKDIR=${WORKDIR},PROJECT_DIR=${PROJECT_DIR},SCRIPT_DIR=${SCRIPT_DIR},RESULT_DIR=${RESULT_DIR},JULIA_NUM_THREADS=${cpus},FIG2_SKIP_P20000_SERIAL=${FIG2_SKIP_P20000_SERIAL:-false}" \
+        --export="ALL,FIG2_UPDATE_STRATEGY=${strategy},FIG2_COVARIANCE_STRUCTURES=${covariances},WORKDIR=${WORKDIR},PROJECT_DIR=${PROJECT_DIR},SCRIPT_DIR=${SCRIPT_DIR},RESULT_DIR=${RESULT_DIR},JULIA_NUM_THREADS=${cpus},FIG2_SKIP_P20000_SERIAL=${FIG2_SKIP_P20000_SERIAL:-false}" \
         "${SCRIPT_DIR}/submit_fig2.sh" --worker
 }
 
 if [[ "${1:-}" != "--worker" ]]; then
-    submit_one standard 1 32G
-    submit_one early 1 32G
-    submit_one parallel2 2 32G
-    submit_one parallel4 4 32G
-    submit_one parallel8 8 32G
-    submit_one parallel16 16 32G
-    submit_one parallel32 32 32G
+    submit_one serial 1 32G
+    submit_one serial_robust 1 32G
+    submit_one local0 "${FIG2_WORKERS:-8}" 32G
+    submit_one buffer16 "${FIG2_WORKERS:-8}" 32G
+    submit_one buffer32 "${FIG2_WORKERS:-8}" 32G
+    submit_one buffer64 "${FIG2_WORKERS:-8}" 32G
     exit 0
 fi
 
@@ -64,9 +66,9 @@ result_file="${RESULT_DIR}/fig2_${FIG2_UPDATE_STRATEGY}_task${SLURM_ARRAY_TASK_I
 if [ "$exit_code" -ne 0 ] && [ ! -s "$result_file" ]; then
     now="$(date -Is)"
     msg="worker exited with code ${exit_code}; no Julia result file was written"
-    printf 'task_id,timestamp,status,covariance,p,method_name,update_strategy,method,nworkers,robust,rep,seed,julia_threads,elapsed_sec,error_message\n' > "$result_file"
-    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"%s"\n' \
-        "${SLURM_ARRAY_TASK_ID}" "$now" "failed_shell" "" "" "" "${FIG2_UPDATE_STRATEGY}" "" "" "" "" "" "${JULIA_NUM_THREADS}" "" "$msg" >> "$result_file"
+    printf 'task_id,timestamp,status,covariance,p,method_name,update_strategy,method,nworkers,robust,buffer_size,local_window_mode,rep,seed,julia_threads,elapsed_sec,sum_s,error_message\n' > "$result_file"
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"%s"\n' \
+        "${SLURM_ARRAY_TASK_ID}" "$now" "failed_shell" "" "" "" "${FIG2_UPDATE_STRATEGY}" "" "" "" "" "" "" "" "${JULIA_NUM_THREADS}" "" "" "$msg" >> "$result_file"
     echo "Wrote shell failure marker to $result_file"
 fi
 

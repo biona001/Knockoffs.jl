@@ -25,10 +25,10 @@ function fig3_design()
     combos = NamedTuple[]
     for covariance in COVARIANCE_STRUCTURES,
         (method_name, base_method, parallel_method) in METHOD_CONFIGS,
-        (update_strategy, nworkers, robust) in UPDATE_CONFIGS,
+        (update_strategy, nworkers, robust, buffer_size, local_window_mode) in UPDATE_CONFIGS,
         rep in 1:FIG3_REPS
         method = solver_method(base_method, parallel_method, update_strategy)
-        push!(combos, (; covariance, method_name, update_strategy, method, nworkers, robust, rep))
+        push!(combos, (; covariance, method_name, update_strategy, method, nworkers, robust, buffer_size, local_window_mode, rep))
     end
     return combos
 end
@@ -64,6 +64,8 @@ function write_failure(path, task_id, combo, seed, message)
         method=string(combo.method),
         nworkers=combo.nworkers,
         robust=combo.robust,
+        buffer_size=combo.buffer_size,
+        local_window_mode=string(combo.local_window_mode),
         rep=combo.rep,
         seed=seed,
         target_fdr=missing,
@@ -96,7 +98,7 @@ function main()
         y = X * β + randn(N)
         y .-= mean(y)
 
-        kwargs = solver_kwargs(combo.update_strategy, combo.nworkers, combo.robust)
+        kwargs = solver_kwargs(combo.update_strategy, combo.nworkers, combo.robust, combo.buffer_size, combo.local_window_mode)
         ko_elapsed = @elapsed ko = modelX_gaussian_knockoffs(X, combo.method, zeros(P), Matrix(Σ); kwargs...)
         fit_elapsed = @elapsed fit = fit_lasso(y, ko; filter_method=:knockoff, debias=nothing)
 
@@ -116,6 +118,8 @@ function main()
                 method=string(combo.method),
                 nworkers=combo.nworkers,
                 robust=combo.robust,
+                buffer_size=combo.buffer_size,
+                local_window_mode=string(combo.local_window_mode),
                 rep=combo.rep,
                 seed=seed,
                 target_fdr=q,

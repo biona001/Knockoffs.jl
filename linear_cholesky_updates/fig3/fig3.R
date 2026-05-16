@@ -31,14 +31,15 @@ if (!"status" %in% names(raw)) {
 completed <- raw %>%
   filter(status == "completed", !is.na(target_fdr)) %>%
   mutate(
-    covariance = factor(covariance, levels = c("AR1", "ER", "block")),
+    covariance = factor(covariance, levels = c("AR1", "ER", "block", "stress")),
     method_name = factor(method_name, levels = c("ME", "MVR", "SDP")),
     update_strategy = factor(
       update_strategy,
-      levels = c("standard", "early", "parallel32"),
-      labels = c("standard", "early stop", "parallel 32")
+      levels = c("serial", "serial_robust", "local0", "buffer16", "buffer32", "buffer64"),
+      labels = c("serial", "serial robust", "local b=0", "buffer 16", "buffer 32", "buffer 64")
     )
-  )
+  ) %>%
+  filter(!is.na(update_strategy), !is.na(covariance))
 
 summary <- completed %>%
   group_by(covariance, method_name, update_strategy, target_fdr) %>%
@@ -62,11 +63,18 @@ plot_data <- bind_rows(
   mutate(metric = factor(metric, levels = c("Power", "Empirical FDR")))
 
 method_colors <- c("ME" = "#009E73", "MVR" = "#0072B2", "SDP" = "#D55E00")
-strategy_linetypes <- c("standard" = "solid", "early stop" = "longdash", "parallel 32" = "dotted")
+strategy_linetypes <- c(
+  "serial" = "solid",
+  "serial robust" = "twodash",
+  "local b=0" = "dotted",
+  "buffer 16" = "longdash",
+  "buffer 32" = "dotdash",
+  "buffer 64" = "dashed"
+)
 
 diag_data <- expand.grid(
   metric = factor("Empirical FDR", levels = c("Power", "Empirical FDR")),
-  covariance = factor(c("AR1", "ER", "block"), levels = c("AR1", "ER", "block"))
+  covariance = factor(c("AR1", "ER", "block", "stress"), levels = c("AR1", "ER", "block", "stress"))
 )
 
 p <- ggplot(plot_data, aes(x = target_fdr, y = value, color = method_name, linetype = update_strategy,

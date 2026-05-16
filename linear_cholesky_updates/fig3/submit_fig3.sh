@@ -2,7 +2,7 @@
 #
 #SBATCH --job-name=fig3
 #
-#SBATCH --array=1001-1350 #1350
+#SBATCH --array=1-3600
 #SBATCH --time=48:00:00
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=32G
@@ -20,7 +20,9 @@ ml julia/1.11.4 R/4.0.2 cmake/3.24.2 harfbuzz/1.4.8 fribidi/1.0.12 libgit2/1.1.0
 export JULIA_DEPOT_PATH="/home/groups/sabatti/.julia"
 export JULIA_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}"
 export FIG3_P="${FIG3_P:-5000}"
-export WINDOW_CORR_TOL="${WINDOW_CORR_TOL:-0.02}"
+export FIG3_COVARIANCE_STRUCTURES="${FIG3_COVARIANCE_STRUCTURES:-AR1,ER,block,stress}"
+export FIG3_WORKERS="${FIG3_WORKERS:-32}"
+export WINDOW_CORR_TOL="${WINDOW_CORR_TOL:-0.8}"
 export MIN_WINDOW_SIZE="${MIN_WINDOW_SIZE:-150}"
 export FACTOR_CHECK="${FACTOR_CHECK:-false}"
 

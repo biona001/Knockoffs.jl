@@ -17,21 +17,21 @@ function fig2_design()
     combos = NamedTuple[]
     for covariance in COVARIANCE_STRUCTURES, p in TIMING_P_VALUES,
         (method_name, base_method, parallel_method) in METHOD_CONFIGS,
-        (update_strategy, nworkers, robust) in UPDATE_CONFIGS,
+        (update_strategy, nworkers, robust, buffer_size, local_window_mode) in UPDATE_CONFIGS,
         rep in 1:FIG2_REPS
         !isempty(update_filter) && update_strategy != update_filter && continue
         method = solver_method(base_method, parallel_method, update_strategy)
-        push!(combos, (; covariance, p, method_name, update_strategy, method, nworkers, robust, rep))
+        push!(combos, (; covariance, p, method_name, update_strategy, method, nworkers, robust, buffer_size, local_window_mode, rep))
     end
     return combos
 end
 
 function should_skip(combo)
     skip_serial_p20000 = parse(Bool, get(ENV, "FIG2_SKIP_P20000_SERIAL", "false"))
-    return combo.p == 20000 && !startswith(combo.update_strategy, "parallel") && skip_serial_p20000
+    return combo.p == 20000 && combo.update_strategy in ("serial", "serial_robust") && skip_serial_p20000
 end
 
-function write_result(path, task_id, combo, seed, status; elapsed_sec=missing, error_message="")
+function write_result(path, task_id, combo, seed, status; elapsed_sec=missing, sum_s=missing, error_message="")
     df = DataFrame(
         task_id=task_id,
         timestamp=string(now()),
@@ -43,10 +43,13 @@ function write_result(path, task_id, combo, seed, status; elapsed_sec=missing, e
         method=string(combo.method),
         nworkers=combo.nworkers,
         robust=combo.robust,
+        buffer_size=combo.buffer_size,
+        local_window_mode=string(combo.local_window_mode),
         rep=combo.rep,
         seed=seed,
         julia_threads=Threads.nthreads(),
         elapsed_sec=elapsed_sec,
+        sum_s=sum_s,
         error_message=error_message,
     )
     CSV.write(path, df)
@@ -67,22 +70,24 @@ function main()
     end
 
     Σ = covariance_matrix(combo.covariance, combo.p; seed)
-    kwargs = solver_kwargs(combo.update_strategy, combo.nworkers, combo.robust)
+    kwargs = solver_kwargs(combo.update_strategy, combo.nworkers, combo.robust, combo.buffer_size, combo.local_window_mode)
 
     GC.gc()
     elapsed = missing
+    sum_s = missing
     try
         elapsed = @elapsed begin
             s = solve_s(Σ, combo.method; kwargs...)
             minimum(s) < -1e-6 && error("Solver returned a negative s entry: $(minimum(s)).")
+            sum_s = sum(s)
         end
     catch err
-        write_result(path, task_id, combo, seed, "failed"; elapsed_sec=elapsed, error_message=sprint(showerror, err))
+        write_result(path, task_id, combo, seed, "failed"; elapsed_sec=elapsed, sum_s=sum_s, error_message=sprint(showerror, err))
         println("Failed task $task_id. Wrote $path")
         rethrow()
     end
 
-    write_result(path, task_id, combo, seed, "completed"; elapsed_sec=elapsed)
+    write_result(path, task_id, combo, seed, "completed"; elapsed_sec=elapsed, sum_s=sum_s)
     println("Wrote $path")
 end
 
