@@ -382,6 +382,27 @@ end
     end
 end
 
+@testset "MVR identity covariance" begin
+    Random.seed!(2026)
+    n = 30
+    p = 5
+    Σ = Matrix{Float64}(I, p, p)
+    μ = zeros(p)
+    X = randn(n, p)
+
+    s = solve_s(Symmetric(Σ), :mvr)
+    @test s ≈ ones(p)
+
+    ko = modelX_gaussian_knockoffs(X, :mvr, μ, Σ)
+    @test ko.s ≈ ones(p)
+    @test size(ko.Xko) == (n, p)
+
+    Σar = Matrix(SymmetricToeplitz(0.01 .^ (0:p-1)))
+    sar = solve_s(Symmetric(Σar), :mvr)
+    @test all(isfinite, sar)
+    @test all(sar .> 0)
+end
+
 @testset "SDP vs MVR vs ME knockoffs" begin
     # This is example 1 from https://amspector100.github.io/knockpy/mrcknock.html 
     # SDP knockoffs are provably powerless in this situation, while MVR and ME knockoffs have high power

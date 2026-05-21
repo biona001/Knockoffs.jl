@@ -132,6 +132,7 @@ function solve_MVR(
     verbose::Bool = false
     ) where T
     p = size(Σ, 1)
+    isdiag(Σ) && return fill(one(T), p)
     # whether to use robust cholesky updates or not
     cholupdate! = robust ? lowrankupdate! : lowrankupdate_turbo!
     choldowndate! = robust ? lowrankdowndate! : lowrankdowndate_turbo!
