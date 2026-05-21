@@ -401,6 +401,20 @@ end
     sar = solve_s(Symmetric(Σar), :mvr)
     @test all(isfinite, sar)
     @test all(sar .> 0)
+
+    Σtiny = Matrix{Float64}(I, p, p)
+    Σtiny[1, 2] = Σtiny[2, 1] = 1e-9
+    stiny = solve_s(Symmetric(Σtiny), :mvr)
+    @test all(isfinite, stiny)
+    ko_tiny = modelX_gaussian_knockoffs(X, :mvr, μ, Σtiny)
+    @test size(ko_tiny.Xko) == (n, p)
+
+    Σnear = Matrix{Float64}(I, p, p)
+    Σnear[1, 2] = Σnear[2, 1] = 0.9999999
+    snear = solve_s(Symmetric(Σnear), :mvr)
+    @test all(isfinite, snear)
+    ko_near = modelX_gaussian_knockoffs(X, :mvr, μ, Σnear)
+    @test size(ko_near.Xko) == (n, p)
 end
 
 @testset "SDP vs MVR vs ME knockoffs" begin

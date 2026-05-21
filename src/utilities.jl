@@ -190,6 +190,9 @@ function solve_quadratic(cn, cd, Sjj, m, verbose=false)
     b = 2*(-cn*Sjj + cd*m^2)
     c = -cn*Sjj^2 - m^2
     a == c == 0 && return 0 # quick return; when a = c = 0, only solution is δ = 0
+    if isapprox(a, 0, atol=sqrt(eps(float(typeof(a)))) * max(abs(cn), abs(cd^2*m^2), one(abs(a))))
+        return -c / b
+    end
     x1 = (-b + sqrt(b^2 - 4*a*c)) / (2a)
     x2 = (-b - sqrt(b^2 - 4*a*c)) / (2a)
     δj = -Sjj < x1 < inv(cd) ? x1 : x2
