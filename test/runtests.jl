@@ -219,6 +219,59 @@ end
     end
 end
 
+@testset "Symbol and string inputs agree" begin
+    Random.seed!(2028)
+    n = 8
+    p = 2
+    Σ = [1.0 0.2; 0.2 1.0]
+    μ = zeros(p)
+    X = randn(n, p)
+    groups = collect(1:p)
+
+    # Use :equi to keep the test fast while still exercising method conversion.
+    Random.seed!(1)
+    ko_symbol = modelX_gaussian_knockoffs(X, :equi, μ, Σ)
+    Random.seed!(1)
+    ko_string = modelX_gaussian_knockoffs(X, "equi", μ, Σ)
+    @test ko_symbol.method == ko_string.method == :equi
+    @test ko_symbol.s ≈ ko_string.s
+    @test ko_symbol.Xko ≈ ko_string.Xko
+
+    Random.seed!(2)
+    group_symbol = modelX_gaussian_group_knockoffs(X, :equi, groups, μ, Σ)
+    Random.seed!(2)
+    group_string = modelX_gaussian_group_knockoffs(X, "equi", groups, μ, Σ)
+    @test group_symbol.method == group_string.method == :equi
+    @test group_symbol.S ≈ group_string.S
+    @test group_symbol.Xko ≈ group_string.Xko
+
+    Random.seed!(3)
+    rep_symbol = modelX_gaussian_rep_group_knockoffs(X, :equi, groups, μ, Σ)
+    Random.seed!(3)
+    rep_string = modelX_gaussian_rep_group_knockoffs(X, "equi", groups, μ, Σ)
+    @test rep_symbol.method == rep_string.method == :equi
+    @test rep_symbol.S ≈ rep_string.S
+    @test rep_symbol.Xko ≈ rep_string.Xko
+
+    w = [0.1, 1.9, 1.3, 1.8, 0.8, -0.7, -0.1]
+    @test threshold(w, 0.2, :knockoff) == threshold(w, 0.2, "knockoff")
+    @test get_knockoff_qvalue(w; method=:knockoff_plus) ==
+        get_knockoff_qvalue(w; method="knockoff_plus")
+
+    τ = [1.0, 0.4, 0.8, 0.3]
+    κ = [0, 1, 0, 2]
+    @test mk_threshold(τ, κ, 2, 0.2, :knockoff_plus) ==
+        mk_threshold(τ, κ, 2, 0.2, "knockoff_plus")
+
+    Random.seed!(4)
+    ipad_symbol = ipad(X; r_method=:er)
+    Random.seed!(4)
+    ipad_string = ipad(X; r_method="er")
+    @test ipad_symbol.r_method == ipad_string.r_method == :er
+    @test ipad_symbol.r == ipad_string.r
+    @test ipad_symbol.Xko ≈ ipad_string.Xko
+end
+
 @testset "MK_statistics" begin
     # single knockoffs
     beta = [1.0, 0.2, -0.3, 0.8, -0.1, 0.5]

@@ -181,6 +181,7 @@ function modelX_gaussian_rep_group_knockoffs(
     kwargs... # extra arguments for solve_s_group
     ) where T
     size(X, 2) == length(groups)  || error("Dimensions of X and groups doesn't match")
+    method = Symbol(method)
 
     # compute group representatives
     group_reps = choose_group_reps(Symmetric(Σ), groups, threshold=rep_threshold)
@@ -355,13 +356,13 @@ function solve_s_group(
     # check for errors
     length(groups) == size(Σ, 1) || 
         error("Length of groups should be equal to dimension of Σ")
+    method = Symbol(method)
     max_group_size = countmap(groups) |> values |> collect |> maximum
     if max_group_size > 50 && method != :equi && !occursin("pca", string(method))
         @warn "Maximum group size is $max_group_size, optimization may be slow. " * 
             "Consider running `modelX_gaussian_rep_group_knockoffs` to speed up convergence."
         flush(stdout)
     end
-    method = Symbol(method)
     # Scale covariance to correlation matrix
     σs = sqrt.(diag(Σ))
     iscor = all(x -> x ≈ 1, σs)
@@ -706,6 +707,7 @@ function solve_group_block_update(
     niter = 100, # max number of cyclic block updates
     verbose::Bool = false,
     ) where T
+    method = Symbol(method)
     method ∈ [:sdp_block, :maxent_block, :mvr_block] ||
         error("Expected method to be :sdp_block, :maxent_block, or :mvr_block")
     p = size(Σ, 1)

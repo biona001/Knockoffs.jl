@@ -22,6 +22,7 @@ problem.
 + Ahn, S.C. and Horenstein, A.R., 2013. Eigenvalue ratio test for the number of factors. Econometrica, 81(3), pp.1203-1227.
 """
 function ipad(X::AbstractMatrix{T}; r_method = :er, m::Number = 1) where T
+    r_method = Symbol(r_method)
     n, p = size(X)
     # estimate r
     XXt = X * X'
