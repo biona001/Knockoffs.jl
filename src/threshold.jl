@@ -18,6 +18,7 @@ Controlled Variable Selection" by Candes, Fan, Janson, and Lv (2018)
 """
 function threshold(w::AbstractVector{T}, q::Number,
     method=:knockoff_plus, rej_bounds::Int=10000) where T <: AbstractFloat
+    method = Symbol(method)
     0 ≤ q ≤ 1 || error("Target FDR should be between 0 and 1 but got $q")
     offset = method == :knockoff ? 0 : method == :knockoff_plus ? 1 :
         error("method should be :knockoff or :knockoff_plus but was $method.")
@@ -38,9 +39,10 @@ feature is the minimum target FDR at which that feature is selected.
 """
 function get_knockoff_qvalue(
     w::AbstractVector{T};
-    method::Symbol=:knockoff_plus,
+    method::Union{Symbol, String}=:knockoff_plus,
     rej_bounds::Int=10000,
     ) where T <: AbstractFloat
+    method = Symbol(method)
     rej_bounds > 0 || error("rej_bounds should be positive but got $rej_bounds")
     offset = method == :knockoff ? 0 : method == :knockoff_plus ? 1 :
         error("method should be :knockoff or :knockoff_plus but was $method.")
@@ -89,6 +91,7 @@ Chooses the multiple knockoff threshold `τ̂ > 0` by setting
 function mk_threshold(τ::Vector{T}, κ::Vector{Int}, m::Int, q::Number,
     method=:knockoff_plus, rej_bounds::Int=10000
     ) where T <: AbstractFloat
+    method = Symbol(method)
     0 ≤ q ≤ 1 || error("Target FDR should be between 0 and 1 but got $q")
     method == :knockoff_plus || error("Multiple knockoffs needs to use :knockoff_plus filtering method")
     length(τ) == length(κ) || error("Length of τ and κ should be the same")

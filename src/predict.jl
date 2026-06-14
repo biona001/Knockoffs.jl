@@ -2,7 +2,7 @@ function predict(
     model::LassoKnockoffFilter{T},
     xtest::AbstractMatrix{T},
     q::Real;
-    debias::Union{Nothing, Symbol}=model.debias,
+    debias::Union{Nothing, Symbol, String}=model.debias,
     kwargs...,
     ) where T
     β, a0 = selected_coefficients(model, q; debias=debias, kwargs...)
@@ -19,7 +19,7 @@ function predict(
     model::LassoKnockoffFilter{T},
     xtest::AbstractMatrix{T},
     qs::AbstractVector{<:Real};
-    debias::Union{Nothing, Symbol}=model.debias,
+    debias::Union{Nothing, Symbol, String}=model.debias,
     kwargs...,
     ) where T
     ŷs = Vector{T}[]

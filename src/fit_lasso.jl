@@ -34,10 +34,12 @@ function fit_lasso(
     d::Distribution=Normal(),
     m::Number = 1,
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff_plus,
-    debias::Union{Nothing, Symbol} = nothing,
+    filter_method::Union{Symbol,String} = :knockoff_plus,
+    debias::Union{Nothing, Symbol, String} = nothing,
     kwargs..., # arguments for glmnetcv
     ) where T
+    filter_method = Symbol(filter_method)
+    !isnothing(debias) && (debias = Symbol(debias))
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
         modelX_gaussian_group_knockoffs(X, method, groups, m=m)
     return fit_lasso(y, ko, d=d,
@@ -53,10 +55,12 @@ function fit_lasso(
     d::Distribution=Normal(),
     m::Number = 1,
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff_plus,
-    debias::Union{Nothing, Symbol} = :ls,
+    filter_method::Union{Symbol,String} = :knockoff_plus,
+    debias::Union{Nothing, Symbol, String} = :ls,
     kwargs..., # arguments for glmnetcv
     ) where T
+    filter_method = Symbol(filter_method)
+    !isnothing(debias) && (debias = Symbol(debias))
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, μ, Σ, m=m) : 
         modelX_gaussian_group_knockoffs(X, method, groups, μ, Σ; m=m)
     return fit_lasso(y, ko, d=d,
@@ -67,11 +71,13 @@ function fit_lasso(
     y::AbstractVecOrMat{T},
     ko::Knockoff;
     d::Distribution=Normal(),
-    filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
-    debias::Union{Nothing, Symbol} = nothing,
+    filter_method::Union{Symbol,String} = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
+    debias::Union{Nothing, Symbol, String} = nothing,
     stringent::Bool = false,
     kwargs..., # arguments for glmnetcv
     ) where T <: AbstractFloat
+    filter_method = Symbol(filter_method)
+    !isnothing(debias) && (debias = Symbol(debias))
     typeof(y) <: AbstractMatrix && (y = vec(y))
     ytmp = d == Binomial() ? form_glmnet_logistic_y(y) : y
     X = ko.X
@@ -172,9 +178,10 @@ Return thresholded coefficients/intercept corresponding to q-value level `q`.
 function selected_coefficients(
     model::LassoKnockoffFilter{T},
     q::Real;
-    debias::Union{Nothing, Symbol}=model.debias,
+    debias::Union{Nothing, Symbol, String}=model.debias,
     kwargs...,
     ) where T
+    !isnothing(debias) && (debias = Symbol(debias))
     β_filtered = zeros(T, length(model.beta))
     selected_stats = select_variables(model, q)
     if hasproperty(model.ko, :groups)
@@ -234,9 +241,10 @@ function fit_marginal(
     d::Distribution=Normal(),
     m::Number = 1,
     groups::Union{Nothing, AbstractVector{Int}} = nothing,
-    filter_method::Symbol = :knockoff_plus,
+    filter_method::Union{Symbol,String} = :knockoff_plus,
     kwargs..., # arguments for glmnetcv
     ) where T
+    filter_method = Symbol(filter_method)
     ko = isnothing(groups) ? modelX_gaussian_knockoffs(X, method, m=m) : 
         modelX_gaussian_group_knockoffs(X, method, groups, m=m)
     return fit_marginal(y, ko, d=d,
@@ -247,8 +255,9 @@ function fit_marginal(
     y::AbstractVecOrMat{T},
     ko::Knockoff;
     d::Distribution=Normal(),
-    filter_method::Symbol = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
+    filter_method::Union{Symbol,String} = :knockoff_plus, # `:knockoff` or `:knockoff_plus`
     ) where T <: AbstractFloat
+    filter_method = Symbol(filter_method)
     typeof(y) <: AbstractMatrix && (y = vec(y))
     X = ko.X
     X̃ = ko.Xko
@@ -311,6 +320,7 @@ function debias!(
     d::Distribution=Normal(),
     kwargs... # extra arguments for glmnetcv
     ) where T
+    method = Symbol(method)
     count(!iszero, β̂) == 0 && error("β̂ is all zeros! Nothing to debias!")
     zero_idx = β̂ .== 0
     if method == :lasso
@@ -349,6 +359,7 @@ function debias!(
     d::Distribution=Normal(),
     kwargs... # extra arguments for glmnetcv
     ) where T
+    method = Symbol(method)
     p = length(β̂)
     p == length(groups) || error("check vector length") # note GLMNet.jl does not include intercept in β̂
     count(!iszero, β̂) == 0 && error("β̂ is all zeros! Nothing to debias!")
