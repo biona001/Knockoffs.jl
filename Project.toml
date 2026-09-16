@@ -31,7 +31,7 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 BlockDiagonals = "0.1.36"
-CSV = "0.10"
+CSV = "0.10, 1"
 Clustering = "0.15.1"
 CovarianceEstimation = "0.2.8"
 DataFrames = "1"
